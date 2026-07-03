@@ -1,0 +1,5 @@
+4Bit ALU:
+00 : Add/Sub 
+11 : Bitwise XOR
+01 : Bitwise OR
+10 : Bitwise AND
