@@ -1,21 +1,21 @@
 Format of 16bit instruction:
 ---------------------------
 00000  | 000     | 000 | 00000
-Opcode | r0/dest | r1  | spare/const
+Opcode | rx0/dest | rx1  | spare/const
 ---------------------------
 
 16 bit ALU opcodes:
 -------------------
-00000 : Add         | ADD r0, r1 (r0=r0+r1)  | 00000 r0 r1 00000
-00100 : Subtract    | SUB r0, r1 (r0=r0-r1)  | 00100 r0 r1 00000
-00011 : Bitwise XOR | XOR r0, r1 (r0=r0^r1)  | 00011 r0 r1 00000
-00001 : Bitwise OR  | OR  r0, r1 (r0=r0|r1)  | 00001 r0 r1 00000
-00010 : Bitwise AND | AND r0, r1 (r0=r0&r1)  | 00010 r0 r1 00000
-00101 : Bitwise NOT | AND r0, r1 (r0=r0!r1)  | 00101 r0 r1 00000
-01000 : Bitwise SHL | SHL r0, va (r0=r0<<va) | 01000 r0 va 00000
-01100 : Bitwise SHR | SHR r0, va (r0=r0>>va) | 01100 r0 va 00000
-01101 : Bitwise SAR | SAR r0, va (r0=r0>>>va)| 01101 r0 va 00000
-00111 : Multiply    | MUL r0, r1 (r0=r0*r1)  | 00111 r0 r1 00000
-00110 : Divide      | DIV r0, r1 (r0=r0/r1)  | 00110 r0 r1 00000
+00000 : Add         | ADD rx0, rx1 (rx0=rx0+rx1)  | 00000 rx0 rx1 00000
+00100 : Subtract    | SUB rx0, rx1 (rx0=rx0-rx1)  | 00100 rx0 rx1 00000
+00011 : Bitwise XOR | XOR rx0, rx1 (rx0=rx0^rx1)  | 00011 rx0 rx1 00000
+00001 : Bitwise OR  | OR  rx0, rx1 (rx0=rx0|rx1)  | 00001 rx0 rx1 00000
+00010 : Bitwise AND | AND rx0, rx1 (rx0=rx0&rx1)  | 00010 rx0 rx1 00000
+00101 : Bitwise NOT | AND rx0, rx1 (rx0=rx0!rx1)  | 00101 rx0 rx1 00000
+01000 : Bitwise SHL | SHL rx0, val (rx0=rx0<<val) | 01000 rx0 val 00000
+01100 : Bitwise SHR | SHR rx0, val (rx0=rx0>>val) | 01100 rx0 val 00000
+01101 : Bitwise SAR | SAR rx0, val (rx0=rx0>>>val)| 01101 rx0 val 00000
+00111 : Multiply    | MUL rx0, rx1 (rx0=rx0*rx1)  | 00111 rx0 rx1 00000
+00110 : Divide      | DIV rx0, rx1 (rx0=rx0/rx1)  | 00110 rx0 rx1 00000
 
 TOTAL: 10 instruction(only lower 4bits actually used)
