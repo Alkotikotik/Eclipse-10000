@@ -1,8 +1,19 @@
 Format of 16bit instruction:
 ---------------------------
-00000  | 000     | 000 | 00000
-Opcode | rx0/dest | rx1  | spare/const
+00000       | 000           | 000      | 00000
+Opcode (5b) | rx0/dest (3b) | rx1 (3b) | spare/const (5b)
 ---------------------------
+
+Register Mapping:
+-----------------
+rx0 : 000
+rx1 : 001
+rx2 : 010
+rx3 : 011
+rx4 : 100
+rx5 : 101
+rx6 : 110
+rx7 : 111
 
 16 bit ALU opcodes:
 -------------------
@@ -14,8 +25,20 @@ Opcode | rx0/dest | rx1  | spare/const
 00101 : Bitwise NOT | AND rx0, rx1 (rx0=rx0!rx1)  | 00101 rx0 rx1 00000
 01000 : Bitwise SHL | SHL rx0, val (rx0=rx0<<val) | 01000 rx0 val 00000
 01100 : Bitwise SHR | SHR rx0, val (rx0=rx0>>val) | 01100 rx0 val 00000
+//TODO
 01101 : Bitwise SAR | SAR rx0, val (rx0=rx0>>>val)| 01101 rx0 val 00000
 00111 : Multiply    | MUL rx0, rx1 (rx0=rx0*rx1)  | 00111 rx0 rx1 00000
 00110 : Divide      | DIV rx0, rx1 (rx0=rx0/rx1)  | 00110 rx0 rx1 00000
 
-TOTAL: 10 instruction(only lower 4bits actually used)
+Example Encoding:
+-----------------
+Assembly: SUB rx3, rx5
+
+Opcode (SUB)   = 00100
+Dest/rx0 (rx3) = 011
+Src/rx1  (rx5) = 101
+Spare          = 00000
+
+Binary:   00100 011 101 00000
+Hex:      0x27A0
+---------------------
