@@ -36,15 +36,16 @@ Loads:
 
 Branching:
 ------------------------------
-11111 : BEQ (branch if equal)
+11111 : BEQ (branch if equal) | BEQ rx0, rx1, address
 11110 : BNE (branch if not equal)
 11100 : BS (branch if smaller)
 11000 : BG (branch if greater)
+10001 : JMP(Branch. ) | JMP rx0
 
 
 Example Encoding:
 -----------------
-Assembly: SUB rx3, rx5
+Assembly: SUB [rx3, rx5]
 
 Opcode (SUB)   = 00100
 Dest/rx0 (rx3) = 011
@@ -54,3 +55,11 @@ Spare          = 00000
 Binary:   00100 011 101 00000
 Hex:      0x27A0
 ---------------------
+
+~Start:
+    LOAD 8 -> rx0
+    LOAD 1 -> rx1
+
+~Loop:
+    SUB [rx0, rx1]
+    BG  -> ~Loop
