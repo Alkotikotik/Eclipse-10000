@@ -15,7 +15,7 @@ rx5 : 101
 rx6 : 110
 rx7 : 111
 
-16 bit ALU opcodes:
+16 bit ALU opcodes(highest bit is 0):
 -------------------
 00000 : Add         | ADD rx0, rx1 (rx0=rx0+rx1)  | 00000 rx0 rx1 00000
 00100 : Subtract    | SUB rx0, rx1 (rx0=rx0-rx1)  | 00100 rx0 rx1 00000
@@ -29,6 +29,11 @@ rx7 : 111
 01101 : Bitwise SAR | SAR rx0, val (rx0=rx0>>>val)| 01101 rx0 val 00000
 00111 : Multiply    | MUL rx0, rx1 (rx0=rx0*rx1)  | 00111 rx0 rx1 00000
 00110 : Divide      | DIV rx0, rx1 (rx0=rx0/rx1)  | 00110 rx0 rx1 00000
+
+Load type:
+------------------------------ 
+10000 : Load instant 
+
 
 Example Encoding:
 -----------------
