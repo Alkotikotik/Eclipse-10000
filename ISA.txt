@@ -33,12 +33,12 @@ rx7 : 111
 Loads:
 ------------------------------
 10010 : Load instant
-10100 : Load from memory | FETCH rx0, rx1
-10110 : Store to memory | STORE rx0, rx1
+10100 : Load from memory | LDR rx0, rx1
+10110 : Store to memory | STR rx0, rx1
 
 Branching:
 ------------------------------
-11111 : BEQ (branch if equal) | BEQ rx0, rx1, address
+11111 : BEQ (branch if equa | BEQ rx0, rx1, address
 11110 : BNE (branch if not equal)
 11100 : BS (branch if smaller)
 11000 : BG (branch if greater)
