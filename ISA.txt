@@ -26,9 +26,7 @@ rx7 : 111
 01000 : Bitwise SHL | SHL rx0, val (rx0=rx0<<val) | 01000 rx0 val 00000
 01100 : Bitwise SHR | SHR rx0, val (rx0=rx0>>val) | 01100 rx0 val 00000
 //TODO
-01101 : Bitwise SAR | SAR rx0, val (rx0=rx0>>>val)| 01101 rx0 val 00000
-00111 : Multiply    | MUL rx0, rx1 (rx0=rx0*rx1)  | 00111 rx0 rx1 00000
-00110 : Divide      | DIV rx0, rx1 (rx0=rx0/rx1)  | 00110 rx0 rx1 00000
+01111 : Multiply    | MUL rx0, rx1 (rx0,rx1=rx0*rx1)  | 00111 rx0 rx1 00000
 
 Loads:
 ------------------------------
@@ -38,7 +36,7 @@ Loads:
 
 Branching:
 ------------------------------
-11111 : BEQ (branch if equa | BEQ rx0, rx1, address
+11111 : BEQ (branch if equal) | BEQ rx0, rx1, address
 11110 : BNE (branch if not equal)
 11100 : BS (branch if smaller)
 11000 : BG (branch if greater)
