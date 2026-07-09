@@ -32,7 +32,9 @@ rx7 : 111
 
 Loads:
 ------------------------------
-10000 : Load instant
+10010 : Load instant
+10100 : Load from memory | FETCH rx0, rx1
+10110 : Store to memory | STORE rx0, rx1
 
 Branching:
 ------------------------------
