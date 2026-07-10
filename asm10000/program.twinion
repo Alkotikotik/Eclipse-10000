@@ -17,7 +17,8 @@
     ADD [rx2, rx0]
 
     ADD [rx0, rx1]
-
+    
+    >_Due to the lack of mov command I just do this instead
     XOR [rx1, rx1]
     ADD [rx1, rx2]
 
