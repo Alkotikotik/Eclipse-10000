@@ -1,4 +1,5 @@
 ~Init:
+>_Fibbonachi
     LOAD rx0 <- 0
     LOAD rx1 <- 1
 
@@ -6,11 +7,18 @@
     LOAD rx4 <- 31
 
     MUL [rx3, rx4]
+    LOAD rx5 <- 0
+    LOAD rx6 <- 1
+    LOAD rx2 <- 0
 ~Loop:
+    STR rx0, rx5
+    ADD [rx5, rx6]
+
     ADD [rx2, rx0]
-    ADD [rx2, rx1]
 
     ADD [rx0, rx1]
+
+    XOR [rx1, rx1]
     ADD [rx1, rx2]
 
     XOR [rx2, rx2]
