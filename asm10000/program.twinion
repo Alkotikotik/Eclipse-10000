@@ -1,0 +1,19 @@
+~Init:
+    LOAD rx0 <- 0
+    LOAD rx1 <- 1
+
+    LOAD rx3 <- 31
+    LOAD rx4 <- 31
+
+    MUL [rx3, rx4]
+~Loop:
+    ADD [rx2, rx0]
+    ADD [rx2, rx1]
+
+    ADD [rx0, rx1]
+    ADD [rx1, rx2]
+
+    XOR [rx2, rx2]
+
+    BS rx0, rx3, ~Loop
+
