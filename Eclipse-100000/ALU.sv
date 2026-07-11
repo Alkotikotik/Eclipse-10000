@@ -8,6 +8,10 @@ module ALU (
     output logic NegativeFlag,
     output logic ZeroFlag
 );
+
+    logic [63:0] mul_product;
+    assign mul_product = x * y;
+
     //Doesn't care about clk
     always_comb begin
         result = 32'b0;
@@ -15,13 +19,15 @@ module ALU (
         case (opcode)
             6'b000001: result = x + y;
             6'b000011: result = x - y;
-            6'b000111: result = x * y;
+            6'b000111: result = mul_product[31:0];
+            6'b001111: result = mul_product[63:32];
             6'b000010: result = x ^ y;
             6'b000110: result = x | y;
             6'b001110: result = x & y;
             6'b011110: result = ~x   ;
-            6'b010000: result = x << y;
-            6'b011000: result = x >> y;
+            6'b010000: result = x << y[4:0]; //lower 5
+            6'b011000: result = x >> y[4:0];
+            6'b011100: result = $signed($signed(x) >>> y[4:0]); //JIC
 
             default: result = 32'b0;
         endcase
@@ -34,12 +40,13 @@ module ALU (
 
         if (opcode == 6'b000011) begin
             OverflowFlag = (x[31] != y[31]) && (result[31] != x[31]);
-        end else if (opcode == 6'b000010) begin
+        end else if (opcode == 6'b000001) begin
             OverflowFlag = (x[31] == y[31]) && (result[31] != x[31]);
+        end else if (opcode == 6'b000111) begin
+            OverflowFlag = (mul_product[63:32] != 32'b0); //Later if opcode is mul and overflow run HIMUL
         end else begin
             OverflowFlag = 1'b0;
         end
     end
-
 
 endmodule

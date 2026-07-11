@@ -74,6 +74,14 @@ int main(int argc, char **argv) {
   sim_time += 10;
   print_test("Bitwise AND check", (top->result == 0x0F0F0000));
 
+  top->opcode = 0b000111;
+  top->x = 0x0000000F;
+  top->y = 0x0000000F;
+  top->eval();
+  tfp->dump(sim_time);
+  sim_time += 10;
+  print_test("Multiplication check: ", (top->result = 0x000000e1));
+
   // Wrap up
   tfp->close();
   delete tfp;

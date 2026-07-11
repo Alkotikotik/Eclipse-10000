@@ -1,18 +1,19 @@
 Format of 32bit instructions
 
 000000     | 00000 | 00000    | 0000000000000000
-opcode (6b)| rx0   |rx1(spare)| (spare/address)
+opcode (6b)| rx0(5b)   |rx1(spare)| (spare/address)
 rx0 = rx0 (operation) rx1
 
 
 ALU instructions:
 000001 : Add 
 000011 : Sub
-000111 : Mul
+000111 : LOMUL
+001111 : HIMUL
 000010 : XOR
 000110 : OR
 001110 : AND
 011110 : NOT
 010000 : SHL
 011000 : SHR
-000000
+011100 : SRA
