@@ -17,3 +17,12 @@ ALU instructions:
 010000 : SHL
 011000 : SHR
 011100 : SRA
+
+Memory 
+100001 : LOAD //load instant 
+100011 : LDR
+100111 : STR 
+
+Branching 
+
+11-----
