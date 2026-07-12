@@ -10,6 +10,7 @@
     LOAD rx5 <- 0
     LOAD rx6 <- 1
     LOAD rx2 <- 0
+
 ~Loop:
     STR rx0, rx5
     ADD [rx5, rx6]
@@ -17,7 +18,7 @@
     ADD [rx2, rx0]
 
     ADD [rx0, rx1]
-    
+
     >_Due to the lack of mov command I just do this instead
     XOR [rx1, rx1]
     ADD [rx1, rx2]
