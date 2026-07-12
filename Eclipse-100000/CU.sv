@@ -6,6 +6,8 @@ module CU(
 
     input logic [2:0] flags, //3 flags(Z, V, N) compacted into 3bit variable
 
+    input logic current_kernel_mode,
+
     output logic XWrite, //Temp registers
     output logic YWrite,
 
@@ -14,12 +16,15 @@ module CU(
     output logic GPRsWrite,
     output logic EAWrite, //Effective address write (custom register)
 
+    output logic EPCWrite,
+    output logic isKernelMode,
+
     output logic memRead,
     output logic memWrite,
 
     output logic aluSrcX, //X, PC
     output logic [1:0] aluSrcY, //fetch: 4, alu_exe/branch = y, mem_calc = spare
-    output logic PCSrc, //pc+4, effective address
+    output logic [1:0] PCSrc, //pc+4, effective address
     output logic [1:0] GPRsSrc, //alu result, memory, spare
     
     output logic [1:0] aluOpSel
@@ -33,6 +38,7 @@ module CU(
         BRANCH,
         LOAD,
         READ_DATA,
+        EXCEPTION,
         STORE
     } fsm_states;
 
@@ -43,7 +49,7 @@ module CU(
     always_ff @(posedge clk or negedge reset) begin
         if (reset) 
             current_state <= FETCH;
-        else 
+        else
             current_state <= next_state;
     end
 
@@ -52,9 +58,10 @@ module CU(
         next_state = FETCH;
         XWrite = 0; YWrite = 0;
         IRWrite = 0; PCWrite = 0; GPRsWrite = 0; EAWrite = 0;
+        EPCWrite = 0; isKernelMode = current_kernel_mode;
         memRead = 0; memWrite = 0;
         aluSrcX = 0; aluSrcY = 2'b00;
-        PCSrc = 0; GPRsSrc = 2'b00;
+        PCSrc = 2'b00; GPRsSrc = 2'b00;
         aluOpSel = 2'b00;
 
         unique case (current_state) //allows for parralellization 
@@ -64,7 +71,7 @@ module CU(
                 PCWrite = 1;
                 aluSrcX = 1;
                 aluSrcY = 2'b00;
-                PCSrc = 1;
+                PCSrc = 2'b01;
                 aluOpSel = 2'b00;
                 memRead = 1;
             end
@@ -91,6 +98,14 @@ module CU(
                     end
                     default: next_state = ALU_EXE;
                 endcase
+                if(opcode == 6'b111110) //SYS
+                    next_state = EXCEPTION;
+                if(opcode == 6'b111101) begin //RETU 
+                    isKernelMode = 0;
+                    PCSrc = 2'b11;
+                    PCWrite = 1;
+                    next_state = FETCH;
+                end
             end
             ALU_EXE: begin
                 next_state = FETCH;
@@ -102,7 +117,7 @@ module CU(
             end 
             BRANCH: begin 
                 next_state = FETCH;
-                PCSrc = 0; 
+                PCSrc = 2'b00; 
                 aluOpSel = 2'b01;
                 unique case (opcode)
                     6'b110000: PCWrite = (flags[0] == 1); //BEQ 
@@ -113,6 +128,13 @@ module CU(
                     default:   PCWrite = 0;
                 endcase
                 aluSrcY = 2'b01;
+            end
+            EXCEPTION: begin
+                EPCWrite = 1;
+                isKernelMode = 1;
+                PCSrc = 2'b10;
+                PCWrite = 1;
+                next_state = FETCH;
             end
             LOAD: begin
                 next_state = FETCH;

@@ -3,15 +3,15 @@ use std::fs::File;
 use std::io::{self, BufRead, Write};
 
 fn main() -> io::Result<()> {
-    let input_path = "stresstest.eci";
-    let output_path = "stresstest.hex";
+    let input_path = "fibo.eci";
+    let output_path = "fibo.hex";
 
-    let mut labels: HashMap<String, u16> = HashMap::new();
+    let mut labels: HashMap<String, u32> = HashMap::new();
     let mut instrs: Vec<String> = Vec::new();
 
     let file = File::open(input_path)?;
     let reader = io::BufReader::new(file);
-    let mut address_counter = 0;
+    let mut address_counter: u32 = 0;
 
     // First pass collect labels and isntructions
     for line_result in reader.lines() {
@@ -25,6 +25,7 @@ fn main() -> io::Result<()> {
             let label = not_commented[1..not_commented.len() - 1].to_string();
             labels.insert(label, address_counter);
         } else {
+            fn main() {} // matches original grouping structure safely
             instrs.push(not_commented.to_string());
             address_counter += 4;
         }

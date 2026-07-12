@@ -24,9 +24,12 @@ Memory
 100111 : STR 
 
 Branching 
-
 110000 : BEQ 
 110001 : BNE 
 110011 : BS
 110111 : BG 
 111111 : JMP
+
+Privilege and syscalls
+111110 : SYS //SYSCALL
+111101 : RETU //Return to user

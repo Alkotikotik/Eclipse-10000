@@ -7,6 +7,7 @@ module CORE(
     logic [31:0] PC, IR;
     logic [31:0] EA;
     logic [31:0] RegX, RegY;
+    logic [31:0] EPC;
 
     logic [31:0] PCNext;
 
@@ -19,10 +20,14 @@ module CORE(
     logic memRead, memWrite;
     logic aluSrcX;
     logic [1:0] aluSrcY;
-    logic PCSrc;
+    logic [1:0] PCSrc;
     logic [1:0] GPRsSrc;
     logic [31:0] sign_ext_imm;
     assign sign_ext_imm = { {16{immediate[15]}}, immediate };
+
+    logic KernelMode;
+    logic EPCWrite;
+    logic isKernelMode;
 
     logic [31:0] GPRs_data_out0;
     logic [31:0] GPRs_data_out1;
@@ -58,8 +63,16 @@ module CORE(
         endcase
     end
 
+    always_comb begin
+    unique case (PCSrc)
+        2'b00: PCNext = EA;
+        2'b01: PCNext = AluResult;
+        2'b10: PCNext = 32'h00000064;
+        2'b11: PCNext = EPC;
+    endcase
+end
+
     assign GPRs_data_in = (GPRsSrc == 2'b01) ? ram_data_out : (GPRsSrc == 2'b11) ? { {16{immediate[15]}}, immediate } : AluResult;
-    assign PCNext = (PCSrc == 1) ? AluResult : EA;
     
     //SPRs
     always_ff @(posedge clk or posedge reset) begin
@@ -69,12 +82,16 @@ module CORE(
             RegX <= 32'd0;
             RegY <= 32'd0;
             EA <= 32'd0;
+            KernelMode <= 1;
         end else begin
             if (PCWrite) PC <= PCNext;
             if (IRWrite) IR <= ram_data_out;
             if (XWrite) RegX <= GPRs_data_out0;
             if (YWrite) RegY <= GPRs_data_out1;
             if (EAWrite) EA <= AluResult;
+            if (EPCWrite) EPC <= PC;
+            if (isKernelMode) KernelMode <= 1;
+            if (!isKernelMode) KernelMode <= 0;
         end
     end
 
@@ -92,12 +109,15 @@ module CORE(
         .reset(reset),
         .opcode(opcode),
         .flags(CompactedFlags),
+        .current_kernel_mode(KernelMode),
         .XWrite(XWrite),
         .YWrite(YWrite),
         .IRWrite(IRWrite),
         .PCWrite(PCWrite),
         .GPRsWrite(GPRsWrite),
         .EAWrite(EAWrite),
+        .EPCWrite(EPCWrite),
+        .isKernelMode(isKernelMode),
         .memRead(memRead),
         .memWrite(memWrite),
         .aluSrcX(aluSrcX),
