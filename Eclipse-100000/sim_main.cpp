@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
     std::cout << "Beginning execution with waveform tracing..." << std::endl;
 
     // Main Simulation Loop
-    while (sim_time < 2000 && !Verilated::gotFinish()) {
+    while (sim_time < 5000 && !Verilated::gotFinish()) {
         sim_time++;
         top->clk = !top->clk;
         top->eval();
@@ -54,5 +54,19 @@ int main(int argc, char **argv) {
     // 3. Flush and close the waveform file cleanly
     tfp->close();
     std::cout << "Simulation finished. Waveform saved to 'waveform.vcd'" << std::endl;
+
+    // --- ADD THIS MEMORY DUMP BLOCK HERE ---
+    std::cout << "\n--- RAM DUMP (Addresses 4000 down to 3950) ---" << std::endl;
+    for (int addr = 4092; addr >= 3950; addr -= 4) {
+        // Translate the byte address into the 12-bit array index: address[13:2]
+        int index = (addr >> 2) & 0xFFF;
+
+        // Access the internal 'ramm' array inside your system_ram instance
+        unsigned int val = top->rootp->CORE__DOT__system_ram__DOT__ramm[index];
+
+        std::cout << "Address [" << std::dec << addr << "]: 0x" << std::hex << val << " ("
+                  << std::dec << val << ")" << std::endl;
+    }
+
     return 0;
 }

@@ -33,8 +33,7 @@ module CU(
         BRANCH,
         LOAD,
         READ_DATA,
-        STORE,
-        WRITEBACK
+        STORE
     } fsm_states;
 
     fsm_states current_state, next_state;
@@ -42,7 +41,7 @@ module CU(
 
     //Update state if not reset
     always_ff @(posedge clk or negedge reset) begin
-        if (!reset) 
+        if (reset) 
             current_state <= FETCH;
         else 
             current_state <= next_state;
@@ -67,6 +66,7 @@ module CU(
                 aluSrcY = 2'b00;
                 PCSrc = 1;
                 aluOpSel = 2'b00;
+                memRead = 1;
             end
             DECODE: begin
                 aluSrcX = 1;
@@ -93,12 +93,12 @@ module CU(
                 endcase
             end
             ALU_EXE: begin
-                next_state = WRITEBACK;
+                next_state = FETCH;
                 aluSrcY = 2'b01;
                 GPRsSrc = 2'b00;
                 aluSrcX = 0;
                 aluOpSel = 2'b10;
-
+                GPRsWrite = 1;
             end 
             BRANCH: begin 
                 next_state = FETCH;
@@ -120,18 +120,15 @@ module CU(
                 GPRsSrc = 2'b11;
             end 
             READ_DATA: begin 
-                next_state = WRITEBACK;
+                next_state = FETCH;
                 memRead = 1;
                 GPRsSrc = 2'b01; 
-            end 
+                GPRsWrite = 1;
+            end
             STORE: begin
                 next_state = FETCH;
                 memWrite = 1;
             end 
-            WRITEBACK: begin 
-                next_state = FETCH;
-                GPRsWrite = 1;
-            end
             default: next_state = FETCH;
         endcase
     end

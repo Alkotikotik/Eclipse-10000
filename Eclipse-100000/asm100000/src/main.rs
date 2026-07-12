@@ -95,7 +95,7 @@ fn main() -> io::Result<()> {
                     rx0 = parse_reg(tokens[1]);
                 }
                 if tokens.len() > 2 {
-                    rx1 = parse_reg(tokens[2]);
+                    immediate = tokens[2].parse::<u32>().unwrap_or(0);
                 }
             }
             "BEQ" | "BNE" | "BS" | "BG" => {

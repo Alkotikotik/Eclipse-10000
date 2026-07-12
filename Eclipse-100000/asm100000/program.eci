@@ -1,23 +1,23 @@
 ~Init:
 >_Fibbonachi
-    LOAD rx0 <- 0
+    LOAD rx12 <- 0
     LOAD rx1 <- 1
 
     LOAD rx3 <- 1000
     LOAD rx4 <- 1000
 
     MUL [rx3, rx4]
-    LOAD rx5 <- 4096
-    LOAD rx6 <- 1
+    LOAD rx5 <- 4092
+    LOAD rx6 <- 4
     LOAD rx2 <- 0
 
 ~Loop:
-    STR rx0, rx5
+    STR rx12, rx5
     SUB [rx5, rx6]
 
-    ADD [rx2, rx0]
+    ADD [rx2, rx12]
 
-    ADD [rx0, rx1]
+    ADD [rx12, rx1]
 
     >_Due to the lack of mov command I just do this instead
     XOR [rx1, rx1]
@@ -25,4 +25,4 @@
 
     XOR [rx2, rx2]
 
-    BS rx0, rx3, ~Loop
+    BS rx12, rx3, ~Loop

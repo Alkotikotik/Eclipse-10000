@@ -50,13 +50,13 @@ module CORE(
         unique case (aluSrcY)
             2'b00: AluMuxY = 32'd4; 
             2'b01: AluMuxY = RegY; 
-            2'b11: AluMuxY = { {16{immediate[15]}}, immediate }; 
+            2'b11: AluMuxY = { {16{immediate[15]}}, immediate };
 
             default: AluMuxY = RegY;
         endcase
     end
 
-    assign GPRs_data_in = (GPRsSrc == 2'b01) ? ram_data_out : AluResult;
+    assign GPRs_data_in = (GPRsSrc == 2'b01) ? ram_data_out : (GPRsSrc == 2'b11) ? { {16{immediate[15]}}, immediate } : AluResult;
     assign PCNext = (PCSrc == 1) ? AluResult : EA;
     
     //SPRs
@@ -128,8 +128,8 @@ module CORE(
 
     RAM system_ram (
         .clk(clk),
-        .address( (memRead && !memWrite && IRWrite) ? PC : EA ),
-        .data_in(GPRs_data_out1),
+        .address((IRWrite) ? PC : RegY),
+        .data_in(RegX),
         .mem_write(memWrite),
         .mem_read(memRead),
         .data_out(ram_data_out)
