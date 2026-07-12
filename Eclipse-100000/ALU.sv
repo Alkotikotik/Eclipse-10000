@@ -24,10 +24,10 @@ module ALU (
             6'b000010: result = x ^ y;
             6'b000110: result = x | y;
             6'b001110: result = x & y;
-            6'b011110: result = ~x   ;
-            6'b010000: result = x << y[4:0]; //lower 5
-            6'b011000: result = x >> y[4:0];
-            6'b011100: result = $signed($signed(x) >>> y[4:0]); //JIC
+            6'b001111: result = ~x   ;
+            6'b001000: result = x << y[4:0]; //lower 5
+            6'b001100: result = x >> y[4:0];
+            6'b001110: result = $signed($signed(x) >>> y[4:0]); //JIC
 
             default: result = 32'b0;
         endcase

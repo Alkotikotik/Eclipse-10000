@@ -13,16 +13,20 @@ ALU instructions:
 000010 : XOR
 000110 : OR
 001110 : AND
-011110 : NOT
-010000 : SHL
-011000 : SHR
-011100 : SRA
+001111 : NOT
+001000 : SHL
+001100 : SHR
+001110 : SRA
 
 Memory 
-100001 : LOAD //load instant 
+010001 : LOAD //load instant 
 100011 : LDR
 100111 : STR 
 
 Branching 
 
-11-----
+110000 : BEQ 
+110001 : BNE 
+110011 : BS
+110111 : BG 
+111111 : JMP
