@@ -36,14 +36,14 @@ fn main() -> io::Result<()> {
     opcodes.insert("SUB", 0b000011);
     opcodes.insert("MUL", 0b000111); //Mul defaults to LOMUL
     opcodes.insert("LOMUL", 0b000111);
-    opcodes.insert("HIMUL", 0b001111);
+    opcodes.insert("HIMUL", 0b001101);
     opcodes.insert("XOR", 0b000010);
     opcodes.insert("OR", 0b000110);
     opcodes.insert("AND", 0b001110);
     opcodes.insert("NOT", 0b001111);
     opcodes.insert("SHL", 0b001000);
     opcodes.insert("SHR", 0b001100);
-    opcodes.insert("SRA", 0b001110);
+    opcodes.insert("SRA", 0b001010);
     opcodes.insert("LOAD", 0b010001);
     opcodes.insert("LDR", 0b100011);
     opcodes.insert("STR", 0b100111);

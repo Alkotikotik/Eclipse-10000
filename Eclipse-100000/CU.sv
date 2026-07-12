@@ -20,7 +20,9 @@ module CU(
     output logic aluSrcX, //X, PC
     output logic [1:0] aluSrcY, //fetch: 4, alu_exe/branch = y, mem_calc = spare
     output logic PCSrc, //pc+4, effective address
-    output logic [1:0] GPRsSrc //alu result, memory, spare
+    output logic [1:0] GPRsSrc, //alu result, memory, spare
+    
+    output logic [1:0] aluOpSel
 
 );
 
@@ -54,6 +56,7 @@ module CU(
         memRead = 0; memWrite = 0;
         aluSrcX = 0; aluSrcY = 2'b00;
         PCSrc = 0; GPRsSrc = 2'b00;
+        aluOpSel = 2'b00;
 
         unique case (current_state) //allows for parralellization 
             FETCH: begin
@@ -63,11 +66,13 @@ module CU(
                 aluSrcX = 1;
                 aluSrcY = 2'b00;
                 PCSrc = 1;
+                aluOpSel = 2'b00;
             end
             DECODE: begin
                 aluSrcX = 1;
                 aluSrcY = 2'b11;
                 EAWrite = 1;
+                aluOpSel = 2'b00;
 
                 XWrite = 1;
                 YWrite = 1;
@@ -92,11 +97,13 @@ module CU(
                 aluSrcY = 2'b01;
                 GPRsSrc = 2'b00;
                 aluSrcX = 0;
+                aluOpSel = 2'b10;
 
             end 
             BRANCH: begin 
                 next_state = FETCH;
                 PCSrc = 0; 
+                aluOpSel = 2'b01;
                 unique case (opcode)
                     6'b110000: PCWrite = (flags[0] == 1); //BEQ 
                     6'b110001: PCWrite = (flags[0] == 0); //BNE

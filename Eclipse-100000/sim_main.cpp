@@ -1,90 +1,58 @@
-#include "VALU.h"
+#include "VCORE.h"
+#include "VCORE___024root.h"
 #include "verilated.h"
-#include "verilated_vcd_c.h" // Waveform header
+#include "verilated_vcd_c.h" // Include the waveform tracing header
 #include <iostream>
 #include <memory>
 
-void print_test(const char *name, bool passed) {
-  if (passed)
-    std::cout << "[PASS] " << name << std::endl;
-  else
-    std::cout << "[FAIL] " << name << " <<<< ERROR!" << std::endl;
-}
+uint64_t sim_time = 0;
 
 int main(int argc, char **argv) {
-  const std::unique_ptr<VerilatedContext> contextp{new VerilatedContext};
-  contextp->commandArgs(argc, argv);
-  contextp->traceEverOn(true); // Turn on tracing capability
+    Verilated::commandArgs(argc, argv);
 
-  const std::unique_ptr<VALU> top{new VALU{contextp.get()}};
+    // 1. Enable tracing capabilities
+    Verilated::traceEverOn(true);
+    auto tfp = std::make_unique<VerilatedVcdC>();
 
-  // Setup waveform recorder
-  VerilatedVcdC *tfp = new VerilatedVcdC;
-  top->trace(tfp, 99);
-  tfp->open("waveform.vcd");
+    auto top = std::make_unique<VCORE>();
 
-  uint64_t sim_time = 0; // Timeline tracker
+    // 2. Open the dump file
+    top->trace(tfp.get(), 99); // Trace 99 levels of hierarchy deep
+    tfp->open("waveform.vcd");
 
-  std::cout << "=== Starting Comprehensive Waveform Test Suite ==="
-            << std::endl;
+    // Assert Reset
+    top->reset = 1;
+    top->clk = 0;
+    top->eval();
+    tfp->dump(sim_time); // Dump initial state to waveform
 
-  // --- TEST 1: ADD 0 + 0 ---
-  top->opcode = 0b000001;
-  top->x = 0;
-  top->y = 0;
-  top->eval();
-  tfp->dump(sim_time);
-  sim_time += 10; // Record and step time
-  print_test("ADD 0 + 0 = 0", (top->result == 0 && top->ZeroFlag == 1));
+    for (int i = 0; i < 4; i++) {
+        sim_time++;
+        top->clk = !top->clk;
+        top->eval();
+        tfp->dump(sim_time); // Dump state on every toggle
+    }
 
-  // --- TEST 2: SUB 5 - 10 ---
-  top->opcode = 0b000011;
-  top->x = 5;
-  top->y = 10;
-  top->eval();
-  tfp->dump(sim_time);
-  sim_time += 10;
-  print_test("SUB 5 - 10 = -5",
-             ((int32_t)top->result == -5 && top->NegativeFlag == 1));
+    // De-assert Reset
+    top->reset = 0;
+    std::cout << "Beginning execution with waveform tracing..." << std::endl;
 
-  // --- TEST 3: SUB Overflow ---
-  top->opcode = 0b000011;
-  top->x = 2147483647;
-  top->y = -1;
-  top->eval();
-  tfp->dump(sim_time);
-  sim_time += 10;
-  print_test("SUB Overflow Detection", (top->OverflowFlag == 1));
+    // Main Simulation Loop
+    while (sim_time < 2000 && !Verilated::gotFinish()) {
+        sim_time++;
+        top->clk = !top->clk;
+        top->eval();
+        tfp->dump(sim_time); // Log the signal changes to the VCD file
 
-  // --- TEST 4: ADD Overflow ---
-  top->opcode = 0b000001;
-  top->x = 0x80000000;
-  top->y = 0xFFFFFFFF;
-  top->eval();
-  tfp->dump(sim_time);
-  sim_time += 10;
-  print_test("ADD Overflow Detection", (top->OverflowFlag == 1));
+        if (top->clk == 1) {
+            std::cout << "[Cycle " << (sim_time / 2) << "]"
+                      << " PC = 0x" << std::hex << (int)top->rootp->CORE__DOT__PC << " | IR = 0x"
+                      << std::hex << (int)top->rootp->CORE__DOT__IR << std::endl;
+        }
+    }
 
-  // --- TEST 5: Bitwise AND ---
-  top->opcode = 0b001110;
-  top->x = 0x0F0F0F0F;
-  top->y = 0xFFFF0000;
-  top->eval();
-  tfp->dump(sim_time);
-  sim_time += 10;
-  print_test("Bitwise AND check", (top->result == 0x0F0F0000));
-
-  top->opcode = 0b000111;
-  top->x = 0x0000000F;
-  top->y = 0x0000000F;
-  top->eval();
-  tfp->dump(sim_time);
-  sim_time += 10;
-  print_test("Multiplication check: ", (top->result = 0x000000e1));
-
-  // Wrap up
-  tfp->close();
-  delete tfp;
-  std::cout << "=== Waveform successfully generated! ===" << std::endl;
-  return 0;
+    // 3. Flush and close the waveform file cleanly
+    tfp->close();
+    std::cout << "Simulation finished. Waveform saved to 'waveform.vcd'" << std::endl;
+    return 0;
 }
