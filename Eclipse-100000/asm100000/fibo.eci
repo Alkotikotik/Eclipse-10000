@@ -12,7 +12,7 @@
     LOAD rx2 <- 0
 
 ~Loop:
-    STR rx12, rx5
+    STR rx12, [rx5 - 4]
     SUB [rx5, rx6]
 
     ADD [rx2, rx12]

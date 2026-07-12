@@ -21,6 +21,8 @@ module CORE(
     logic [1:0] aluSrcY;
     logic PCSrc;
     logic [1:0] GPRsSrc;
+    logic [31:0] sign_ext_imm;
+    assign sign_ext_imm = { {16{immediate[15]}}, immediate };
 
     logic [31:0] GPRs_data_out0;
     logic [31:0] GPRs_data_out1;
@@ -128,7 +130,7 @@ module CORE(
 
     RAM system_ram (
         .clk(clk),
-        .address((IRWrite) ? PC : RegY),
+        .address((IRWrite) ? PC : (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY), //Separeate CLA
         .data_in(RegX),
         .mem_write(memWrite),
         .mem_read(memRead),

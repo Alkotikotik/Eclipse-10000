@@ -3,8 +3,8 @@ use std::fs::File;
 use std::io::{self, BufRead, Write};
 
 fn main() -> io::Result<()> {
-    let input_path = "program.eci";
-    let output_path = "program.hex";
+    let input_path = "stresstest.eci";
+    let output_path = "stresstest.hex";
 
     let mut labels: HashMap<String, u16> = HashMap::new();
     let mut instrs: Vec<String> = Vec::new();
@@ -95,7 +95,25 @@ fn main() -> io::Result<()> {
                     rx0 = parse_reg(tokens[1]);
                 }
                 if tokens.len() > 2 {
-                    immediate = tokens[2].parse::<u32>().unwrap_or(0);
+                    rx1 = parse_reg(tokens[2]);
+                }
+                if tokens.len() > 3 {
+                    if tokens[3] == "-" && tokens.len() > 4 {
+                        let val = tokens[4].parse::<i32>().unwrap_or(0);
+                        immediate = (-val) as u32;
+                    } 
+                    else if tokens[3] == "+" && tokens.len() > 4 {
+                        immediate = tokens[4].parse::<i32>().unwrap_or(0) as u32;
+                    } 
+                    else {
+                        let target = tokens[3].trim_start_matches('~');
+                        if let Some(&label_addr) = labels.get(target) {
+                            let offset = (label_addr as i32) - ((current_pc + 4) as i32);
+                            immediate = offset as u32;
+                        } else {
+                            immediate = target.parse::<i32>().unwrap_or(0) as u32;
+                        }
+                    }
                 }
             }
             "BEQ" | "BNE" | "BS" | "BG" => {
