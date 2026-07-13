@@ -1,10 +1,20 @@
 use std::collections::HashMap;
+use std::env;
 use std::fs::File;
 use std::io::{self, BufRead, Write};
+use std::process;
 
 fn main() -> io::Result<()> {
-    let input_path = "fibo.eci";
-    let output_path = "fibo.hex";
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 3 {
+        eprintln!("Usage: {} <input_file.eci> <output_file.hex>", args[0]);
+        process::exit(1);
+    }
+
+    // Dynamic paths based on user input
+    let input_path = &args[1];
+    let output_path = &args[2];
 
     let mut labels: HashMap<String, u32> = HashMap::new();
     let mut instrs: Vec<String> = Vec::new();
@@ -25,7 +35,6 @@ fn main() -> io::Result<()> {
             let label = not_commented[1..not_commented.len() - 1].to_string();
             labels.insert(label, address_counter);
         } else {
-            fn main() {} // matches original grouping structure safely
             instrs.push(not_commented.to_string());
             address_counter += 4;
         }
