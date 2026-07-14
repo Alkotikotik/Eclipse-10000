@@ -5,6 +5,7 @@ module CU(
     input logic [5:0] opcode,
 
     input logic [2:0] flags, //3 flags(Z, V, N) compacted into 3bit variable
+    input logic [15:0] mmio_timer_reg,
 
     input logic current_kernel_mode,
     input logic memViolation,
@@ -47,23 +48,23 @@ module CU(
 
     fsm_states current_state, next_state;
 
-    logic [13:0] counter;
+    logic [15:0] counter;
     logic timer_interrupt_pending;
     
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             current_state <= FETCH;
-            counter <= 14'd10000;
-            timer_interrupt_pending <= 1'b0;
+            counter <= 16'd10000;
+            timer_interrupt_pending <= 0;
         end else begin
             current_state <= next_state;
             
-            if (counter == 14'd0) begin
-                counter <= 14'd10000;
-                timer_interrupt_pending <= 1'b1;
+            if (counter == 16'd0) begin
+                counter <= mmio_timer_reg;
+                timer_interrupt_pending <= 1;
             end else begin
-                counter <= counter - 1'b1;
+                counter <= counter - 1;
             end
 
             if (current_state == TIMER_INTERRUPT)

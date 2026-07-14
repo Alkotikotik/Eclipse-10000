@@ -1,8 +1,13 @@
 module CORE(
     input logic clk,
-    input logic reset
+    input logic reset,
+    input logic [7:0] ENC_10K_KeyIn,
+
+    output logic [31:0] vram_addr,
+    output logic [31:0] vram_data_out,
+    output logic vram_write
 );
-    
+
     //Declarations
     logic [31:0] PC, IR;
     logic [31:0] EA;
@@ -48,7 +53,13 @@ module CORE(
 
     logic [31:0] ram_data_out;
     
-    //Breaking opcode down
+    logic RAM_cs; //Chip select
+    logic VRAM_cs;
+    logic IO_cs;
+    logic [31:0] cpu_mem_data_out; //unified data output
+    logic [15:0] mmio_timer_reg;
+    
+    //Breaking instruction down
     assign opcode = IR[31:26];
     assign rx0 = IR[25:21];
     assign rx1 = IR[20:16];
@@ -58,15 +69,14 @@ module CORE(
     assign memViolation = (!KernelMode && (memRead || memWrite) &&
                           ((memTarget < memBase)   || (memTarget >= (memBase + memLimit))));
 
-    
     //Muxes
     assign AluMuxX = (aluSrcX == 1'b1) ? PC : RegX;
     assign CompactedFlags = {NegativeFlag, OverflowFlag, ZeroFlag};
 
     always_comb begin
         unique case (aluSrcY)
-            2'b00: AluMuxY = 32'd4; 
-            2'b01: AluMuxY = RegY; 
+            2'b00: AluMuxY = 32'd4;
+            2'b01: AluMuxY = RegY;
             2'b11: AluMuxY = { {16{immediate[15]}}, immediate };
 
             default: AluMuxY = RegY;
@@ -86,8 +96,6 @@ module CORE(
         endcase
     end
 
-    assign GPRs_data_in = (GPRsSrc == 2'b01) ? ram_data_out : (GPRsSrc == 2'b11) ? { {16{immediate[15]}}, immediate } : AluResult;
-    
     //SPRs
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -100,6 +108,7 @@ module CORE(
             
             memBase    <= 32'h0;
             memLimit   <= 32'hFFFFFFFF;
+            mmio_timer_reg <= 16'd10000;
         end else begin
             if (PCWrite) PC <= PCNext;
             if (IRWrite) IR <= ram_data_out;
@@ -109,6 +118,10 @@ module CORE(
             if (EPCWrite) EPC <= PC;
             if (isKernelMode) KernelMode <= 1;
             if (!isKernelMode) KernelMode <= 0;
+
+            if (memWrite && IO_cs && (memTarget == 32'hFFFFFF04)) begin
+                mmio_timer_reg <= RegX[15:0];
+            end
         end
     end
 
@@ -116,17 +129,57 @@ module CORE(
         unique case (aluOpSel)
             2'b00: AluOpcode = 6'b000001; // Force ADD (for PC+4 or Effective Address calculation)
             2'b01: AluOpcode = 6'b000011; // Force SUB (for PC-relative Branch comparison)
-            2'b10: AluOpcode = opcode;    // Use raw Opcode from IR (for actual Instruction Execution)
+            2'b10: AluOpcode = opcode;    // Use raw Opcode from IR (for actuall Instruction Execution)
 
             default: AluOpcode = 6'b000001;
         endcase
     end
+    
+    //First 2GB(0x00000000 - 0x00000000) - regular RAM
+    //Next 1MB(0x80000000 - 0x800FFFFF) - VRAM
+    //Then I/O registers
+    always_comb begin
+        RAM_cs = 0;
+        VRAM_cs = 0;
+        IO_cs = 0;
+
+        if (IRWrite) begin
+            RAM_cs = 1;
+        end
+        else begin
+            if (memTarget >= 32'h80000000 && memTarget <= 32'h800FFFFF) begin
+                VRAM_cs = 1;
+            end else if (memTarget >= 32'hFFFFFF00) begin
+                IO_cs = 1;
+            end else begin
+                RAM_cs = 1;
+            end
+        end
+    end
+
+    always_comb begin 
+        if (RAM_cs) begin 
+            cpu_mem_data_out = ram_data_out;
+        end else if (IO_cs) begin
+            unique case (memTarget)
+                32'hFFFFFF00: cpu_mem_data_out = {24'd0, ENC_10K_KeyIn};
+                32'hFFFFFF04: cpu_mem_data_out = {16'd0, mmio_timer_reg};
+                default:      cpu_mem_data_out = 32'd0; 
+            endcase
+        end else begin
+            cpu_mem_data_out = 32'd0; // VRAM read fallback or unmapped space
+        end
+    end
+
+    assign GPRs_data_in = (GPRsSrc == 2'b01) ? cpu_mem_data_out :
+                          (GPRsSrc == 2'b11) ? { {16{immediate[15]}}, immediate } : AluResult;
     
     CU control_unit (
         .clk(clk),
         .reset(reset),
         .opcode(opcode),
         .flags(CompactedFlags),
+        .mmio_timer_reg(mmio_timer_reg),
         .current_kernel_mode(KernelMode),
         .memViolation(memViolation),
         .XWrite(XWrite),
@@ -173,9 +226,13 @@ module CORE(
         .clk(clk),
         .address((IRWrite) ? PC : (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY),
         .data_in(RegX),
-        .mem_write(memWrite && !memViolation),
-        .mem_read(memRead && !memViolation),
+        .mem_write(memWrite && !memViolation && RAM_cs),
+        .mem_read(memRead && !memViolation && RAM_cs),
         .data_out(ram_data_out)
     );
+
+    assign vram_addr = memTarget - 32'h80000000;
+    assign vram_data_out = RegX;
+    assign vram_write = (memWrite && VRAM_cs);
 
 endmodule
