@@ -1,0 +1,23 @@
+~Init:
+    LOAD rx11 <- 13
+    LOAD rx12 <- 12
+
+    SYS
+    JMP ~Calc
+
+#ORG 0x64
+~ISR_Vector:
+    JMP ~SYSCALL_Handler
+
+~SYSCALL_Handler:
+    LOAD KRX <- 100
+    STR KRX, [SP - 4]
+
+    >_ TODO everything
+
+    RETU
+
+~Calc:
+    ADD [rx11, rx12]
+    LOAD rx3 <- 256
+    STR rx11, rx3

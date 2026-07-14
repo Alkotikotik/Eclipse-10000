@@ -139,7 +139,9 @@ end
 
     GPRs all_gprs (
         .clk(clk),
+        .reset(reset),
         .reg_write(GPRsWrite),
+        .KernelMode(KernelMode),
         .rr0(rx0),
         .rr1(rx1),
         .rw0(rx0),

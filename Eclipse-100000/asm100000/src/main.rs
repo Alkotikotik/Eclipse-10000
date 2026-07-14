@@ -31,6 +31,21 @@ fn main() -> io::Result<()> {
             continue;
         }
 
+        if not_commented.to_uppercase().starts_with("#ORG") {
+            let parts: Vec<&str> = not_commented.split_whitespace().collect();
+            if parts.len() > 1 {
+                let target_str = parts[1].trim_start_matches("0x");
+                let target_address = u32::from_str_radix(target_str, 16)
+                    .unwrap_or_else(|_| parts[1].parse::<u32>().unwrap_or(0));
+                
+                while address_counter < target_address {
+                    instrs.push("PAD".to_string());
+                    address_counter += 4;
+                }
+            }
+            continue;
+        }
+
         if not_commented.starts_with('~') && not_commented.ends_with(':') {
             let label = not_commented[1..not_commented.len() - 1].to_string();
             labels.insert(label, address_counter);
@@ -42,6 +57,7 @@ fn main() -> io::Result<()> {
 
     //opcodes mapping
     let mut opcodes: HashMap<&str, u32> = HashMap::new();
+    opcodes.insert("PAD", 0b000000);
     opcodes.insert("ADD", 0b000001);
     opcodes.insert("SUB", 0b000011);
     opcodes.insert("MUL", 0b000111); //Mul defaults to LOMUL
@@ -62,6 +78,8 @@ fn main() -> io::Result<()> {
     opcodes.insert("BS", 0b110011);
     opcodes.insert("BG", 0b110111);
     opcodes.insert("JMP", 0b111111);
+    opcodes.insert("SYS", 0b111110);
+    opcodes.insert("RETU", 0b111101);
 
     let mut output_file = File::create(output_path)?;
 
@@ -177,6 +195,13 @@ fn main() -> io::Result<()> {
 }
 
 fn parse_reg(reg_str: &str) -> u32 {
-    let clean = reg_str.trim_start_matches(|c| c == 'r' || c == 'R' || c == 'x' || c == 'X');
+    let upper = reg_str.to_uppercase();
+    if upper == "TSP" || upper == "SP"{
+        return 31;
+    }
+    else if upper == "KRX"{
+        return 1;
+    }
+    let clean = upper.trim_start_matches(|c| c == 'R' || c == 'X');
     clean.parse::<u32>().unwrap_or(0)
 }

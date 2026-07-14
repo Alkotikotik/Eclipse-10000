@@ -57,7 +57,7 @@ int main(int argc, char **argv) {
 
     // --- ADD THIS MEMORY DUMP BLOCK HERE ---
     std::cout << "\n--- RAM DUMP (Addresses 4000 down to 3950) ---" << std::endl;
-    for (int addr = 4100; addr >= 3950; addr -= 4) {
+    for (int addr = 4096; addr >= 0; addr -= 4) {
         // Translate the byte address into the 12-bit array index: address[13:2]
         int index = (addr >> 2) & 0xFFF;
 
