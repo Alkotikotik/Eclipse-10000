@@ -1,23 +1,37 @@
-~Init:
-    LOAD rx11 <- 13
-    LOAD rx12 <- 12
-
-    SYS
-    JMP ~Calc
+~Boot:
+    JMP ~BIOS
 
 #ORG 0x64
 ~ISR_Vector:
     JMP ~SYSCALL_Handler
 
+~Timer_Vector:
+    JMP ~Timer_Handler
+
+~IlligalOpcode_Vector:
+    JMP ~IlligalOpcode_Handler
+
+~MemFault_Vector:
+    JMP ~MemFault_Handler
 ~SYSCALL_Handler:
-    LOAD KRX <- 100
-    STR KRX, [SP - 4]
-
     >_ TODO everything
-
     RETU
 
-~Calc:
-    ADD [rx11, rx12]
-    LOAD rx3 <- 256
-    STR rx11, rx3
+~Timer_Handler:
+    >_ TODO everything
+    RETU
+
+~IlligalOpcode_Handler:
+    >_ TODO everything
+    RETU
+
+~MemFault_Handler:
+    >_ TODO everything
+    >_ PRINT "[FATAL: memFault] you are cooked buddy"
+    RETU
+
+
+~BIOS:
+    >_ TODO everything
+
+

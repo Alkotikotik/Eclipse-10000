@@ -7,6 +7,7 @@ module CU(
     input logic [2:0] flags, //3 flags(Z, V, N) compacted into 3bit variable
 
     input logic current_kernel_mode,
+    input logic memViolation,
 
     output logic XWrite, //Temp registers
     output logic YWrite,
@@ -24,7 +25,7 @@ module CU(
 
     output logic aluSrcX, //X, PC
     output logic [1:0] aluSrcY, //fetch: 4, alu_exe/branch = y, mem_calc = spare
-    output logic [1:0] PCSrc, //pc+4, effective address
+    output logic [2:0] PCSrc, //pc+4, effective address
     output logic [1:0] GPRsSrc, //alu result, memory, spare
     
     output logic [1:0] aluOpSel
@@ -39,18 +40,35 @@ module CU(
         LOAD,
         READ_DATA,
         EXCEPTION,
+        TIMER_INTERRUPT,
+        MEM_FAULT,
         STORE
     } fsm_states;
 
     fsm_states current_state, next_state;
+
+    logic [13:0] counter;
+    logic timer_interrupt_pending;
     
 
-    //Update state if not reset
-    always_ff @(posedge clk or negedge reset) begin
-        if (reset) 
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
             current_state <= FETCH;
-        else
+            counter <= 14'd10000;
+            timer_interrupt_pending <= 1'b0;
+        end else begin
             current_state <= next_state;
+            
+            if (counter == 14'd0) begin
+                counter <= 14'd10000;
+                timer_interrupt_pending <= 1'b1;
+            end else begin
+                counter <= counter - 1'b1;
+            end
+
+            if (current_state == TIMER_INTERRUPT)
+                timer_interrupt_pending <= 1'b0;
+        end
     end
 
     always_comb begin
@@ -61,7 +79,7 @@ module CU(
         EPCWrite = 0; isKernelMode = current_kernel_mode;
         memRead = 0; memWrite = 0;
         aluSrcX = 0; aluSrcY = 2'b00;
-        PCSrc = 2'b00; GPRsSrc = 2'b00;
+        PCSrc = 3'b000; GPRsSrc = 2'b00;
         aluOpSel = 2'b00;
 
         unique case (current_state) //allows for parralellization 
@@ -71,7 +89,7 @@ module CU(
                 PCWrite = 1;
                 aluSrcX = 1;
                 aluSrcY = 2'b00;
-                PCSrc = 2'b01;
+                PCSrc = 3'b001;
                 aluOpSel = 2'b00;
                 memRead = 1;
             end
@@ -102,7 +120,7 @@ module CU(
                     next_state = EXCEPTION;
                 if(opcode == 6'b111101) begin //RETU 
                     isKernelMode = 0;
-                    PCSrc = 2'b11;
+                    PCSrc = 3'b011;
                     PCWrite = 1;
                     next_state = FETCH;
                 end
@@ -117,7 +135,7 @@ module CU(
             end 
             BRANCH: begin 
                 next_state = FETCH;
-                PCSrc = 2'b00; 
+                PCSrc = 3'b000; 
                 aluOpSel = 2'b01;
                 unique case (opcode)
                     6'b110000: PCWrite = (flags[0] == 1); //BEQ 
@@ -132,7 +150,21 @@ module CU(
             EXCEPTION: begin
                 EPCWrite = 1;
                 isKernelMode = 1;
-                PCSrc = 2'b10;
+                PCSrc = 3'b010;
+                PCWrite = 1;
+                next_state = FETCH;
+            end
+            TIMER_INTERRUPT: begin
+                EPCWrite = 1;
+                isKernelMode = 1;
+                PCSrc = 3'b100;
+                PCWrite = 1;
+                next_state = FETCH;
+            end
+            MEM_FAULT: begin
+                EPCWrite = 1;
+                isKernelMode = 1;
+                PCSrc = 3'b110;
                 PCWrite = 1;
                 next_state = FETCH;
             end
@@ -153,6 +185,13 @@ module CU(
             end 
             default: next_state = FETCH;
         endcase
+    
+        //Jump straight to exeption
+        if (next_state == FETCH && timer_interrupt_pending && !current_kernel_mode && current_state != EXCEPTION)
+            next_state = TIMER_INTERRUPT;
+        if((current_state == LOAD || current_state == READ_DATA || current_state == STORE) && memViolation) begin
+            next_state = MEM_FAULT;
+        end
     end
 
 endmodule

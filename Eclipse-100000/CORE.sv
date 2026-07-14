@@ -18,9 +18,14 @@ module CORE(
 
     logic XWrite, YWrite, IRWrite, PCWrite, GPRsWrite, EAWrite;
     logic memRead, memWrite;
+    logic memViolation;
+    logic [31:0] memBase;
+    logic [31:0] memLimit;
+    logic [31:0] memTarget;
+
     logic aluSrcX;
     logic [1:0] aluSrcY;
-    logic [1:0] PCSrc;
+    logic [2:0] PCSrc;
     logic [1:0] GPRsSrc;
     logic [31:0] sign_ext_imm;
     assign sign_ext_imm = { {16{immediate[15]}}, immediate };
@@ -49,6 +54,11 @@ module CORE(
     assign rx1 = IR[20:16];
     assign immediate = IR[15:0];
     
+    assign memTarget = (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY;
+    assign memViolation = (!KernelMode && (memRead || memWrite) &&
+                          ((memTarget < memBase)   || (memTarget >= (memBase + memLimit))));
+
+    
     //Muxes
     assign AluMuxX = (aluSrcX == 1'b1) ? PC : RegX;
     assign CompactedFlags = {NegativeFlag, OverflowFlag, ZeroFlag};
@@ -64,13 +74,17 @@ module CORE(
     end
 
     always_comb begin
-    unique case (PCSrc)
-        2'b00: PCNext = EA;
-        2'b01: PCNext = AluResult;
-        2'b10: PCNext = 32'h00000064;
-        2'b11: PCNext = EPC;
-    endcase
-end
+        unique case (PCSrc)
+            3'b000: PCNext = EA;
+            3'b001: PCNext = AluResult;
+            3'b010: PCNext = 32'h00000064; // Syscall Vector
+            3'b011: PCNext = EPC;          // RETU
+            3'b100: PCNext = 32'h00000068; // Timer Vector
+            3'b101: PCNext = 32'h0000006C; // Illegal Opcode Fault Vector
+            3'b110: PCNext = 32'h00000070; // Memory Protection Fault Vector
+            default: PCNext = AluResult;
+        endcase
+    end
 
     assign GPRs_data_in = (GPRsSrc == 2'b01) ? ram_data_out : (GPRsSrc == 2'b11) ? { {16{immediate[15]}}, immediate } : AluResult;
     
@@ -83,6 +97,9 @@ end
             RegY <= 32'd0;
             EA <= 32'd0;
             KernelMode <= 1;
+            
+            memBase    <= 32'h0;
+            memLimit   <= 32'hFFFFFFFF;
         end else begin
             if (PCWrite) PC <= PCNext;
             if (IRWrite) IR <= ram_data_out;
@@ -100,6 +117,7 @@ end
             2'b00: AluOpcode = 6'b000001; // Force ADD (for PC+4 or Effective Address calculation)
             2'b01: AluOpcode = 6'b000011; // Force SUB (for PC-relative Branch comparison)
             2'b10: AluOpcode = opcode;    // Use raw Opcode from IR (for actual Instruction Execution)
+
             default: AluOpcode = 6'b000001;
         endcase
     end
@@ -110,6 +128,7 @@ end
         .opcode(opcode),
         .flags(CompactedFlags),
         .current_kernel_mode(KernelMode),
+        .memViolation(memViolation),
         .XWrite(XWrite),
         .YWrite(YWrite),
         .IRWrite(IRWrite),
@@ -152,10 +171,10 @@ end
 
     RAM system_ram (
         .clk(clk),
-        .address((IRWrite) ? PC : (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY), //Separeate CLA
+        .address((IRWrite) ? PC : (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY),
         .data_in(RegX),
-        .mem_write(memWrite),
-        .mem_read(memRead),
+        .mem_write(memWrite && !memViolation),
+        .mem_read(memRead && !memViolation),
         .data_out(ram_data_out)
     );
 
