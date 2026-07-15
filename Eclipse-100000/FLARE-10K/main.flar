@@ -2,7 +2,7 @@
 #def u32 X_BOUND : 360;
 #def u32 Y_BOUND : 240;
 
-func bootstrap_os(u32 x, u32 y) {
+func bootstrap_os(u32 x, u32 y) => u32 {
     *u32 [0xFFFFFF08] = 4096; >_ absolute pointer directly to memory address
     *u32 [0xFFFFFF0C] = 16384;
 
@@ -14,12 +14,12 @@ func bootstrap_os(u32 x, u32 y) {
     u8 c;
 
     for i < 128{ >_ default i = 1, i++
-        c+=1;
+        c = c + 1;
     }
 
     if c == 128{
-        for j = 2, j+=2, i < 64{
-            c-= 2;
+        for j = 2, j = j + 2, i < 64{
+            c = c - 2;
         }
     }
 
@@ -27,10 +27,12 @@ func bootstrap_os(u32 x, u32 y) {
 
     c = x * y; >_ Overflow you are cooked buddy
 
-    inline [
+    inline {
         XOR [rx0, rx0]
         LOAD rx12 <- 0x10
-    outline];
+    outline};
+
+    return c as u32;
 }
 
 func main(){
