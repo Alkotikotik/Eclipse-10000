@@ -58,16 +58,22 @@ module CORE(
     logic IO_cs;
     logic [31:0] cpu_mem_data_out; //unified data output
     logic [15:0] mmio_timer_reg;
+
+    logic [31:0] active_address;
+    
     
     //Breaking instruction down
     assign opcode = IR[31:26];
     assign rx0 = IR[25:21];
     assign rx1 = IR[20:16];
     assign immediate = IR[15:0];
+
+    assign memTarget = (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY;
+    assign active_address = (IRWrite) ? PC : memTarget;
     
     assign memTarget = (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY;
-    assign memViolation = (!KernelMode && (memRead || memWrite) &&
-                          ((memTarget < memBase)   || (memTarget >= (memBase + memLimit))));
+    assign memViolation = (!KernelMode && (memRead || memWrite) && ((active_address < memBase) ||
+                          (33'(active_address) >= (33'(memBase) + 33'(memLimit)))));
 
     //Muxes
     assign AluMuxX = (aluSrcX == 1'b1) ? PC : RegX;
@@ -116,11 +122,16 @@ module CORE(
             if (YWrite) RegY <= GPRs_data_out1;
             if (EAWrite) EA <= AluResult;
             if (EPCWrite) EPC <= PC;
-            if (isKernelMode) KernelMode <= 1;
-            if (!isKernelMode) KernelMode <= 0;
+            KernelMode <= isKernelMode;
 
-            if (memWrite && IO_cs && (memTarget == 32'hFFFFFF04)) begin
-                mmio_timer_reg <= RegX[15:0];
+            if (memWrite && IO_cs && KernelMode) begin
+                unique case (memTarget)
+                    32'hFFFFFF04: mmio_timer_reg <= RegX[15:0];
+                    32'hFFFFFF08: memBase <= RegX;
+                    32'hFFFFFF0C: memLimit <= RegX;
+                    32'hFFFFFF10: EPC <= RegX;
+                    default: ;
+                endcase
             end
         end
     end
@@ -138,6 +149,7 @@ module CORE(
     //First 2GB(0x00000000 - 0x00000000) - regular RAM
     //Next 1MB(0x80000000 - 0x800FFFFF) - VRAM
     //Then I/O registers
+    //Starting with 64MB
     always_comb begin
         RAM_cs = 0;
         VRAM_cs = 0;
@@ -147,13 +159,16 @@ module CORE(
             RAM_cs = 1;
         end
         else begin
-            if (memTarget >= 32'h80000000 && memTarget <= 32'h800FFFFF) begin
-                VRAM_cs = 1;
-            end else if (memTarget >= 32'hFFFFFF00) begin
-                IO_cs = 1;
-            end else begin
+            if (memTarget <= 32'h03FFFFFF) begin
                 RAM_cs = 1;
+            end 
+            else if (memTarget >= 32'h80000000 && memTarget <= 32'h800FFFFF) begin
+                VRAM_cs = 1;
+            end 
+            else if (memTarget >= 32'hFFFFFF00) begin
+                IO_cs = 1;
             end
+            //Else [Fatal errors: you are cooked buddy]
         end
     end
 

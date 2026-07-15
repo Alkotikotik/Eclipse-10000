@@ -9,22 +9,19 @@ module RAM(
     output logic [31:0] data_out
 );
 
-    logic [31:0] ramm [0:4095];
+    logic [31:0] ramm [0:16777215]; //64MB
     
-    //Load program
     initial begin
         $readmemh("program.hex", ramm);
     end
-
-    //So compiler wouldn't complain
-    logic [19:0] unused_bits;
-    assign unused_bits = {address[31:14], address[1:0]};
-
-    assign data_out = (mem_read) ? ramm[address[13:2]] : 32'b0;
+    
+    logic [7:0] unused_bits;
+    assign unused_bits = {address[31:26], address[1:0]}; //So compiler wouldn't compain
+    assign data_out = (mem_read) ? ramm[address[25:2]] : 32'b0; //Ignore bottom 2 bits
 
     always_ff @(posedge clk) begin
         if (mem_write) begin
-            ramm[address[13:2]] <= data_in;
+            ramm[address[25:2]] <= data_in;
         end
     end
 
