@@ -68,11 +68,11 @@ module CORE(
     assign rx1 = IR[20:16];
     assign immediate = IR[15:0];
 
-    assign memTarget = (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY;
     assign active_address = (IRWrite) ? PC : memTarget;
     
     assign memTarget = (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY;
-    assign memViolation = (!KernelMode && (memRead || memWrite) && ((active_address < memBase) ||
+    assign memViolation = (!KernelMode && (memRead || memWrite) &&
+                          ((active_address < memBase) ||
                           (33'(active_address) >= (33'(memBase) + 33'(memLimit)))));
 
     //Muxes

@@ -80,6 +80,8 @@ fn main() -> io::Result<()> {
     opcodes.insert("JMP", 0b111111);
     opcodes.insert("SYS", 0b111110);
     opcodes.insert("RETU", 0b111101);
+    opcodes.insert("PUSH", 0b101000);
+    opcodes.insert("POP", 0b101001);
 
     let mut output_file = File::create(output_path)?;
 
@@ -179,6 +181,20 @@ fn main() -> io::Result<()> {
                 if tokens.len() > 2 {
                     rx1 = parse_reg(tokens[2]);
                 }
+            }
+            "PUSH" => {
+                if tokens.len() > 1 {
+                    rx0 = parse_reg(tokens[1]);
+                }
+                rx1 = 31;
+                immediate = (-4_i32) as u32;
+            }
+            "POP" => {
+                if tokens.len() > 1 {
+                    rx0 = parse_reg(tokens[1]);
+                }
+                rx1 = 31;
+                immediate = 4;
             }
         }
 

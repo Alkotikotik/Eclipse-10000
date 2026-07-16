@@ -1,12 +1,20 @@
 >_ FLARE-10K Kernel Initialization
-#def u32 X_BOUND : 360;
-#def u32 Y_BOUND : 240;
+#def u32 X_BOUND = 360;
+#def u32 Y_BOUND = 240;
+
+arch PageTableEntry{
+    u32 Entry;
+    u8 flags;
+};
 
 func bootstrap_os(u32 x, u32 y) => u32 {
     [0xFFFFFF08] = 4096; >_ standalone value in square brackets always means contents of the address specified
     [0xFFFFFF0C] = 16384;
 
     u32 value = [0xFFFFF08]; >_ so value = 4096
+    u32 value1 = 0xFFFFFF08;
+    [value1] = 512; >_ now value = 512
+
 
     i32 a = 256;
     i16 b;
