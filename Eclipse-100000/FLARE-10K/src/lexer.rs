@@ -44,7 +44,6 @@ pub enum Token {
     LBrace, //{}
     RBrace,
 
-    Comment(String), // For >_ comment
     InlineBlock(String),
 }
 
@@ -166,15 +165,12 @@ impl<'a> Lexer<'a> {
         Token::IntLiteral(val)
     }
 
-    fn read_comment(&mut self) -> Token {
-        let mut comment_content = String::new();
+    fn skip_comment(&mut self) {
         while let Some(c) = self.advance() {
             if c == '\n' {
                 break;
             }
-            comment_content.push(c);
         }
-        Token::Comment(comment_content)
     }
 
     fn read_inline(&mut self) -> Token {
@@ -218,66 +214,68 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
-
         self.skip_whitespace();
         let current_char = self.advance()?;
         let token: Token;
 
-            token = match current_char {
-                '(' => Token::LParen,
-                ')' => Token::RParen,
-                '[' => Token::LBracket,
-                ']' => Token::RBracket,
-                '{' => Token::LBrace,
-                '}' => Token::RBrace,
-                ',' => Token::Comma,
-                ':' => Token::Colon,
-                ';' => Token::Semicolon,
-                '+' => Token::Add,
-                '-' => Token::Sub,
-                '*' => Token::Asterix,
-                '<' => Token::Less,
+        token = match current_char {
+            '(' => Token::LParen,
+            ')' => Token::RParen,
+            '[' => Token::LBracket,
+            ']' => Token::RBracket,
+            '{' => Token::LBrace,
+            '}' => Token::RBrace,
+            ',' => Token::Comma,
+            ':' => Token::Colon,
+            ';' => Token::Semicolon,
+            '+' => Token::Add,
+            '-' => Token::Sub,
+            '*' => Token::Asterix,
+            '<' => Token::Less,
 
-                '=' => {
-                    if self.peek() == Some(&'=') {
-                        self.advance();
-                        Token::IsEqual
-                    } else if self.peek() == Some(&'>') {
-                        self.advance();
-                        Token::ToRet
-                    } else {
-                        Token::Equal
-                    }
+            '=' => {
+                if self.peek() == Some(&'=') {
+                    self.advance();
+                    Token::IsEqual
+                } else if self.peek() == Some(&'>') {
+                    self.advance();
+                    Token::ToRet
+                } else {
+                    Token::Equal
                 }
-                '>' => {
-                    if self.peek() == Some(&'_') {
-                        self.advance();
-                        self.read_comment()
-                    } else {
-                        Token::More
-                    }
+            }
+            '>' => {
+                if self.peek() == Some(&'_') {
+                    self.advance();
+                    self.skip_comment();
+                    //Skip comment
+                    return self.next();
+                } else {
+                    Token::More
                 }
+            }
 
-                c if c.is_alphabetic() || c == '_' || c == '#' => {
-                    let tok = self.read_idenkeyword(c);
-                    
-                    if tok == Token::Inline {
-                        self.read_inline()
-                    } else {
-                        tok
-                    }
+            c if c.is_alphabetic() || c == '_' || c == '#' => {
+                let tok = self.read_idenkeyword(c);
+                
+                if tok == Token::Inline {
+                    self.read_inline()
+                } else {
+                    tok
                 }
-                c if c.is_numeric() => self.read_number(c),
+            }
+            c if c.is_numeric() => self.read_number(c),
 
-                _ => {
-                    panic!(
-                        "Syntax Error: Unexpected character '{}' at line {}, column {}", 
-                        current_char, 
-                        self.line, 
-                        self.position
-                    );
-                }
-            };
+            _ => {
+                panic!(
+                    "Syntax Error: Unexpected character '{}' at line {}, column {}", 
+                    current_char,
+                    self.line,
+                    self.position
+                );
+            }
+        };
+
         Some(token)
     }
 }
