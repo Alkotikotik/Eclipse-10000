@@ -11,6 +11,6 @@ fn main() {
     let lexer = Lexer::new(&src, 0, 0);
 
     for token in lexer {
-        println!("{:?}", token);
+        println!("[ {:?} ]" , token);
     }
 }

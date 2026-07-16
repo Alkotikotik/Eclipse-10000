@@ -178,7 +178,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_inline(&mut self) -> Token {
-        let mut depth = 0;
+        let mut depth;
         let mut block_content = String::new();
 
         self.skip_whitespace();
