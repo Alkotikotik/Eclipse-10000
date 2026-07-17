@@ -36,6 +36,7 @@ pub enum Token {
     ToRet,
     More,
     Less,
+    Excl,
 
     LParen, //()
     RParen,
@@ -232,6 +233,7 @@ impl<'a> Iterator for Lexer<'a> {
             '-' => Token::Sub,
             '*' => Token::Asterix,
             '<' => Token::Less,
+            '!' => Token::Excl,
 
             '=' => {
                 if self.peek() == Some(&'=') {
