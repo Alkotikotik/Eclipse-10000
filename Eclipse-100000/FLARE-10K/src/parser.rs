@@ -1,3 +1,6 @@
+//Parser for FLARE-10K precende table in the main directory of language.
+//Refer to it, it might act as a documentation
+
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -33,6 +36,7 @@ pub enum MoreLess {
     More,
     Less,
     Eq,
+    NotEq,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,7 +67,17 @@ pub enum Expr {
         left: Box<Expr>,
         op: MoreLess,
         right: Box<Expr>,
-    }
+    },
+    Assign {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    
+    VarDecl {
+        ty: Type,
+        name: String,
+        initial: Option<Box<Expr>>, //Initial is optional
+    },
 }
 
 pub struct Parser<'a> {
@@ -97,6 +111,7 @@ impl<'a> Parser<'a> {
     fn parse_func(&mut self) -> Vec<Expr> { todo!() }
 
     //Highest precedence
+    //Parse: literals, identifiers, calls
     fn parse_atomic(&mut self) -> Expr {
         match self.tokens.peek() {
             Some(Token::IntLiteral(_)) => {
@@ -121,7 +136,7 @@ impl<'a> Parser<'a> {
                     }
                 } else { unreachable!() }
             }
-            Some(Token::LBracket) => {
+            Some(Token::LBracket) => { //If "(" after ID its a call
                 self.advance();
                 let val = self.parse_expr();
                 self.expect(Token::RBracket);
@@ -130,6 +145,7 @@ impl<'a> Parser<'a> {
             _ => panic!("Expected atomic expression"),
         }
     }
+    //Cast works just as in rust, its pretty convinient falls to atomic
     fn parse_cast(&mut self) -> Expr {
         let mut expr = self.parse_atomic();
         
@@ -144,8 +160,6 @@ impl<'a> Parser<'a> {
                 Token::I16 => Type::I16,
                 Token::I8 => Type::I8,
 
-
-
                 other => panic!("Expected a type after 'as', found {:?}", other),
             };
 
@@ -156,7 +170,7 @@ impl<'a> Parser<'a> {
         }
         expr
     }
-
+    //Unary is singalar values operations, like -val or !val, falls to cast if no ! or -
     fn parse_unary(&mut self) -> Expr {
         match self.tokens.peek() {
             Some(Token::Sub) => {
@@ -181,7 +195,7 @@ impl<'a> Parser<'a> {
             _ => self.parse_cast(),
         }
     }
-
+    //Parse * and / higher precedence that + and -, first falls to unary
     fn parse_factor(&mut self) -> Expr {
         let mut expr = self.parse_unary();
         
@@ -189,8 +203,9 @@ impl<'a> Parser<'a> {
             match token{
                 Token::Mul => {
                     self.advance();
-                    let right = self.parse_unary();
-
+                    let right = self.parse_unary(); //Parsing RHS with unary bc it can be eg -val
+                    
+                    //Store as node for code generation later
                     expr = Expr::Binary {
                         left: Box::new(expr),
                         op: BinaryOpKind::Mul,
@@ -212,7 +227,8 @@ impl<'a> Parser<'a> {
         }
         expr
     }
-
+    
+    //Similar, falls to factor 
     fn parse_term(&mut self) -> Expr {
         let mut expr = self.parse_factor();
         
@@ -244,6 +260,8 @@ impl<'a> Parser<'a> {
         expr
     }
     
+    //Similar again falls to term bc it can be val+val1 < val*val1
+    //Also it can technically be val < val1 < val2
     fn parse_compariSON(&mut self) -> Expr {
         let mut expr = self.parse_term();
         
@@ -274,7 +292,8 @@ impl<'a> Parser<'a> {
         }
         expr
     }
-
+    
+    //Fals to comparison, eg val<val == val > val
     fn parse_equality(&mut self) -> Expr {
         let mut expr = self.parse_compariSON();
         
@@ -289,15 +308,54 @@ impl<'a> Parser<'a> {
                         op: MoreLess::Eq,
                         right: Box::new(right),
                     };
+                }
+                Token::NotEqual => {
+                    self.advance();
+                    let right = self.parse_term();
+
+                    expr = Expr::MoreLessEq {
+                        left: Box::new(expr),
+                        op: MoreLess::NotEq,
+                        right: Box::new(right),
+                    };
+                }
                 _ => break;
 
-                }
             }
         }
         expr
     }
 
-    fn parse_assign(&mut self) -> Expr {
+    fn parse_assign (&mut self) -> Expr {
+        if let Some(token) = self.tokens.peek() {
+            if matches!(token, Token::U32 | Token::U16 | Token::U8 | Token::I32 | Token::I16 | Token::I8) {
+                return self.parse_var_decl();
+            }
+        }
+
+        let lhs = self.parse_equality();
+
+        if self.tokens.peek() == Some(&Token::Equal) {
+            self.advance();
+            
+            match &lhs {
+                Expr::Identifier(_) | Expr::Deref(_) => {}
+                _ => panic!("Invalid lhs value: Only variables or memory addresses can be assigned"),
+            }
+            
+            //Recursively to allow val=val1=5
+            let rhs = self.parse_assign();
+
+            Expr::Assign {
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        } else {
+            lhs
+        }
+    }
+
+    fn parse_var_decl(&mut self) -> Expr {
 
     }
 }

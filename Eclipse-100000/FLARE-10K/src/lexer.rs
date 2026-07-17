@@ -27,6 +27,7 @@ pub enum Token {
 
     Equal,
     IsEqual,
+    NotEqual,
     Add,
     Sub,
     Asterix,
@@ -52,7 +53,7 @@ pub struct Lexer<'a> {
     chars: Peekable<Chars<'a>>,
     line: usize,
     position: usize,
-    is_inline: bool
+    is_inline: bool,
 }
 
 impl<'a> Lexer<'a> {
@@ -68,7 +69,7 @@ impl<'a> Lexer<'a> {
     // Helpers
     fn advance(&mut self) -> Option<char> {
         let next_char = self.chars.next();
-        
+
         //Track column and position
         if let Some(c) = next_char {
             if c == '\n' {
@@ -117,8 +118,14 @@ impl<'a> Lexer<'a> {
             "for" => Token::For,
             "if" => Token::If,
             "while" => Token::While,
-            "inline" => { self.is_inline = true; Token::Inline}
-            "outline" => { self.is_inline = false; Token::Outline}
+            "inline" => {
+                self.is_inline = true;
+                Token::Inline
+            }
+            "outline" => {
+                self.is_inline = false;
+                Token::Outline
+            }
             "u32" => Token::TypeU32,
             "u16" => Token::TypeU16,
             "u8" => Token::TypeU8,
@@ -183,7 +190,10 @@ impl<'a> Lexer<'a> {
             self.advance();
             depth = 1;
         } else {
-            panic!("Syntax Error: Expected '{{' after inline keyword at line {}", self.line);
+            panic!(
+                "Syntax Error: Expected '{{' after inline keyword at line {}",
+                self.line
+            );
         }
 
         while depth > 0 {
@@ -198,7 +208,10 @@ impl<'a> Lexer<'a> {
                 }
                 block_content.push(c);
             } else {
-                panic!("Syntax Error: Unclosed inline assembly block at line {}", self.line);
+                panic!(
+                    "Syntax Error: Unclosed inline assembly block at line {}",
+                    self.line
+                );
             }
         }
 
@@ -233,7 +246,6 @@ impl<'a> Iterator for Lexer<'a> {
             '-' => Token::Sub,
             '*' => Token::Asterix,
             '<' => Token::Less,
-            '!' => Token::Excl,
 
             '=' => {
                 if self.peek() == Some(&'=') {
@@ -256,10 +268,18 @@ impl<'a> Iterator for Lexer<'a> {
                     Token::More
                 }
             }
+            '!' => {
+                if self.peek() == Some(&'=') {
+                    self.advance();
+                    Token::NotEqual
+                } else {
+                    Token::Excl
+                }
+            }
 
             c if c.is_alphabetic() || c == '_' || c == '#' => {
                 let tok = self.read_idenkeyword(c);
-                
+
                 if tok == Token::Inline {
                     self.read_inline()
                 } else {
@@ -270,10 +290,8 @@ impl<'a> Iterator for Lexer<'a> {
 
             _ => {
                 panic!(
-                    "Syntax Error: Unexpected character '{}' at line {}, column {}", 
-                    current_char,
-                    self.line,
-                    self.position
+                    "Syntax Error: Unexpected character '{}' at line {}, column {}",
+                    current_char, self.line, self.position
                 );
             }
         };
