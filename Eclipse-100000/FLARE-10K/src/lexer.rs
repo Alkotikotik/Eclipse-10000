@@ -6,6 +6,7 @@ pub enum Token {
     Func,
     For,
     If,
+    Else,
     While,
     Inline,
     Outline,
@@ -118,6 +119,7 @@ impl<'a> Lexer<'a> {
             "func" => Token::Func,
             "for" => Token::For,
             "if" => Token::If,
+            "else" => Token::Else,
             "while" => Token::While,
             "inline" => {
                 self.is_inline = true;
@@ -187,21 +189,21 @@ impl<'a> Lexer<'a> {
         let mut block_content = String::new();
 
         self.skip_whitespace();
-        if self.peek() == Some(&'{') {
+        if self.peek() == Some(&'[') {
             self.advance();
             depth = 1;
         } else {
             panic!(
-                "Syntax Error: Expected '{{' after inline keyword at line {}",
+                "Syntax Error: Expected '[' after inline keyword at line {}",
                 self.line
             );
         }
 
         while depth > 0 {
             if let Some(c) = self.advance() {
-                if c == '{' {
+                if c == '[' {
                     depth += 1;
-                } else if c == '}' {
+                } else if c == ']' {
                     depth -= 1;
                     if depth == 0 {
                         break;
@@ -247,7 +249,7 @@ impl<'a> Iterator for Lexer<'a> {
             '-' => Token::Sub,
             '*' => Token::Asterix,
             '<' => Token::Less,
-            '/' => Token::Div,
+            '/' => Token::Div, //For later
 
             '=' => {
                 if self.peek() == Some(&'=') {

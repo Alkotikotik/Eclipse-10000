@@ -1,11 +1,32 @@
 //Parser for FLARE-10K precende table in the main directory of language.
 //Refer to it, it might act as a documentation
-
 use std::iter::Peekable;
 use std::str::Chars;
 
 use crate::lexer::Lexer;
 use crate::lexer::Token;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stmt {
+    For {
+        init: Box<Expr>,
+        cond: Expr,
+        inc: Expr,
+        body: Vec<Stmt>,
+    },
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+    },
+    IfElse {
+        cond: Expr,
+        main_branch: Vec<Stmt>,
+        else_branch: Option<Vec<Stmt>>,
+    },
+    InlineAsm(String),
+    Return(Option<Expr>),
+    Expr(Expr), //Assigments or function calls
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -130,7 +151,7 @@ impl<'a> Parser<'a> {
                 self.expect(Token::RBracket);
                 Expr::Deref(Box::new(inner_expr))
             }
-            Some(Token::LParen) => { //For parenthisez math, like (1+5)*2
+            Some(Token::LParen) => { //For parenthisezed math, like (1+5)*2
                 let inner_expr = self.parse_assign();
                 self.expect(Token::RParen);
                 inner_expr
@@ -141,7 +162,7 @@ impl<'a> Parser<'a> {
     //Cast works just as in rust, its pretty convinient falls to atomic
     fn parse_cast(&mut self) -> Expr {
         let mut expr = self.parse_atomic();
-        
+
         if self.tokens.peek() == Some(&Token::As) {
             self.advance();
 
@@ -170,7 +191,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 //Recursive, so --5 is possible
                 let val = self.parse_unary();
-                
+
                 Expr::Unary {
                     op: UnaryOpKind::Negate,
                     expr: Box::new(val),
@@ -179,7 +200,7 @@ impl<'a> Parser<'a> {
             Some(Token::Excl) => {
                 self.advance();
                 let val = self.parse_unary();
-                
+
                 Expr::Unary {
                     op: UnaryOpKind::Not,
                     expr: Box::new(val),
@@ -191,13 +212,13 @@ impl<'a> Parser<'a> {
     //Parse * and / higher precedence that + and -, first falls to unary
     fn parse_factor(&mut self) -> Expr {
         let mut expr = self.parse_unary();
-        
+
         while let Some(token) = self.tokens.peek(){
             match token{
                 Token::Asterix => {
                     self.advance();
                     let right = self.parse_unary(); //Parsing RHS with unary bc it can be eg -val
-                    
+
                     //Store as node for code generation later
                     expr = Expr::Binary {
                         left: Box::new(expr),
@@ -220,11 +241,11 @@ impl<'a> Parser<'a> {
         }
         expr
     }
-    
+
     //Similar, falls to factor 
     fn parse_term(&mut self) -> Expr {
         let mut expr = self.parse_factor();
-        
+
         while let Some(token) = self.tokens.peek(){
             match token{
                 Token::Add => {
@@ -252,12 +273,12 @@ impl<'a> Parser<'a> {
         }
         expr
     }
-    
+
     //Similar again falls to term bc it can be val+val1 < val*val1
     //Also it can technically be val < val1 < val2
     fn parse_compariSON(&mut self) -> Expr {
         let mut expr = self.parse_term();
-        
+
         while let Some(token) = self.tokens.peek(){
             match token{
                 Token::More => {
@@ -285,11 +306,11 @@ impl<'a> Parser<'a> {
         }
         expr
     }
-    
+
     //Fals to comparison, eg val<val == val > val
     fn parse_equality(&mut self) -> Expr {
         let mut expr = self.parse_compariSON();
-        
+
         while let Some(token) = self.tokens.peek(){
             match token{
                 Token::IsEqual => {
@@ -330,12 +351,12 @@ impl<'a> Parser<'a> {
 
         if self.tokens.peek() == Some(&Token::Equal) {
             self.advance();
-            
+
             match &lhs {
                 Expr::Identifier(_) | Expr::Deref(_) => {}
                 _ => panic!("Invalid lhs value: Only variables or memory addresses can be assigned"),
             }
-            
+
             //Recursively to allow val=val1=5
             let rhs = self.parse_assign();
 
@@ -386,5 +407,71 @@ impl<'a> Parser<'a> {
                 initial: None,
             }
         }
+    }
+
+    fn parse_stmt(&mut self) -> Stmt {
+        match self.tokens.peek() {
+            Some(Token::For) => {
+                self.advance();
+                self.parse_for_stmt()
+            },
+            Some(Token::While) => {
+                self.advance():
+                self.parse_while_stmt()
+            },
+            Some(Token::If) => {
+                self.advance();
+                self.parse_ifelse_stmt()
+            },
+            Some(Token::Inline) => {
+                self.advance();
+                self.parse_inline_asm()
+            },
+            Some(Token::Return) => {
+                self.advance();
+                self.parse_return_stmt()
+            },
+            _ => {
+                let expr = self.parse_assign();
+                self.expect(Token::Semicolon);
+                Stmt::Expr(expr)
+            }
+        }
+    }
+    fn parse_for_stmt(&mut self) -> Stmt {
+        self.expect(Token::LBracket);
+
+        let init = self.parse_assign();
+        self.expect(Token::Semicolon);
+
+        let cond = self.parse_assign();
+        self.expect(Token::Semicolon);
+
+        let inc = self.parse_assign();
+        
+        self.expect(Token::RBracket);
+        self.expect(Token::LBrace);
+
+        let mut body = Vec::new();
+
+        //Will stop at EOF
+        while let Some(token) = self.tokens.peek() {
+            if token == &Token::RBrace {
+                break;
+            }
+            body.push(self.parse_stmt());
+        }
+
+        self.expect(Token::RBrace);
+
+        Stmt::For {
+            init: Box::new(init),
+            cond,
+            inc,
+            body,
+        }
+    }
+    fn parse_ifelse_stmt(&mut self) -> Stmt {
+
     }
 }

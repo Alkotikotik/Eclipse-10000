@@ -21,12 +21,15 @@ func bootstrap_os(u32 x, u32 y) => u32 {
     b = a * -256;
     u8 c;
 
-    for u32 i = 0; i < 128; i = i + 1{
+    for [u32 i = 0; i < 128; i = i + 1] {
         c = c + 1;
     }
+    while [true] {
+        >_ It works just fine
+    }
 
-    if c == 128{
-        for u32 j = 2; j < 64; j = j + 2;{
+    if [c == 128] {
+        for [u32 j = 2; j < 64; j = j + 2;] {
             c = c - 2;
         }
     }
@@ -35,10 +38,10 @@ func bootstrap_os(u32 x, u32 y) => u32 {
 
     c = x * y; >_ Overflow you are cooked buddy
 
-    inline {
+    inline [
         XOR [rx0, rx0]
         LOAD rx12 <- 0x10
-    outline};
+    outline];
 
     return c as u32;
 }
