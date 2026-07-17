@@ -1,6 +1,9 @@
 mod lexer;
 use lexer::Lexer;
 
+mod parser;
+use parser::Parser;
+
 use std::fs;
 
 fn main() {

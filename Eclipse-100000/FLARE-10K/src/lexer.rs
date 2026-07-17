@@ -31,6 +31,7 @@ pub enum Token {
     Add,
     Sub,
     Asterix,
+    Div,
     Comma,
     Colon,
     Semicolon,
@@ -246,6 +247,7 @@ impl<'a> Iterator for Lexer<'a> {
             '-' => Token::Sub,
             '*' => Token::Asterix,
             '<' => Token::Less,
+            '/' => Token::Div,
 
             '=' => {
                 if self.peek() == Some(&'=') {

@@ -4,8 +4,8 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
-mod lexer;
-use lexer::Lexer;
+use crate::lexer::Lexer;
+use crate::lexer::Token;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -107,42 +107,35 @@ impl<'a> Parser<'a> {
 //Recursive descent
 impl<'a> Parser<'a> {
 
-    fn parse_expr(&mut self) -> Expr { todo!() }
     fn parse_func(&mut self) -> Vec<Expr> { todo!() }
 
     //Highest precedence
     //Parse: literals, identifiers, calls
     fn parse_atomic(&mut self) -> Expr {
-        match self.tokens.peek() {
-            Some(Token::IntLiteral(_)) => {
-                if let Token::IntLiteral(val) = self.advance() {
-                    Expr::IntLiteral(val)
-                } else { unreachable!() } //Literally unreachable just for later optimizations
+        match self.tokens.next() {
+            Some(Token::IntLiteral(val)) => Expr::IntLiteral(val),
+            Some(Token::HexLiteral(val)) => Expr::HexLiteral(val),
+            Some(Token::Identifier(name)) => {
+                if self.tokens.peek() == Some(&Token::LParen) {
+                    self.tokens.next();
+                    let args = self.parse_func();
+                    self.expect(Token::RParen);
+                    Expr::FunctionCall { name, args }
+                } else {
+                    Expr::Identifier(name)
+                }
             }
-            Some(Token::HexLiteral(_)) => {
-                if let Token::HexLiteral(val) = self.advance() {
-                    Expr::HexLiteral(val)
-                } else { unreachable!() }
-            }
-            Some(Token::Identifier(_)) => {
-                if let Token::Identifier(name) = self.advance() {
-                    if self.tokens.peek() == Some(&Token::LParen) {
-                        self.advance();
-                        let args = self.parse_func();
-                        self.expect(Token::RParen);
-                        Expr::FunctionCall { name, args }
-                    } else {
-                        Expr::Identifier(name)
-                    }
-                } else { unreachable!() }
-            }
-            Some(Token::LBracket) => { //If "(" after ID its a call
-                self.advance();
-                let val = self.parse_expr();
+            Some(Token::LBracket) => { //Adress can be an expression, eg [5+10]
+                let inner_expr = self.parse_assign();
                 self.expect(Token::RBracket);
-                Expr::Deref(Box::new(val))
+                Expr::Deref(Box::new(inner_expr))
             }
-            _ => panic!("Expected atomic expression"),
+            Some(Token::LParen) => { //For parenthisez math, like (1+5)*2
+                let inner_expr = self.parse_assign();
+                self.expect(Token::RParen);
+                inner_expr
+            }
+            anything_else => panic!("Expected atomic expression, found {:?}", anything_else),
         }
     }
     //Cast works just as in rust, its pretty convinient falls to atomic
@@ -153,12 +146,12 @@ impl<'a> Parser<'a> {
             self.advance();
 
             let target_type = match self.advance() {
-                Token::U32 => Type::U32,
-                Token::U16 => Type::U16,
-                Token::U8 => Type::U8,
-                Token::I32 => Type::I32,
-                Token::I16 => Type::I16,
-                Token::I8 => Type::I8,
+                Token::TypeU32 => Type::U32,
+                Token::TypeU16 => Type::U16,
+                Token::TypeU8 => Type::U8,
+                Token::TypeI32 => Type::I32,
+                Token::TypeI16 => Type::I16,
+                Token::TypeI8 => Type::I8,
 
                 other => panic!("Expected a type after 'as', found {:?}", other),
             };
@@ -201,7 +194,7 @@ impl<'a> Parser<'a> {
         
         while let Some(token) = self.tokens.peek(){
             match token{
-                Token::Mul => {
+                Token::Asterix => {
                     self.advance();
                     let right = self.parse_unary(); //Parsing RHS with unary bc it can be eg -val
                     
@@ -222,7 +215,7 @@ impl<'a> Parser<'a> {
                         right: Box::new(right),
                     };
                 }
-                _ => break;
+                _ => break,
             }
         }
         expr
@@ -254,7 +247,7 @@ impl<'a> Parser<'a> {
                         right: Box::new(right),
                     };
                 }
-                _ => break;
+                _ => break,
             }
         }
         expr
@@ -287,7 +280,7 @@ impl<'a> Parser<'a> {
                         right: Box::new(right),
                     };
                 }
-                _ => break;
+                _ => break,
             }
         }
         expr
@@ -301,7 +294,7 @@ impl<'a> Parser<'a> {
             match token{
                 Token::IsEqual => {
                     self.advance();
-                    let right = self.parse_term();
+                    let right = self.parse_compariSON();
 
                     expr = Expr::MoreLessEq {
                         left: Box::new(expr),
@@ -311,7 +304,7 @@ impl<'a> Parser<'a> {
                 }
                 Token::NotEqual => {
                     self.advance();
-                    let right = self.parse_term();
+                    let right = self.parse_compariSON();
 
                     expr = Expr::MoreLessEq {
                         left: Box::new(expr),
@@ -319,7 +312,7 @@ impl<'a> Parser<'a> {
                         right: Box::new(right),
                     };
                 }
-                _ => break;
+                _ => break,
 
             }
         }
@@ -328,7 +321,7 @@ impl<'a> Parser<'a> {
 
     fn parse_assign (&mut self) -> Expr {
         if let Some(token) = self.tokens.peek() {
-            if matches!(token, Token::U32 | Token::U16 | Token::U8 | Token::I32 | Token::I16 | Token::I8) {
+            if matches!(token, Token::TypeU32 | Token::TypeU16 | Token::TypeU8 | Token::TypeI32 | Token::TypeI16 | Token::TypeI8) {
                 return self.parse_var_decl();
             }
         }
@@ -357,5 +350,41 @@ impl<'a> Parser<'a> {
 
     fn parse_var_decl(&mut self) -> Expr {
 
+        let ty = match self.advance() {
+            Token::TypeU32 => Type::U32,
+            Token::TypeU16 => Type::U16,
+            Token::TypeU8 => Type::U8,
+            Token::TypeI32 => Type::I32,
+            Token::TypeI16 => Type::I16,
+            Token::TypeI8 => Type::I8,
+
+            other => panic!("Expected type at the start of declaration, found {:?}", other),
+        };
+        let name = if let Token::Identifier(var_name) = self.advance() {
+            var_name
+        } else {
+            panic!("Expected identifier name after type variable declaration");
+        };
+
+        if self.tokens.peek() == Some(&Token::Equal) {
+            self.advance();
+            let initial_expr = self.parse_assign();
+
+            self.expect(Token::Semicolon);
+
+            Expr::VarDecl {
+                ty,
+                name,
+                initial: Some(Box::new(initial_expr)),
+            }
+        }
+        else {
+            self.expect(Token::Semicolon);
+            Expr::VarDecl {
+                ty,
+                name,
+                initial: None,
+            }
+        }
     }
 }
