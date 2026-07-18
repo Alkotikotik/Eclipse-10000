@@ -1,3 +1,4 @@
+//Lexer - performs lexical analysis on the input file and returns tokens
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -43,7 +44,7 @@ pub enum Token {
 
     LParen, //()
     RParen,
-    LBracket, // []
+    LBracket, //[]
     RBracket,
     LBrace, //{}
     RBrace,
@@ -55,7 +56,7 @@ pub struct Lexer<'a> {
     chars: Peekable<Chars<'a>>,
     line: usize,
     position: usize,
-    is_inline: bool,
+    token_queue: Vec<Token>, //For inline
 }
 
 impl<'a> Lexer<'a> {
@@ -64,15 +65,12 @@ impl<'a> Lexer<'a> {
             chars: input.chars().peekable(),
             line,
             position,
-            is_inline: false,
+            token_queue: Vec::new(),
         }
     }
 
-    // Helpers
     fn advance(&mut self) -> Option<char> {
         let next_char = self.chars.next();
-
-        //Track column and position
         if let Some(c) = next_char {
             if c == '\n' {
                 self.line += 1;
@@ -81,7 +79,6 @@ impl<'a> Lexer<'a> {
                 self.position += 1;
             }
         }
-
         next_char
     }
 
@@ -92,10 +89,6 @@ impl<'a> Lexer<'a> {
     fn skip_whitespace(&mut self) {
         while let Some(&c) = self.peek() {
             if c.is_whitespace() {
-                if c == '\n' {
-                    self.line += 1;
-                    self.position = 0;
-                }
                 self.advance();
             } else {
                 break;
@@ -121,14 +114,8 @@ impl<'a> Lexer<'a> {
             "if" => Token::If,
             "else" => Token::Else,
             "while" => Token::While,
-            "inline" => {
-                self.is_inline = true;
-                Token::Inline
-            }
-            "outline" => {
-                self.is_inline = false;
-                Token::Outline
-            }
+            "inline" => Token::Inline,
+            "outline" => Token::Outline,
             "u32" => Token::TypeU32,
             "u16" => Token::TypeU16,
             "u8" => Token::TypeU8,
@@ -148,10 +135,8 @@ impl<'a> Lexer<'a> {
         num_str.push(first_char);
 
         if first_char == '0' && self.peek() == Some(&'x') {
-            // Exclude 0x
             self.advance();
             num_str.clear();
-
             while let Some(&c) = self.peek() {
                 if c.is_ascii_hexdigit() {
                     num_str.push(self.advance().unwrap());
@@ -163,7 +148,6 @@ impl<'a> Lexer<'a> {
             return Token::HexLiteral(val);
         }
 
-        // Otherwise standard decimal
         while let Some(&c) = self.peek() {
             if c.is_numeric() {
                 num_str.push(self.advance().unwrap());
@@ -184,46 +168,30 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn read_inline(&mut self) -> Token {
-        let mut depth;
+    fn read_inline_block(&mut self) {
         let mut block_content = String::new();
 
-        self.skip_whitespace();
-        if self.peek() == Some(&'[') {
-            self.advance();
-            depth = 1;
-        } else {
-            panic!(
-                "Syntax Error: Expected '[' after inline keyword at line {}",
-                self.line
-            );
-        }
-
-        while depth > 0 {
+        loop {
             if let Some(c) = self.advance() {
-                if c == '[' {
-                    depth += 1;
-                } else if c == ']' {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
                 block_content.push(c);
+                if block_content.ends_with("outline];") {
+                    break;
+                }
             } else {
-                panic!(
-                    "Syntax Error: Unclosed inline assembly block at line {}",
-                    self.line
-                );
+                panic!("Error: inline wasn't closed");
             }
         }
 
-        let mut content = block_content.trim().to_string();
-        if content.ends_with("outline") {
-            content = content.trim_end_matches("outline").trim().to_string();
-        }
+        let content_len = block_content.len();
+        let raw_asm = &block_content[..content_len - 9];
+        let trimmed_asm = raw_asm.trim().to_string();
 
-        Token::InlineBlock(content)
+        // Just push needed tokens to the queue, conditions are met anyways
+        self.token_queue.push(Token::LBracket);
+        self.token_queue.push(Token::InlineBlock(trimmed_asm));
+        self.token_queue.push(Token::Outline);
+        self.token_queue.push(Token::RBracket);
+        self.token_queue.push(Token::Semicolon);
     }
 }
 
@@ -231,11 +199,15 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // 1. First, drain any tokens waiting in our queue
+        if !self.token_queue.is_empty() {
+            return Some(self.token_queue.remove(0));
+        }
+
         self.skip_whitespace();
         let current_char = self.advance()?;
-        let token: Token;
 
-        token = match current_char {
+        let token = match current_char {
             '(' => Token::LParen,
             ')' => Token::RParen,
             '[' => Token::LBracket,
@@ -249,7 +221,7 @@ impl<'a> Iterator for Lexer<'a> {
             '-' => Token::Sub,
             '*' => Token::Asterix,
             '<' => Token::Less,
-            '/' => Token::Div, //For later
+            '/' => Token::Div,
 
             '=' => {
                 if self.peek() == Some(&'=') {
@@ -266,7 +238,6 @@ impl<'a> Iterator for Lexer<'a> {
                 if self.peek() == Some(&'_') {
                     self.advance();
                     self.skip_comment();
-                    //Skip comment
                     return self.next();
                 } else {
                     Token::More
@@ -285,7 +256,15 @@ impl<'a> Iterator for Lexer<'a> {
                 let tok = self.read_idenkeyword(c);
 
                 if tok == Token::Inline {
-                    self.read_inline()
+                    self.skip_whitespace();
+                    if self.peek() == Some(&'[') {
+                        self.advance();
+                        self.read_inline_block();
+
+                        Token::Inline
+                    } else {
+                        tok
+                    }
                 } else {
                     tok
                 }

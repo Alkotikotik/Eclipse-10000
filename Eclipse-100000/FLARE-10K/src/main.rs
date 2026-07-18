@@ -1,8 +1,8 @@
 mod lexer;
 use lexer::Lexer;
 
-mod parser;
-use parser::Parser;
+//mod parser;
+//use parser::Parser;
 
 use std::fs;
 
