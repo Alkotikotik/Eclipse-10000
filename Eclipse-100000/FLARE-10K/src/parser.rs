@@ -1,5 +1,6 @@
 //Parser for FLARE-10K precende table in the main directory of language.
 //Refer to it, it might act as a documentation
+//It is LL(1) recisrive descent parser
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -127,8 +128,6 @@ impl<'a> Parser<'a> {
 
 //Recursive descent
 impl<'a> Parser<'a> {
-
-    fn parse_func(&mut self) -> Vec<Expr> { todo!() }
 
     //Highest precedence
     //Parse: literals, identifiers, calls
@@ -408,29 +407,30 @@ impl<'a> Parser<'a> {
             }
         }
     }
-
+    
+    //General, for parsing stmts
     fn parse_stmt(&mut self) -> Stmt {
         match self.tokens.peek() {
             Some(Token::For) => {
                 self.advance();
                 self.parse_for_stmt()
-            },
+            }
             Some(Token::While) => {
-                self.advance():
+                self.advance();
                 self.parse_while_stmt()
-            },
+            }
             Some(Token::If) => {
                 self.advance();
                 self.parse_ifelse_stmt()
-            },
+            }
             Some(Token::Inline) => {
                 self.advance();
                 self.parse_inline_asm()
-            },
+            }
             Some(Token::Return) => {
                 self.advance();
                 self.parse_return_stmt()
-            },
+            }
             _ => {
                 let expr = self.parse_assign();
                 self.expect(Token::Semicolon);
@@ -438,6 +438,7 @@ impl<'a> Parser<'a> {
             }
         }
     }
+
     fn parse_for_stmt(&mut self) -> Stmt {
         self.expect(Token::LBracket);
 
@@ -448,20 +449,22 @@ impl<'a> Parser<'a> {
         self.expect(Token::Semicolon);
 
         let inc = self.parse_assign();
-        
+
+        //Trailing semicolon is optional, so both [true] and [true;] are valid
+        if self.tokens.peek() == Some(&Token::Semicolon) {
+            self.advance();
+        }
+
         self.expect(Token::RBracket);
         self.expect(Token::LBrace);
 
         let mut body = Vec::new();
-
-        //Will stop at EOF
         while let Some(token) = self.tokens.peek() {
             if token == &Token::RBrace {
                 break;
             }
             body.push(self.parse_stmt());
         }
-
         self.expect(Token::RBrace);
 
         Stmt::For {
@@ -471,7 +474,99 @@ impl<'a> Parser<'a> {
             body,
         }
     }
+
     fn parse_ifelse_stmt(&mut self) -> Stmt {
+        self.expect(Token::LBracket);
+        let cond = self.parse_assign();
+        self.expect(Token::RBracket);
+
+        self.expect(Token::LBrace);
+        let mut main_branch = Vec::new();
+        while let Some(token) = self.tokens.peek() {
+            if token == &Token::RBrace {
+                break;
+            }
+            main_branch.push(self.parse_stmt());
+        }
+        self.expect(Token::RBrace);
+        let mut else_branch = None;
+
+        if self.tokens.peek() == Some(&Token::Else) {
+            self.advance();
+
+            if self.tokens.peek() == Some(&Token::If) {
+                self.advance();
+                let buff = self.parse_ifelse_stmt();
+                else_branch = Some(vec![buff]);
+            } else {
+                self.expect(Token::LBrace);
+                let mut else_body = Vec::new();
+                while let Some(token) = self.tokens.peek() {
+                    if token == &Token::RBrace {
+                        break;
+                    }
+                    else_body.push(self.parse_stmt());
+                }
+                self.expect(Token::RBrace);
+                else_branch = Some(else_body);
+            }
+        }
+
+        Stmt::IfElse {
+            cond,
+            main_branch,
+            else_branch,
+        }
+    }
+
+    fn parse_while_stmt(&mut self) -> Stmt {
+        self.expect(Token::LBracket);
+        let cond = self.parse_assign();
+        self.expect(Token::RBracket);
+
+        self.expect(Token::LBrace);
+        let mut body = Vec::new();
+        while let Some(token) = self.tokens.peek() {
+            if token == &Token::RBrace {
+                break;
+            }
+            body.push(self.parse_stmt());
+        }
+        self.expect(Token::RBrace);
+
+        Stmt::While {
+            cond,
+            body,
+        }
+    }
+
+    fn parse_return_stmt(&mut self) -> Stmt {
+        if self.tokens.peek() == Some(&Token::Semicolon) { //Empty return for voids
+            self.advance();
+            Stmt::Return(None)
+        } else {
+            let to_return = self.parse_assign();
+            self.expect(Token::Semicolon);
+            Stmt::Return(Some(to_return))
+        }
+    }
+
+    fn parse_inline_asm(&mut self) -> Stmt {
+        self.expect(Token::LBracket);
+
+        let inline_string = match self.advance() {
+            Token::InlineBlock(asm_str) => asm_str,
+            other => panic!("Expected raw asm, but got {:?}", other),
+        };
+
+        self.expect(Token::Outline);
+        self.expect(Token::RBracket);
+        self.expect(Token::Semicolon);
+
+        Stmt::InlineAsm(inline_string)
+    }
+
+    fn parse_func(&mut self) -> Stmt {
 
     }
 }

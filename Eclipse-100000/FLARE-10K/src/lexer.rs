@@ -199,7 +199,6 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // 1. First, drain any tokens waiting in our queue
         if !self.token_queue.is_empty() {
             return Some(self.token_queue.remove(0));
         }

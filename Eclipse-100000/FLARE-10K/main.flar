@@ -29,7 +29,7 @@ func bootstrap_os(u32 x, u32 y) => u32 {
     }
 
     if [c == 128] {
-        for [u32 j = 2; j < 64; j = j + 2;] {
+        for [u32 j = 2; j < 64; j = j + 2] {
             c = c - 2;
         }
     }
