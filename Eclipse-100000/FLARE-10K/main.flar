@@ -34,7 +34,7 @@ func bootstrap_os(u32 x, u32 y) => u32 {
         }
     }
 
-    pressf(c); >_print
+    >_ pressf(c); >_print
 
     c = x * y; >_ Overflow you are cooked buddy
 

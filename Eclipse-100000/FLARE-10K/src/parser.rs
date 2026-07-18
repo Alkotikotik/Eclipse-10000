@@ -1,8 +1,8 @@
 //Parser for FLARE-10K precende table in the main directory of language.
 //Refer to it, it might act as a documentation
-//It is LL(1) recisrive descent parser
-use std::iter::Peekable;
-use std::str::Chars;
+//It is LL(1) recusrsive descent parser
+//use std::iter::Peekable;
+//use std::str::Chars;
 
 use crate::lexer::Lexer;
 use crate::lexer::Token;
@@ -29,9 +29,7 @@ pub struct StructDef {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalDef {
-    pub ty: Type,
-    pub name: String,
-    pub val: Expr,
+    pub decl: Expr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +69,7 @@ pub enum Type {
     I32,
     I16,
     I8,
+    Bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -128,7 +127,7 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-    
+
     VarDecl {
         ty: Type,
         name: String,
@@ -148,29 +147,41 @@ impl<'a> Parser<'a> {
     }
 
     fn advance(&mut self) -> Token {
-        self.tokens.next().expect("Unexpected End of File")
+        let (tok, line, col) = self.tokens.next().expect("Unexpected End of File");
+        tok
     }
 
     fn expect(&mut self, to_expect: Token) {
-        if self.tokens.peek() == Some(&to_expect) {
-            self.tokens.next();
+        if let Some(&(ref next_tok, line, col)) = self.tokens.peek() {
+            if next_tok == &to_expect {
+                self.tokens.next();
+            } else {
+                panic!(
+                    "Parser Error: Expected token {:?}, found {:?} at line {}, character {}",
+                    to_expect, next_tok, line, col
+                );
+            }
         } else {
-            panic!("Error, expected: {:?}", to_expect);
+            panic!(
+                "Parser Error: Expected token {:?}, found End of File",
+                to_expect
+            );
         }
     }
 }
 
 //Recursive descent
 impl<'a> Parser<'a> {
-
     //Highest precedence
     //Parse: literals, identifiers, calls
     fn parse_atomic(&mut self) -> Expr {
-        match self.tokens.next() {
-            Some(Token::IntLiteral(val)) => Expr::IntLiteral(val),
-            Some(Token::HexLiteral(val)) => Expr::HexLiteral(val),
-            Some(Token::Identifier(name)) => {
-                if self.tokens.peek() == Some(&Token::LParen) {
+        let (tok, line, col) = self.tokens.next().expect("Unexpected End of File");
+        match tok {
+            Token::IntLiteral(val) => Expr::IntLiteral(val),
+            Token::HexLiteral(val) => Expr::HexLiteral(val),
+            Token::Identifier(name) => {
+                if let Some(&(Token::LParen, _, _)) = self.tokens.peek() {
+                    // , _, _ are for character and row
                     self.tokens.next();
                     let args = self.parse_call_args();
                     self.expect(Token::RParen);
@@ -179,35 +190,45 @@ impl<'a> Parser<'a> {
                     Expr::Identifier(name)
                 }
             }
-            Some(Token::LBracket) => { //Adress can be an expression, eg [5+10]
+            Token::LBracket => {
+                //Adress can be an expression, eg [5+10]
                 let inner_expr = self.parse_assign();
                 self.expect(Token::RBracket);
                 Expr::Deref(Box::new(inner_expr))
             }
-            Some(Token::LParen) => { //For parenthisezed math, like (1+5)*2
+            Token::LParen => {
+                //For parenthisezed math, like (1+5)*2
                 let inner_expr = self.parse_assign();
                 self.expect(Token::RParen);
                 inner_expr
             }
-            anything_else => panic!("Expected atomic expression, found {:?}", anything_else),
+            anything_else => panic!(
+                "Parser Error: Expected atomic expression, found {:?} at line {}, character {}",
+                anything_else, line, col
+            ),
         }
     }
     //Cast works just as in rust, its pretty convinient falls to atomic
     fn parse_cast(&mut self) -> Expr {
         let mut expr = self.parse_atomic();
 
-        if self.tokens.peek() == Some(&Token::As) {
+        if let Some(&(Token::As, _, _)) = self.tokens.peek() {
             self.advance();
 
-            let target_type = match self.advance() {
+            let (next_tok, line, col) = self.tokens.next().expect("Unexpected End of File");
+            let target_type = match next_tok {
                 Token::TypeU32 => Type::U32,
                 Token::TypeU16 => Type::U16,
                 Token::TypeU8 => Type::U8,
                 Token::TypeI32 => Type::I32,
                 Token::TypeI16 => Type::I16,
                 Token::TypeI8 => Type::I8,
+                Token::TypeBool => Type::Bool,
 
-                other => panic!("Expected a type after 'as', found {:?}", other),
+                other => panic!(
+                    "Parser Error: Expected a type after 'as', found {:?} at line {}, character {}",
+                    other, line, col
+                ),
             };
 
             expr = Expr::Cast {
@@ -220,7 +241,7 @@ impl<'a> Parser<'a> {
     //Unary is singalar values operations, like -val or !val, falls to cast if no ! or -
     fn parse_unary(&mut self) -> Expr {
         match self.tokens.peek() {
-            Some(Token::Sub) => {
+            Some(&(Token::Sub, _, _)) => {
                 self.advance();
                 //Recursive, so --5 is possible
                 let val = self.parse_unary();
@@ -230,7 +251,7 @@ impl<'a> Parser<'a> {
                     expr: Box::new(val),
                 }
             }
-            Some(Token::Excl) => {
+            Some(&(Token::Excl, _, _)) => {
                 self.advance();
                 let val = self.parse_unary();
 
@@ -246,8 +267,8 @@ impl<'a> Parser<'a> {
     fn parse_factor(&mut self) -> Expr {
         let mut expr = self.parse_unary();
 
-        while let Some(token) = self.tokens.peek(){
-            match token{
+        while let Some(&(ref token, _, _)) = self.tokens.peek() {
+            match token {
                 Token::Asterix => {
                     self.advance();
                     let right = self.parse_unary(); //Parsing RHS with unary bc it can be eg -val
@@ -275,12 +296,12 @@ impl<'a> Parser<'a> {
         expr
     }
 
-    //Similar, falls to factor 
+    //Similar, falls to factor
     fn parse_term(&mut self) -> Expr {
         let mut expr = self.parse_factor();
 
-        while let Some(token) = self.tokens.peek(){
-            match token{
+        while let Some(&(ref token, _, _)) = self.tokens.peek() {
+            match token {
                 Token::Add => {
                     self.advance();
                     let right = self.parse_factor();
@@ -312,8 +333,8 @@ impl<'a> Parser<'a> {
     fn parse_compariSON(&mut self) -> Expr {
         let mut expr = self.parse_term();
 
-        while let Some(token) = self.tokens.peek(){
-            match token{
+        while let Some(&(ref token, _, _)) = self.tokens.peek() {
+            match token {
                 Token::More => {
                     self.advance();
                     let right = self.parse_term();
@@ -328,7 +349,7 @@ impl<'a> Parser<'a> {
                     self.advance();
                     let right = self.parse_term();
 
-                    expr = Expr::MoreLessEq  {
+                    expr = Expr::MoreLessEq {
                         left: Box::new(expr),
                         op: MoreLess::Less,
                         right: Box::new(right),
@@ -344,8 +365,8 @@ impl<'a> Parser<'a> {
     fn parse_equality(&mut self) -> Expr {
         let mut expr = self.parse_compariSON();
 
-        while let Some(token) = self.tokens.peek(){
-            match token{
+        while let Some(&(ref token, _, _)) = self.tokens.peek() {
+            match token {
                 Token::IsEqual => {
                     self.advance();
                     let right = self.parse_compariSON();
@@ -367,27 +388,37 @@ impl<'a> Parser<'a> {
                     };
                 }
                 _ => break,
-
             }
         }
         expr
     }
 
-    fn parse_assign (&mut self) -> Expr {
-        if let Some(token) = self.tokens.peek() {
-            if matches!(token, Token::TypeU32 | Token::TypeU16 | Token::TypeU8 | Token::TypeI32 | Token::TypeI16 | Token::TypeI8) {
+    fn parse_assign(&mut self) -> Expr {
+        if let Some(&(ref token, _, _)) = self.tokens.peek() {
+            if matches!(
+                token,
+                Token::TypeU32
+                    | Token::TypeU16
+                    | Token::TypeU8
+                    | Token::TypeI32
+                    | Token::TypeI16
+                    | Token::TypeI8
+                    | Token::TypeBool
+            ) {
                 return self.parse_var_decl();
             }
         }
 
         let lhs = self.parse_equality();
 
-        if self.tokens.peek() == Some(&Token::Equal) {
+        if let Some(&(Token::Equal, _, _)) = self.tokens.peek() {
             self.advance();
 
             match &lhs {
                 Expr::Identifier(_) | Expr::Deref(_) => {}
-                _ => panic!("Invalid lhs value: Only variables or memory addresses can be assigned"),
+                _ => panic!(
+                    "Parser Error: Invalid lhs value: Only variables or memory addresses can be assigned"
+                ),
             }
 
             //Recursively to allow val=val1=5
@@ -403,36 +434,45 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_var_decl(&mut self) -> Expr {
-
-        let ty = match self.advance() {
+        let (next_tok, line, col) = self.tokens.next().expect("Unexpected End of File");
+        let ty = match next_tok {
             Token::TypeU32 => Type::U32,
             Token::TypeU16 => Type::U16,
             Token::TypeU8 => Type::U8,
             Token::TypeI32 => Type::I32,
             Token::TypeI16 => Type::I16,
             Token::TypeI8 => Type::I8,
+            Token::TypeBool => Type::Bool,
 
-            other => panic!("Expected type at the start of declaration, found {:?}", other),
+            other => panic!(
+                "Parser Error: Expected type at the start of declaration, found {:?} at line {}, character {}",
+                other, line, col
+            ),
         };
-        let name = if let Token::Identifier(var_name) = self.advance() {
+
+        let (ident_tok, ident_line, ident_col) =
+            self.tokens.next().expect("Unexpected End of File");
+        let name = if let Token::Identifier(var_name) = ident_tok {
             var_name
         } else {
-            panic!("Expected identifier name after type variable declaration");
+            panic!(
+                "Parser Error: Expected identifier name after type variable declaration, found {:?} at line {}, character {}",
+                ident_tok, ident_line, ident_col
+            );
         };
 
-        if self.tokens.peek() == Some(&Token::Equal) {
+        if let Some(&(Token::Equal, _, _)) = self.tokens.peek() {
             self.advance();
             let initial_expr = self.parse_assign();
 
-            self.expect(Token::Semicolon);
+            //self.expect(Token::Semicolon);
 
             Expr::VarDecl {
                 ty,
                 name,
                 initial: Some(Box::new(initial_expr)),
             }
-        }
-        else {
+        } else {
             self.expect(Token::Semicolon);
             Expr::VarDecl {
                 ty,
@@ -441,27 +481,27 @@ impl<'a> Parser<'a> {
             }
         }
     }
-    
+
     //General, for parsing stmts
     fn parse_stmt(&mut self) -> Stmt {
         match self.tokens.peek() {
-            Some(Token::For) => {
+            Some(&(Token::For, _, _)) => {
                 self.advance();
                 self.parse_for_stmt()
             }
-            Some(Token::While) => {
+            Some(&(Token::While, _, _)) => {
                 self.advance();
                 self.parse_while_stmt()
             }
-            Some(Token::If) => {
+            Some(&(Token::If, _, _)) => {
                 self.advance();
                 self.parse_ifelse_stmt()
             }
-            Some(Token::Inline) => {
+            Some(&(Token::Inline, _, _)) => {
                 self.advance();
                 self.parse_inline_asm()
             }
-            Some(Token::Return) => {
+            Some(&(Token::Return, _, _)) => {
                 self.advance();
                 self.parse_return_stmt()
             }
@@ -485,7 +525,7 @@ impl<'a> Parser<'a> {
         let inc = self.parse_assign();
 
         //Trailing semicolon is optional, so both [true] and [true;] are valid
-        if self.tokens.peek() == Some(&Token::Semicolon) {
+        if let Some(&(Token::Semicolon, _, _)) = self.tokens.peek() {
             self.advance();
         }
 
@@ -493,7 +533,7 @@ impl<'a> Parser<'a> {
         self.expect(Token::LBrace);
 
         let mut body = Vec::new();
-        while let Some(token) = self.tokens.peek() {
+        while let Some(&(ref token, _, _)) = self.tokens.peek() {
             if token == &Token::RBrace {
                 break;
             }
@@ -516,7 +556,7 @@ impl<'a> Parser<'a> {
 
         self.expect(Token::LBrace);
         let mut main_branch = Vec::new();
-        while let Some(token) = self.tokens.peek() {
+        while let Some(&(ref token, _, _)) = self.tokens.peek() {
             if token == &Token::RBrace {
                 break;
             }
@@ -525,17 +565,17 @@ impl<'a> Parser<'a> {
         self.expect(Token::RBrace);
         let mut else_branch = None;
 
-        if self.tokens.peek() == Some(&Token::Else) {
+        if let Some(&(Token::Else, _, _)) = self.tokens.peek() {
             self.advance();
 
-            if self.tokens.peek() == Some(&Token::If) {
+            if let Some(&(Token::If, _, _)) = self.tokens.peek() {
                 self.advance();
                 let buff = self.parse_ifelse_stmt();
                 else_branch = Some(vec![buff]);
             } else {
                 self.expect(Token::LBrace);
                 let mut else_body = Vec::new();
-                while let Some(token) = self.tokens.peek() {
+                while let Some(&(ref token, _, _)) = self.tokens.peek() {
                     if token == &Token::RBrace {
                         break;
                     }
@@ -560,7 +600,7 @@ impl<'a> Parser<'a> {
 
         self.expect(Token::LBrace);
         let mut body = Vec::new();
-        while let Some(token) = self.tokens.peek() {
+        while let Some(&(ref token, _, _)) = self.tokens.peek() {
             if token == &Token::RBrace {
                 break;
             }
@@ -568,14 +608,12 @@ impl<'a> Parser<'a> {
         }
         self.expect(Token::RBrace);
 
-        Stmt::While {
-            cond,
-            body,
-        }
+        Stmt::While { cond, body }
     }
 
     fn parse_return_stmt(&mut self) -> Stmt {
-        if self.tokens.peek() == Some(&Token::Semicolon) { //Empty return for voids
+        if let Some(&(Token::Semicolon, _, _)) = self.tokens.peek() {
+            //Empty return for voids
             self.advance();
             Stmt::Return(None)
         } else {
@@ -588,9 +626,13 @@ impl<'a> Parser<'a> {
     fn parse_inline_asm(&mut self) -> Stmt {
         self.expect(Token::LBracket);
 
-        let inline_string = match self.advance() {
+        let (next_tok, line, col) = self.tokens.next().expect("Unexpected End of File");
+        let inline_string = match next_tok {
             Token::InlineBlock(asm_str) => asm_str,
-            other => panic!("Expected raw asm, but got {:?}", other),
+            other => panic!(
+                "Parser Error: Expected raw asm, but got {:?} at line {}, character {}",
+                other, line, col
+            ),
         };
 
         self.expect(Token::Outline);
@@ -602,35 +644,38 @@ impl<'a> Parser<'a> {
 
     fn parse_call_args(&mut self) -> Vec<Expr> {
         let mut args: Vec<Expr> = Vec::new();
-        if self.tokens.peek() == Some(&Token::RParen) {//Zero args
+        if let Some(&(Token::RParen, _, _)) = self.tokens.peek() {
+            //Zero args
             return args;
         }
 
         loop {
             args.push(self.parse_assign());
 
-            match self.tokens.peek() {
-                Some(&Token::Comma) => {
-                    self.advance();
-                }
-                Some(&Token::RParen) => {
+            let (next_tok, line, col) = self.tokens.next().expect("Unexpected End of File");
+            match next_tok {
+                Token::Comma => {}
+                Token::RParen => {
                     break;
                 }
-                other => panic!("Expected ',' or ')' in function arguments, but found {:?}", other),
+                other => panic!(
+                    "Parser Error: Expected ',' or ')' in function arguments, but found {:?} at line {}, character {}",
+                    other, line, col
+                ),
             }
         }
         args
     }
 
     //Parsing whole program, very top of precedence table
-    fn parse_everything(&mut self) -> Program {
+    pub fn parse_everything(&mut self) -> Program {
         let mut program = Program {
             structs: Vec::new(),
             globals: Vec::new(),
             functions: Vec::new(),
         };
 
-        while let Some(token) = self.tokens.peek() {
+        while let Some(&(ref token, line, col)) = self.tokens.peek() {
             match token {
                 Token::Arch => {
                     self.advance();
@@ -638,13 +683,17 @@ impl<'a> Parser<'a> {
                 }
                 Token::Def => {
                     self.advance();
-                    program.globals.push(self.parse_global());
+                    let var_expr = self.parse_var_decl();
+                    program.globals.push(GlobalDef { decl: var_expr });
                 }
                 Token::Func => {
                     self.advance();
                     program.functions.push(self.parse_function());
                 }
-                other => panic!("Expected global declaration (arch, #def, or func), but found {:?}", other),
+                other => panic!(
+                    "Parser Error: Expected global declaration (arch, #def, or func), but found {:?} at line {}, character {}",
+                    other, line, col
+                ),
             }
         }
         program
@@ -656,81 +705,124 @@ impl<'a> Parser<'a> {
         let to_return: Option<Type>;
         let mut body: Vec<Stmt> = Vec::new();
 
-        if let Some(Token::Identifier(a)) = self.tokens.peek() {
+        if let Some(&(Token::Identifier(ref a), _, _)) = self.tokens.peek() {
             name = a.clone();
             self.advance();
         } else {
-            panic!("Expected function name after func");
+            panic!("Parser Error: Expected function name after func");
         }
 
         self.expect(Token::LParen);
 
-        if self.tokens.peek() == Some(&Token::RParen) { // No params
+        if let Some(&(Token::RParen, _, _)) = self.tokens.peek() {
+            // No params
             self.advance();
         } else {
             loop {
-                if let Some(token) = self.tokens.peek() {
-                    if matches!(token, Token::TypeU32 | Token::TypeU16 | Token::TypeU8 | Token::TypeI32 | Token::TypeI16 | Token::TypeI8) {
-                        let ty = match self.advance() {
-                            Token::TypeU32 => Type::U32,
-                            Token::TypeU16 => Type::U16,
-                            Token::TypeU8 => Type::U8,
-                            Token::TypeI32 => Type::I32,
-                            Token::TypeI16 => Type::I16,
-                            Token::TypeI8 => Type::I8,
-                            _ => unreachable!(),
-                        };
+                let (token, line, col) = self
+                    .tokens
+                    .peek()
+                    .cloned()
+                    .expect("Unexpected EOF in parameters");
 
-                        let param_name = match self.advance() {
-                            Token::Identifier(buff) => buff,
-                            other => panic!("Expected name after type, found {:?}", other),
-                        };
-
-                        params.push(ParamField { ty, name: param_name });
-                    } else {
-                        panic!("Expected parameter type declaration");
-                    }
-                }
-
-                match self.tokens.peek() {
-                    Some(&Token::Comma) => {
-                        self.advance();
-                    }
-                    Some(&Token::RParen) => {
-                        self.advance();
-                        break;
-                    }
-                    other => panic!("Expected ',' or ')' in function parameters, but found {:?}", other),
-                }
-            }
-        }
-
-        if self.tokens.peek() == Some(&Token::ToRet) {
-            self.advance();
-
-            if let Some(token) = self.tokens.peek() {
-                if matches!(token, Token::TypeU32 | Token::TypeU16 | Token::TypeU8 | Token::TypeI32 | Token::TypeI16 | Token::TypeI8) {
-                    to_return = Some(match self.advance() {
+                if matches!(
+                    token,
+                    Token::TypeU32
+                        | Token::TypeU16
+                        | Token::TypeU8
+                        | Token::TypeI32
+                        | Token::TypeI16
+                        | Token::TypeI8
+                        | Token::TypeBool
+                ) {
+                    let (type_tok, _, _) = self.tokens.next().unwrap();
+                    let ty = match type_tok {
                         Token::TypeU32 => Type::U32,
                         Token::TypeU16 => Type::U16,
                         Token::TypeU8 => Type::U8,
                         Token::TypeI32 => Type::I32,
                         Token::TypeI16 => Type::I16,
                         Token::TypeI8 => Type::I8,
+                        Token::TypeBool => Type::Bool,
+                        _ => unreachable!(),
+                    };
+
+                    let (name_tok, name_line, name_col) =
+                        self.tokens.next().expect("Unexpected End of File");
+                    let param_name = match name_tok {
+                        Token::Identifier(buff) => buff,
+                        other => panic!(
+                            "Parser Error: Expected name after type, found {:?} at line {}, character {}",
+                            other, name_line, name_col
+                        ),
+                    };
+
+                    params.push(ParamField {
+                        ty,
+                        name: param_name,
+                    });
+                } else {
+                    panic!(
+                        "Parser Error: Expected parameter type declaration, found {:?} at line {}, character {}",
+                        token, line, col
+                    );
+                }
+
+                let (delim_tok, delim_line, delim_col) =
+                    self.tokens.next().expect("Unexpected End of File");
+                match delim_tok {
+                    Token::Comma => {}
+                    Token::RParen => {
+                        break;
+                    }
+                    other => panic!(
+                        "Parser Error: Expected ',' or ')' in function parameters, but found {:?} at line {}, character {}",
+                        other, delim_line, delim_col
+                    ),
+                }
+            }
+        }
+
+        if let Some(&(Token::ToRet, _, _)) = self.tokens.peek() {
+            self.advance();
+
+            if let Some(&(ref token, line, col)) = self.tokens.peek() {
+                if matches!(
+                    token,
+                    Token::TypeU32
+                        | Token::TypeU16
+                        | Token::TypeU8
+                        | Token::TypeI32
+                        | Token::TypeI16
+                        | Token::TypeI8
+                        | Token::TypeBool
+                ) {
+                    let (ret_tok, _, _) = self.tokens.next().unwrap();
+                    to_return = Some(match ret_tok {
+                        Token::TypeU32 => Type::U32,
+                        Token::TypeU16 => Type::U16,
+                        Token::TypeU8 => Type::U8,
+                        Token::TypeI32 => Type::I32,
+                        Token::TypeI16 => Type::I16,
+                        Token::TypeI8 => Type::I8,
+                        Token::TypeBool => Type::Bool,
                         _ => unreachable!(),
                     });
                 } else {
-                    panic!("Expected return type after =>");
+                    panic!(
+                        "Parser Error: Expected return type after =>, found {:?} at line {}, character {}",
+                        token, line, col
+                    );
                 }
             } else {
-                panic!("Expected return type after =>");
+                panic!("Parser Error: Expected return type after =>, reached End of File");
             }
         } else {
             to_return = None;
         }
 
         self.expect(Token::LBrace);
-        while let Some(token) = self.tokens.peek() {
+        while let Some(&(ref token, _, _)) = self.tokens.peek() {
             if token == &Token::RBrace {
                 break;
             }
@@ -744,5 +836,71 @@ impl<'a> Parser<'a> {
             to_return,
             body,
         }
+    }
+
+    fn parse_arch(&mut self) -> StructDef {
+        let name: String;
+        let mut fields: Vec<ParamField> = Vec::new();
+
+        if let Some(&(Token::Identifier(ref a), _, _)) = self.tokens.peek() {
+            name = a.clone();
+            self.advance();
+        } else {
+            panic!("Parser Error: Expected struct name after arch");
+        }
+        self.expect(Token::LBrace);
+
+        while let Some(&(ref token, line, col)) = self.tokens.peek() {
+            if token == &Token::RBrace {
+                break;
+            }
+            if matches!(
+                token,
+                Token::TypeU32
+                    | Token::TypeU16
+                    | Token::TypeU8
+                    | Token::TypeI32
+                    | Token::TypeI16
+                    | Token::TypeI8
+                    | Token::TypeBool
+            ) {
+                let (type_tok, _, _) = self.tokens.next().unwrap();
+                let ty = match type_tok {
+                    Token::TypeU32 => Type::U32,
+                    Token::TypeU16 => Type::U16,
+                    Token::TypeU8 => Type::U8,
+                    Token::TypeI32 => Type::I32,
+                    Token::TypeI16 => Type::I16,
+                    Token::TypeI8 => Type::I8,
+                    Token::TypeBool => Type::Bool,
+                    _ => unreachable!(),
+                };
+
+                let (name_tok, name_line, name_col) =
+                    self.tokens.next().expect("Unexpected End of File");
+                let field_name = match name_tok {
+                    Token::Identifier(buff) => buff,
+                    other => panic!(
+                        "Parser Error: Expected name after type, found {:?} at line {}, character {}",
+                        other, name_line, name_col
+                    ),
+                };
+
+                fields.push(ParamField {
+                    ty,
+                    name: field_name,
+                });
+                self.expect(Token::Semicolon);
+            } else {
+                panic!(
+                   "Parser Error: Expected field declaration inside struct body, found {:?} at line {}, character {}",
+                    token, line, col
+                );
+            }
+        }
+
+        self.expect(Token::RBrace);
+        self.expect(Token::Semicolon);
+        StructDef { name, fields }
     }
 }

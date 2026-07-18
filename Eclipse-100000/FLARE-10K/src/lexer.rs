@@ -2,7 +2,7 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     Func,
     For,
@@ -57,7 +57,7 @@ pub struct Lexer<'a> {
     chars: Peekable<Chars<'a>>,
     line: usize,
     position: usize,
-    token_queue: Vec<Token>, //For inline
+    token_queue: Vec<(Token, usize, usize)>, //For inline
 }
 
 impl<'a> Lexer<'a> {
@@ -189,16 +189,21 @@ impl<'a> Lexer<'a> {
         let trimmed_asm = raw_asm.trim().to_string();
 
         // Just push needed tokens to the queue, conditions are met anyways
-        self.token_queue.push(Token::LBracket);
-        self.token_queue.push(Token::InlineBlock(trimmed_asm));
-        self.token_queue.push(Token::Outline);
-        self.token_queue.push(Token::RBracket);
-        self.token_queue.push(Token::Semicolon);
+        self.token_queue
+            .push((Token::LBracket, self.line, self.position));
+        self.token_queue
+            .push((Token::InlineBlock(trimmed_asm), self.line, self.position));
+        self.token_queue
+            .push((Token::Outline, self.line, self.position));
+        self.token_queue
+            .push((Token::RBracket, self.line, self.position));
+        self.token_queue
+            .push((Token::Semicolon, self.line, self.position));
     }
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Token;
+    type Item = (Token, usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         if !self.token_queue.is_empty() {
@@ -206,6 +211,8 @@ impl<'a> Iterator for Lexer<'a> {
         }
 
         self.skip_whitespace();
+        let current_line = self.line;
+        let current_pos = self.position;
         let current_char = self.advance()?;
 
         let token = match current_char {
@@ -280,6 +287,6 @@ impl<'a> Iterator for Lexer<'a> {
             }
         };
 
-        Some(token)
+        Some((token, current_line, current_pos))
     }
 }
