@@ -6,7 +6,7 @@ use parser::Parser;
 use std::fs;
 
 fn main() {
-    let input_path = "test.flar";
+    let input_path = "main.flar";
 
     let src = fs::read_to_string(input_path).expect("[Fatal: file not found] you are cooked buddy");
 

@@ -184,7 +184,6 @@ impl<'a> Parser<'a> {
                     // , _, _ are for character and row
                     self.tokens.next();
                     let args = self.parse_call_args();
-                    self.expect(Token::RParen);
                     Expr::FunctionCall { name, args }
                 } else {
                     Expr::Identifier(name)
@@ -434,7 +433,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_var_decl(&mut self) -> Expr {
-        let (next_tok, line, col) = self.tokens.next().expect("Unexpected End of File");
+        let (next_tok, line, col) = self.tokens.next().expect("Unexpected EOF");
         let ty = match next_tok {
             Token::TypeU32 => Type::U32,
             Token::TypeU16 => Type::U16,
@@ -465,15 +464,12 @@ impl<'a> Parser<'a> {
             self.advance();
             let initial_expr = self.parse_assign();
 
-            //self.expect(Token::Semicolon);
-
             Expr::VarDecl {
                 ty,
                 name,
                 initial: Some(Box::new(initial_expr)),
             }
         } else {
-            self.expect(Token::Semicolon);
             Expr::VarDecl {
                 ty,
                 name,
@@ -684,6 +680,7 @@ impl<'a> Parser<'a> {
                 Token::Def => {
                     self.advance();
                     let var_expr = self.parse_var_decl();
+                    self.expect(Token::Semicolon);
                     program.globals.push(GlobalDef { decl: var_expr });
                 }
                 Token::Func => {
