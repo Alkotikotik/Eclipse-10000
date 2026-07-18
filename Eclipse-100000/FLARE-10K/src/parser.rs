@@ -8,6 +8,40 @@ use crate::lexer::Lexer;
 use crate::lexer::Token;
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ParamField {
+    pub ty: Type,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionDef {
+    pub name: String,
+    pub params: Vec<ParamField>,
+    pub to_return: Option<Type>,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructDef {
+    pub name: String,
+    pub fields: Vec<ParamField>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlobalDef {
+    pub ty: Type,
+    pub name: String,
+    pub val: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Program {
+    pub structs: Vec<StructDef>,
+    pub globals: Vec<GlobalDef>,
+    pub functions: Vec<FunctionDef>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     For {
         init: Box<Expr>,
@@ -138,7 +172,7 @@ impl<'a> Parser<'a> {
             Some(Token::Identifier(name)) => {
                 if self.tokens.peek() == Some(&Token::LParen) {
                     self.tokens.next();
-                    let args = self.parse_func();
+                    let args = self.parse_call_args();
                     self.expect(Token::RParen);
                     Expr::FunctionCall { name, args }
                 } else {
@@ -566,7 +600,149 @@ impl<'a> Parser<'a> {
         Stmt::InlineAsm(inline_string)
     }
 
-    fn parse_func(&mut self) -> Stmt {
+    fn parse_call_args(&mut self) -> Vec<Expr> {
+        let mut args: Vec<Expr> = Vec::new();
+        if self.tokens.peek() == Some(&Token::RParen) {//Zero args
+            return args;
+        }
 
+        loop {
+            args.push(self.parse_assign());
+
+            match self.tokens.peek() {
+                Some(&Token::Comma) => {
+                    self.advance();
+                }
+                Some(&Token::RParen) => {
+                    break;
+                }
+                other => panic!("Expected ',' or ')' in function arguments, but found {:?}", other),
+            }
+        }
+        args
+    }
+
+    //Parsing whole program, very top of precedence table
+    fn parse_everything(&mut self) -> Program {
+        let mut program = Program {
+            structs: Vec::new(),
+            globals: Vec::new(),
+            functions: Vec::new(),
+        };
+
+        while let Some(token) = self.tokens.peek() {
+            match token {
+                Token::Arch => {
+                    self.advance();
+                    program.structs.push(self.parse_arch());
+                }
+                Token::Def => {
+                    self.advance();
+                    program.globals.push(self.parse_global());
+                }
+                Token::Func => {
+                    self.advance();
+                    program.functions.push(self.parse_function());
+                }
+                other => panic!("Expected global declaration (arch, #def, or func), but found {:?}", other),
+            }
+        }
+        program
+    }
+
+    fn parse_function(&mut self) -> FunctionDef {
+        let name: String;
+        let mut params: Vec<ParamField> = Vec::new();
+        let to_return: Option<Type>;
+        let mut body: Vec<Stmt> = Vec::new();
+
+        if let Some(Token::Identifier(a)) = self.tokens.peek() {
+            name = a.clone();
+            self.advance();
+        } else {
+            panic!("Expected function name after func");
+        }
+
+        self.expect(Token::LParen);
+
+        if self.tokens.peek() == Some(&Token::RParen) { // No params
+            self.advance();
+        } else {
+            loop {
+                if let Some(token) = self.tokens.peek() {
+                    if matches!(token, Token::TypeU32 | Token::TypeU16 | Token::TypeU8 | Token::TypeI32 | Token::TypeI16 | Token::TypeI8) {
+                        let ty = match self.advance() {
+                            Token::TypeU32 => Type::U32,
+                            Token::TypeU16 => Type::U16,
+                            Token::TypeU8 => Type::U8,
+                            Token::TypeI32 => Type::I32,
+                            Token::TypeI16 => Type::I16,
+                            Token::TypeI8 => Type::I8,
+                            _ => unreachable!(),
+                        };
+
+                        let param_name = match self.advance() {
+                            Token::Identifier(buff) => buff,
+                            other => panic!("Expected name after type, found {:?}", other),
+                        };
+
+                        params.push(ParamField { ty, name: param_name });
+                    } else {
+                        panic!("Expected parameter type declaration");
+                    }
+                }
+
+                match self.tokens.peek() {
+                    Some(&Token::Comma) => {
+                        self.advance();
+                    }
+                    Some(&Token::RParen) => {
+                        self.advance();
+                        break;
+                    }
+                    other => panic!("Expected ',' or ')' in function parameters, but found {:?}", other),
+                }
+            }
+        }
+
+        if self.tokens.peek() == Some(&Token::ToRet) {
+            self.advance();
+
+            if let Some(token) = self.tokens.peek() {
+                if matches!(token, Token::TypeU32 | Token::TypeU16 | Token::TypeU8 | Token::TypeI32 | Token::TypeI16 | Token::TypeI8) {
+                    to_return = Some(match self.advance() {
+                        Token::TypeU32 => Type::U32,
+                        Token::TypeU16 => Type::U16,
+                        Token::TypeU8 => Type::U8,
+                        Token::TypeI32 => Type::I32,
+                        Token::TypeI16 => Type::I16,
+                        Token::TypeI8 => Type::I8,
+                        _ => unreachable!(),
+                    });
+                } else {
+                    panic!("Expected return type after =>");
+                }
+            } else {
+                panic!("Expected return type after =>");
+            }
+        } else {
+            to_return = None;
+        }
+
+        self.expect(Token::LBrace);
+        while let Some(token) = self.tokens.peek() {
+            if token == &Token::RBrace {
+                break;
+            }
+            body.push(self.parse_stmt());
+        }
+        self.expect(Token::RBrace);
+
+        FunctionDef {
+            name,
+            params,
+            to_return,
+            body,
+        }
     }
 }

@@ -13,6 +13,7 @@ pub enum Token {
     Outline,
     Def,
     Return,
+    Arch,
 
     Identifier(String),
     IntLiteral(i32),
@@ -124,6 +125,7 @@ impl<'a> Lexer<'a> {
             "i8" => Token::TypeI8,
             "bool" => Token::TypeBool,
             "#def" => Token::Def,
+            "arch" => Token::Arch,
             "return" => Token::Return,
             "as" => Token::As,
             _ => Token::Identifier(ident),

@@ -83,7 +83,7 @@ module CU(
         PCSrc = 3'b000; GPRsSrc = 2'b00;
         aluOpSel = 2'b00;
 
-        unique case (current_state) //allows for parralellization 
+        unique case (current_state) //allows for parralellization
             FETCH: begin
                 next_state = DECODE;
                 IRWrite = 1;
