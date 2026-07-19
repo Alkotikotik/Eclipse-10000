@@ -34,6 +34,7 @@ pub enum Token {
     Add,
     Sub,
     Asterix,
+    Dot,
     Div,
     Comma,
     Colon,
@@ -42,6 +43,12 @@ pub enum Token {
     More,
     Less,
     Excl,
+
+    Line,
+    Ampersand,
+    Hat,
+    Shl,
+    Shr,
 
     LParen, //()
     RParen,
@@ -53,6 +60,7 @@ pub enum Token {
     InlineBlock(String),
 }
 
+#[derive(Clone)]
 pub struct Lexer<'a> {
     chars: Peekable<Chars<'a>>,
     line: usize,
@@ -228,8 +236,11 @@ impl<'a> Iterator for Lexer<'a> {
             '+' => Token::Add,
             '-' => Token::Sub,
             '*' => Token::Asterix,
-            '<' => Token::Less,
             '/' => Token::Div,
+            '.' => Token::Dot,
+            '^' => Token::Hat,
+            '|' => Token::Line,
+            '&' => Token::Ampersand,
 
             '=' => {
                 if self.peek() == Some(&'=') {
@@ -247,8 +258,19 @@ impl<'a> Iterator for Lexer<'a> {
                     self.advance();
                     self.skip_comment();
                     return self.next();
-                } else {
+                }  else if self.peek() == Some(&'>'){
+                    self.advance();
+                    Token::Shr
+                }  else {
                     Token::More
+                }
+            }
+            '<' => {
+                if self.peek() == Some(&'<') {
+                    self.advance();
+                    Token::Shl
+                } else {
+                    Token::Less
                 }
             }
             '!' => {

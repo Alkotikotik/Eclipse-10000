@@ -1,8 +1,6 @@
 //Parser for FLARE-10K precende table in the main directory of language.
 //Refer to it, it might act as a documentation
 //It is LL(1) recusrsive descent parser
-//use std::iter::Peekable;
-//use std::str::Chars;
 
 use crate::lexer::Lexer;
 use crate::lexer::Token;
@@ -70,6 +68,7 @@ pub enum Type {
     I16,
     I8,
     Bool,
+    Struct(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -84,6 +83,12 @@ pub enum BinaryOpKind {
     Div,
     Add,
     Sub,
+
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    Shl,
+    Shr,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -133,6 +138,10 @@ pub enum Expr {
         name: String,
         initial: Option<Box<Expr>>, //Initial is optional
     },
+    FieldAccess {
+        expr: Box<Expr>, // Allows chaining like a.b.c
+        field: String,
+    },
 }
 
 pub struct Parser<'a> {
@@ -147,8 +156,15 @@ impl<'a> Parser<'a> {
     }
 
     fn advance(&mut self) -> Token {
-        let (tok, line, col) = self.tokens.next().expect("Unexpected End of File");
+        let (tok, _line, _col) = self.tokens.next().expect("Unexpected End of File");
         tok
+    }
+
+    fn peek_two(&mut self) -> Option<Token> {
+        let mut iter_clone = self.tokens.clone();
+        iter_clone.next();
+        
+        iter_clone.next().map(|(tok, _, _)| tok) //Return second one if it exists
     }
 
     fn expect(&mut self, to_expect: Token) {
@@ -179,24 +195,13 @@ impl<'a> Parser<'a> {
         match tok {
             Token::IntLiteral(val) => Expr::IntLiteral(val),
             Token::HexLiteral(val) => Expr::HexLiteral(val),
-            Token::Identifier(name) => {
-                if let Some(&(Token::LParen, _, _)) = self.tokens.peek() {
-                    // , _, _ are for character and row
-                    self.tokens.next();
-                    let args = self.parse_call_args();
-                    Expr::FunctionCall { name, args }
-                } else {
-                    Expr::Identifier(name)
-                }
-            }
+            Token::Identifier(name) => Expr::Identifier(name),
             Token::LBracket => {
-                //Adress can be an expression, eg [5+10]
                 let inner_expr = self.parse_assign();
                 self.expect(Token::RBracket);
                 Expr::Deref(Box::new(inner_expr))
             }
             Token::LParen => {
-                //For parenthisezed math, like (1+5)*2
                 let inner_expr = self.parse_assign();
                 self.expect(Token::RParen);
                 inner_expr
@@ -207,9 +212,44 @@ impl<'a> Parser<'a> {
             ),
         }
     }
+    
+    //Parse function calls and postfixes(field access)
+    fn parse_postfix(&mut self) -> Expr {
+        let mut expr = self.parse_atomic();
+
+        while let Some(&(ref token, line, col)) = self.tokens.peek() {
+            match token {
+                Token::Dot => {
+                    self.advance();
+                    let (next_tok, f_line, f_col) = self.tokens.next().expect("Unexpected EOF after '.'");
+                    if let Token::Identifier(field_name) = next_tok {
+                        expr = Expr::FieldAccess {
+                            expr: Box::new(expr),
+                            field: field_name,
+                        };
+                    } else {
+                        panic!("Parser Error: Expected field ID after after dot, found {:?} at line {}, character {}", next_tok, f_line, f_col);
+                    }
+                }
+                //Function call
+                Token::LParen => {
+                    self.advance();
+                    let args = self.parse_call_args();
+                    
+                    if let Expr::Identifier(name) = expr {
+                        expr = Expr::FunctionCall { name, args };
+                    } else {
+                        panic!("Parser Error: Left-hand side of function call must be an identifier at line {}, character {}", line, col);
+                    }
+                }
+                _ => break,
+            }
+        }
+        expr
+    }
     //Cast works just as in rust, its pretty convinient falls to atomic
     fn parse_cast(&mut self) -> Expr {
-        let mut expr = self.parse_atomic();
+        let mut expr = self.parse_postfix();
 
         if let Some(&(Token::As, _, _)) = self.tokens.peek() {
             self.advance();
@@ -223,6 +263,7 @@ impl<'a> Parser<'a> {
                 Token::TypeI16 => Type::I16,
                 Token::TypeI8 => Type::I8,
                 Token::TypeBool => Type::Bool,
+                Token::Identifier(struct_name) => Type::Struct(struct_name),
 
                 other => panic!(
                     "Parser Error: Expected a type after 'as', found {:?} at line {}, character {}",
@@ -326,11 +367,59 @@ impl<'a> Parser<'a> {
         }
         expr
     }
+    
+    fn parse_shifts(&mut self) -> Expr {
+        let mut expr = self.parse_term();
+
+        while let Some(&(ref token, _, _)) = self.tokens.peek() {
+            let op = match token {
+                Token::Shl => BinaryOpKind::Shl,
+                Token::Shr => BinaryOpKind::Shr,
+                _ => break,
+            };
+            self.advance();
+
+            let right= self.parse_term();
+
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+            }
+        }
+        expr
+    }
+
+    //Parsing regular bitwises, all have same precedence bc them having different ones is kidna
+    //stupid imo
+    fn parse_bitwises(&mut self) -> Expr {
+        let mut expr = self.parse_shifts();
+
+        while let Some(&(ref token, _, _)) = self.tokens.peek() {
+            let op = match token {
+                Token::Ampersand => BinaryOpKind::BitwiseAnd,
+                Token::Line => BinaryOpKind::BitwiseOr,
+                Token::Hat => BinaryOpKind::BitwiseXor,
+                _ => break,
+            };
+            
+            self.advance();
+
+            let right = self.parse_shifts();
+
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+            };
+        }
+        expr
+    }
 
     //Similar again falls to term bc it can be val+val1 < val*val1
     //Also it can technically be val < val1 < val2
     fn parse_compariSON(&mut self) -> Expr {
-        let mut expr = self.parse_term();
+        let mut expr = self.parse_bitwises();
 
         while let Some(&(ref token, _, _)) = self.tokens.peek() {
             match token {
@@ -394,7 +483,7 @@ impl<'a> Parser<'a> {
 
     fn parse_assign(&mut self) -> Expr {
         if let Some(&(ref token, _, _)) = self.tokens.peek() {
-            if matches!(
+            let is_builtin_type = matches!(
                 token,
                 Token::TypeU32
                     | Token::TypeU16
@@ -403,7 +492,13 @@ impl<'a> Parser<'a> {
                     | Token::TypeI16
                     | Token::TypeI8
                     | Token::TypeBool
-            ) {
+            );
+
+            //Its an struct if its identifier followed by another identifier
+            let is_struct_type = matches!(token, Token::Identifier(_))
+                && matches!(self.peek_two(), Some(Token::Identifier(_)));
+
+            if is_builtin_type || is_struct_type {
                 return self.parse_var_decl();
             }
         }
@@ -414,9 +509,9 @@ impl<'a> Parser<'a> {
             self.advance();
 
             match &lhs {
-                Expr::Identifier(_) | Expr::Deref(_) => {}
-                _ => panic!(
-                    "Parser Error: Invalid lhs value: Only variables or memory addresses can be assigned"
+                Expr::Identifier(_) | Expr::Deref(_) | Expr::FieldAccess { .. } => {}
+                other => panic!(
+                    "Parser Error: Invalid lhs value: Only variables or memory addresses can be assigned, found {:?}", other
                 ),
             }
 
@@ -442,6 +537,7 @@ impl<'a> Parser<'a> {
             Token::TypeI16 => Type::I16,
             Token::TypeI8 => Type::I8,
             Token::TypeBool => Type::Bool,
+            Token::Identifier(struct_name) => Type::Struct(struct_name),
 
             other => panic!(
                 "Parser Error: Expected type at the start of declaration, found {:?} at line {}, character {}",
@@ -731,6 +827,7 @@ impl<'a> Parser<'a> {
                         | Token::TypeI16
                         | Token::TypeI8
                         | Token::TypeBool
+                        | Token::Identifier(_)
                 ) {
                     let (type_tok, _, _) = self.tokens.next().unwrap();
                     let ty = match type_tok {
@@ -741,6 +838,8 @@ impl<'a> Parser<'a> {
                         Token::TypeI16 => Type::I16,
                         Token::TypeI8 => Type::I8,
                         Token::TypeBool => Type::Bool,
+                        Token::Identifier(struct_name) => Type::Struct(struct_name),
+
                         _ => unreachable!(),
                     };
 
@@ -793,6 +892,7 @@ impl<'a> Parser<'a> {
                         | Token::TypeI16
                         | Token::TypeI8
                         | Token::TypeBool
+                        | Token::Identifier(_)
                 ) {
                     let (ret_tok, _, _) = self.tokens.next().unwrap();
                     to_return = Some(match ret_tok {
@@ -803,6 +903,7 @@ impl<'a> Parser<'a> {
                         Token::TypeI16 => Type::I16,
                         Token::TypeI8 => Type::I8,
                         Token::TypeBool => Type::Bool,
+                        Token::Identifier(struct_name) => Type::Struct(struct_name),
                         _ => unreachable!(),
                     });
                 } else {
@@ -860,6 +961,7 @@ impl<'a> Parser<'a> {
                     | Token::TypeI16
                     | Token::TypeI8
                     | Token::TypeBool
+                    | Token::Identifier(_)
             ) {
                 let (type_tok, _, _) = self.tokens.next().unwrap();
                 let ty = match type_tok {
@@ -870,6 +972,7 @@ impl<'a> Parser<'a> {
                     Token::TypeI16 => Type::I16,
                     Token::TypeI8 => Type::I8,
                     Token::TypeBool => Type::Bool,
+                    Token::Identifier(struct_name) => Type::Struct(struct_name),
                     _ => unreachable!(),
                 };
 
@@ -890,7 +993,7 @@ impl<'a> Parser<'a> {
                 self.expect(Token::Semicolon);
             } else {
                 panic!(
-                   "Parser Error: Expected field declaration inside struct body, found {:?} at line {}, character {}",
+                    "Parser Error: Expected field declaration inside struct body, found {:?} at line {}, character {}",
                     token, line, col
                 );
             }
