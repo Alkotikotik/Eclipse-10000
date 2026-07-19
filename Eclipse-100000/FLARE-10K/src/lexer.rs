@@ -8,6 +8,7 @@ pub enum Token {
     If,
     Else,
     While,
+    Break,
     Inline,
     Outline,
     Def,
@@ -17,6 +18,8 @@ pub enum Token {
     Identifier(String),
     IntLiteral(i32),
     HexLiteral(u32),
+    BinaryLiteral(u32),
+    BoolLiteral(bool), //1 or 0
 
     TypeU32,
     TypeU16,
@@ -122,6 +125,7 @@ impl<'a> Lexer<'a> {
             "if" => Token::If,
             "else" => Token::Else,
             "while" => Token::While,
+            "break" => Token::Break,
             "inline" => Token::Inline,
             "outline" => Token::Outline,
             "u32" => Token::TypeU32,
@@ -135,6 +139,8 @@ impl<'a> Lexer<'a> {
             "arch" => Token::Arch,
             "return" => Token::Return,
             "as" => Token::As,
+            "true" => Token::BoolLiteral(true),
+            "false" => Token::BoolLiteral(false),
             _ => Token::Identifier(ident),
         }
     }
@@ -155,6 +161,19 @@ impl<'a> Lexer<'a> {
             }
             let val = u32::from_str_radix(&num_str, 16).expect("Invalid hex literal");
             return Token::HexLiteral(val);
+        }
+        if first_char == '0' && self.peek() == Some(&'b') {
+            self.advance();
+            num_str.clear();
+            while let Some(&c) = self.peek() {
+                if c == '0' || c == '1' {
+                    num_str.push(self.advance().unwrap());
+                } else {
+                    break;
+                }
+            }
+            let val = u32::from_str_radix(&num_str, 2).expect("Invalid binary literal");
+            return Token::BinaryLiteral(val);
         }
 
         while let Some(&c) = self.peek() {

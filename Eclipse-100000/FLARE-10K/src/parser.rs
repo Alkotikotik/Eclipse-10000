@@ -56,6 +56,7 @@ pub enum Stmt {
     },
     InlineAsm(String),
     Return(Option<Expr>),
+    Break,
     Expr(Expr), //Assigments or function calls
 }
 
@@ -224,6 +225,8 @@ impl<'a> Parser<'a> {
         match tok {
             Token::IntLiteral(val) => Expr::IntLiteral(val),
             Token::HexLiteral(val) => Expr::HexLiteral(val),
+            Token::BinaryLiteral(val) => Expr::HexLiteral(val),
+            Token::BoolLiteral(val) => {Expr::IntLiteral(if val { 1 } else { 0 })},
             Token::Identifier(name) => Expr::Identifier(name),
             Token::LBracket => {
                 let inner_expr = self.parse_assign();
@@ -505,6 +508,7 @@ impl<'a> Parser<'a> {
                     | Token::TypeI16
                     | Token::TypeI8
                     | Token::TypeBool
+                    | Token::Asterix
             );
 
             //Its an struct if its identifier followed by another identifier
@@ -582,6 +586,11 @@ impl<'a> Parser<'a> {
             Some(&(Token::While, _, _)) => {
                 self.advance();
                 self.parse_while_stmt()
+            }
+            Some(&(Token::Break, _, _)) => {
+                self.advance();
+                self.expect(Token::Semicolon);
+                Stmt::Break
             }
             Some(&(Token::If, _, _)) => {
                 self.advance();
@@ -826,6 +835,7 @@ impl<'a> Parser<'a> {
                         | Token::TypeI8
                         | Token::TypeBool
                         | Token::Identifier(_)
+                        | Token::Asterix
                 ) {
                     let ty = self.match_type();
 
@@ -879,6 +889,7 @@ impl<'a> Parser<'a> {
                         | Token::TypeI8
                         | Token::TypeBool
                         | Token::Identifier(_)
+                        | Token::Asterix
                 ) {
                     to_return = Some(self.match_type());
                 } else {
@@ -937,6 +948,7 @@ impl<'a> Parser<'a> {
                     | Token::TypeI8
                     | Token::TypeBool
                     | Token::Identifier(_)
+                    | Token::Asterix
             ) {
                 let ty = self.match_type();
 
