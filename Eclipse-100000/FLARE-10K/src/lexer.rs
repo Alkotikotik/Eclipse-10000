@@ -1,7 +1,6 @@
 //Lexer - performs lexical analysis on the input file and returns tokens
 use std::iter::Peekable;
 use std::str::Chars;
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     Func,

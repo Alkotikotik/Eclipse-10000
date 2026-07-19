@@ -61,14 +61,11 @@ pub enum Stmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    U32,
-    U16,
-    U8,
-    I32,
-    I16,
-    I8,
+    U8, U16, U32,
+    I8, I16, I32,
     Bool,
     Struct(String),
+    Ptr(Box<Type>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -143,7 +140,6 @@ pub enum Expr {
         field: String,
     },
 }
-
 pub struct Parser<'a> {
     tokens: std::iter::Peekable<Lexer<'a>>,
 }
@@ -163,7 +159,7 @@ impl<'a> Parser<'a> {
     fn peek_two(&mut self) -> Option<Token> {
         let mut iter_clone = self.tokens.clone();
         iter_clone.next();
-        
+
         iter_clone.next().map(|(tok, _, _)| tok) //Return second one if it exists
     }
 
@@ -183,6 +179,39 @@ impl<'a> Parser<'a> {
                 to_expect
             );
         }
+    }
+
+    fn match_type(&mut self) -> Type {
+        let mut pointer_count = 0;
+        //Consume asterixes, can be more than one
+        while let Some(&(Token::Asterix, _, _)) = self.tokens.peek() {
+            self.advance();
+            pointer_count += 1;
+        }
+
+        let (line, col) = match self.tokens.peek() {
+            Some((_, l, c)) => (*l, *c),
+            None => panic!("Parser Error: Unexpected EOF parsing type"),
+        };
+
+        let tok = self.advance();
+        let mut current_type = match tok {
+            Token::TypeU32 => Type::U32,
+            Token::TypeU16 => Type::U16,
+            Token::TypeU8  => Type::U8,
+            Token::TypeI32 => Type::I32,
+            Token::TypeI16 => Type::I16,
+            Token::TypeI8  => Type::I8,
+            Token::TypeBool => Type::Bool,
+            Token::Identifier(name) => Type::Struct(name),
+            other => panic!("Parser Error: Expected type specifier, found {:?} at line {}, character {}", other, line, col),
+        };
+
+        for _ in 0..pointer_count {
+            current_type = Type::Ptr(Box::new(current_type));
+        }
+
+        current_type
     }
 }
 
@@ -212,7 +241,7 @@ impl<'a> Parser<'a> {
             ),
         }
     }
-    
+
     //Parse function calls and postfixes(field access)
     fn parse_postfix(&mut self) -> Expr {
         let mut expr = self.parse_atomic();
@@ -235,7 +264,7 @@ impl<'a> Parser<'a> {
                 Token::LParen => {
                     self.advance();
                     let args = self.parse_call_args();
-                    
+
                     if let Expr::Identifier(name) = expr {
                         expr = Expr::FunctionCall { name, args };
                     } else {
@@ -254,23 +283,7 @@ impl<'a> Parser<'a> {
         if let Some(&(Token::As, _, _)) = self.tokens.peek() {
             self.advance();
 
-            let (next_tok, line, col) = self.tokens.next().expect("Unexpected End of File");
-            let target_type = match next_tok {
-                Token::TypeU32 => Type::U32,
-                Token::TypeU16 => Type::U16,
-                Token::TypeU8 => Type::U8,
-                Token::TypeI32 => Type::I32,
-                Token::TypeI16 => Type::I16,
-                Token::TypeI8 => Type::I8,
-                Token::TypeBool => Type::Bool,
-                Token::Identifier(struct_name) => Type::Struct(struct_name),
-
-                other => panic!(
-                    "Parser Error: Expected a type after 'as', found {:?} at line {}, character {}",
-                    other, line, col
-                ),
-            };
-
+            let target_type = self.match_type(); 
             expr = Expr::Cast {
                 expr: Box::new(expr),
                 target_type,
@@ -367,7 +380,7 @@ impl<'a> Parser<'a> {
         }
         expr
     }
-    
+
     fn parse_shifts(&mut self) -> Expr {
         let mut expr = self.parse_term();
 
@@ -402,7 +415,6 @@ impl<'a> Parser<'a> {
                 Token::Hat => BinaryOpKind::BitwiseXor,
                 _ => break,
             };
-            
             self.advance();
 
             let right = self.parse_shifts();
@@ -418,6 +430,7 @@ impl<'a> Parser<'a> {
 
     //Similar again falls to term bc it can be val+val1 < val*val1
     //Also it can technically be val < val1 < val2
+    #[warn(non_snake_case)] //Very important
     fn parse_compariSON(&mut self) -> Expr {
         let mut expr = self.parse_bitwises();
 
@@ -528,22 +541,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_var_decl(&mut self) -> Expr {
-        let (next_tok, line, col) = self.tokens.next().expect("Unexpected EOF");
-        let ty = match next_tok {
-            Token::TypeU32 => Type::U32,
-            Token::TypeU16 => Type::U16,
-            Token::TypeU8 => Type::U8,
-            Token::TypeI32 => Type::I32,
-            Token::TypeI16 => Type::I16,
-            Token::TypeI8 => Type::I8,
-            Token::TypeBool => Type::Bool,
-            Token::Identifier(struct_name) => Type::Struct(struct_name),
-
-            other => panic!(
-                "Parser Error: Expected type at the start of declaration, found {:?} at line {}, character {}",
-                other, line, col
-            ),
-        };
+        let ty = self.match_type();
 
         let (ident_tok, ident_line, ident_col) =
             self.tokens.next().expect("Unexpected End of File");
@@ -829,19 +827,7 @@ impl<'a> Parser<'a> {
                         | Token::TypeBool
                         | Token::Identifier(_)
                 ) {
-                    let (type_tok, _, _) = self.tokens.next().unwrap();
-                    let ty = match type_tok {
-                        Token::TypeU32 => Type::U32,
-                        Token::TypeU16 => Type::U16,
-                        Token::TypeU8 => Type::U8,
-                        Token::TypeI32 => Type::I32,
-                        Token::TypeI16 => Type::I16,
-                        Token::TypeI8 => Type::I8,
-                        Token::TypeBool => Type::Bool,
-                        Token::Identifier(struct_name) => Type::Struct(struct_name),
-
-                        _ => unreachable!(),
-                    };
+                    let ty = self.match_type();
 
                     let (name_tok, name_line, name_col) =
                         self.tokens.next().expect("Unexpected End of File");
@@ -894,18 +880,7 @@ impl<'a> Parser<'a> {
                         | Token::TypeBool
                         | Token::Identifier(_)
                 ) {
-                    let (ret_tok, _, _) = self.tokens.next().unwrap();
-                    to_return = Some(match ret_tok {
-                        Token::TypeU32 => Type::U32,
-                        Token::TypeU16 => Type::U16,
-                        Token::TypeU8 => Type::U8,
-                        Token::TypeI32 => Type::I32,
-                        Token::TypeI16 => Type::I16,
-                        Token::TypeI8 => Type::I8,
-                        Token::TypeBool => Type::Bool,
-                        Token::Identifier(struct_name) => Type::Struct(struct_name),
-                        _ => unreachable!(),
-                    });
+                    to_return = Some(self.match_type());
                 } else {
                     panic!(
                         "Parser Error: Expected return type after =>, found {:?} at line {}, character {}",
@@ -963,18 +938,7 @@ impl<'a> Parser<'a> {
                     | Token::TypeBool
                     | Token::Identifier(_)
             ) {
-                let (type_tok, _, _) = self.tokens.next().unwrap();
-                let ty = match type_tok {
-                    Token::TypeU32 => Type::U32,
-                    Token::TypeU16 => Type::U16,
-                    Token::TypeU8 => Type::U8,
-                    Token::TypeI32 => Type::I32,
-                    Token::TypeI16 => Type::I16,
-                    Token::TypeI8 => Type::I8,
-                    Token::TypeBool => Type::Bool,
-                    Token::Identifier(struct_name) => Type::Struct(struct_name),
-                    _ => unreachable!(),
-                };
+                let ty = self.match_type();
 
                 let (name_tok, name_line, name_col) =
                     self.tokens.next().expect("Unexpected End of File");
@@ -1001,6 +965,8 @@ impl<'a> Parser<'a> {
 
         self.expect(Token::RBrace);
         self.expect(Token::Semicolon);
+
         StructDef { name, fields }
     }
 }
+
