@@ -67,5 +67,10 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 {
 }
 
 func main(){
-    bootstrap_os(X_BOUND, Y_BOUND);
+
+    PageTableEntry z;
+    z.Entry = 10;
+    z.flags = 11;
+
+    bootstrap_os(X_BOUND, Y_BOUND, &z);
 }

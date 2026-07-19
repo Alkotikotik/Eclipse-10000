@@ -12,7 +12,7 @@ pub struct ParamField {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FunctionDef {
+pub struct FunctionSignature {
     pub name: String,
     pub params: Vec<ParamField>,
     pub to_return: Option<Type>,
@@ -34,7 +34,7 @@ pub struct GlobalDef {
 pub struct Program {
     pub structs: Vec<StructDef>,
     pub globals: Vec<GlobalDef>,
-    pub functions: Vec<FunctionDef>,
+    pub functions: Vec<FunctionSignature>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,6 +104,7 @@ pub enum Expr {
 
     Identifier(String),
     Deref(Box<Expr>),
+    Reference(Box<Expr>),
     FunctionCall {
         name: String,
         args: Vec<Expr>,
@@ -315,6 +316,11 @@ impl<'a> Parser<'a> {
                     op: UnaryOpKind::Not,
                     expr: Box::new(val),
                 }
+            }
+            Some(&(Token::Ampersand, _, _)) => {
+                self.advance();
+                let target = self.parse_atomic();
+                Expr::Reference(Box::new(target))
             }
             _ => self.parse_cast(),
         }
@@ -799,7 +805,7 @@ impl<'a> Parser<'a> {
         program
     }
 
-    fn parse_function(&mut self) -> FunctionDef {
+    fn parse_function(&mut self) -> FunctionSignature {
         let name: String;
         let mut params: Vec<ParamField> = Vec::new();
         let to_return: Option<Type>;
@@ -914,7 +920,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(Token::RBrace);
 
-        FunctionDef {
+        FunctionSignature {
             name,
             params,
             to_return,

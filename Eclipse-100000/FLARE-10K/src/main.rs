@@ -1,8 +1,10 @@
 mod lexer;
 mod parser;
+mod semantic;
 
 use lexer::Lexer;
 use parser::Parser;
+use semantic::Semantic;
 use std::fs;
 
 fn main() {
@@ -25,4 +27,6 @@ fn main() {
 
     println!("Parser Success! Generated AST:");
     println!("{:#?}", ast);
+
+    println!("--- Step whatever: semantic ----");
 }
