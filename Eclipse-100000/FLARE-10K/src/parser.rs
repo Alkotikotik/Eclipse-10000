@@ -154,7 +154,7 @@ impl<'a> Parser<'a> {
     }
 
     fn advance(&mut self) -> Token {
-        let (tok, _line, _col) = self.tokens.next().expect("Unexpected End of File");
+        let (tok, _line, _col) = self.tokens.next().expect("Unexpected EOF");
         tok
     }
 
@@ -206,7 +206,7 @@ impl<'a> Parser<'a> {
             Token::TypeI8  => Type::I8,
             Token::TypeBool => Type::Bool,
             Token::Identifier(name) => Type::Struct(name),
-            other => panic!("Parser Error: Expected type specifier, found {:?} at line {}, character {}", other, line, col),
+            other => panic!("Parser Error: Expected type, found {:?} at line {}, character {}", other, line, col),
         };
 
         for _ in 0..pointer_count {

@@ -12,13 +12,13 @@ fn main() {
 
     let src = fs::read_to_string(input_path).expect("[Fatal: file not found] you are cooked buddy");
 
-    println!("--- Step 1: Lexical Analysis ---");
+    println!("Lexer:");
     let lexer_debug = Lexer::new(&src, 1, 1);
     for token in lexer_debug {
         println!("[ {:?} ]", token);
     }
 
-    println!("\n--- Step 2: Parsing ---");
+    println!("Parser");
     let lexer = Lexer::new(&src, 1, 1);
 
     let mut parser = Parser::new(lexer);
@@ -28,8 +28,8 @@ fn main() {
     println!("Parser Success! Generated AST:");
     println!("{:#?}", ast);
 
-    println!("\n--- Step 3: Semantic Analysis ---");
+    println!("Semantic");
     let mut semantic_analyzer = Semantic::new(&ast);
     semantic_analyzer.check_program(&ast);
-    println!("Semantic Analysis Success! Your code is fully verified.");
+    println!("Semantic Analysis Success, you are not cooked buddy");
 }
