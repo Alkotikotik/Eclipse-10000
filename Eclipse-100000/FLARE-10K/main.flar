@@ -9,7 +9,7 @@ arch PageTableEntry{
 
 func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 {
 
-    >_ bitwises 
+    >_ bitwises
     u32 w = 256;
     u32 r = 2;
     w = w << r;

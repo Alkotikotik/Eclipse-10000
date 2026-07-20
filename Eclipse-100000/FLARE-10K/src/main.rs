@@ -28,5 +28,8 @@ fn main() {
     println!("Parser Success! Generated AST:");
     println!("{:#?}", ast);
 
-    println!("--- Step whatever: semantic ----");
+    println!("\n--- Step 3: Semantic Analysis ---");
+    let mut semantic_analyzer = Semantic::new(&ast);
+    semantic_analyzer.check_program(&ast);
+    println!("Semantic Analysis Success! Your code is fully verified.");
 }
