@@ -1,6 +1,6 @@
 //3AC IR generator, again similar to parser, actually most of compiler parts are very similar
 
-use crate::parser::{Program, FunctionSignature, StructDef, Stmt, Expr, Type};
+use crate::parser::{Program, FunctionSignature, StructDef, Stmt, Expr, Type, MoreLess};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Insts {
@@ -46,14 +46,20 @@ pub enum IRInst {
     Sra { dest: IROperand, left: IROperand, right: IROperand },
 
     Not { dest: IROperand, src: IROperand },
+    Negate { dest: IROperand, src: IROperand},
     Cpy { dest: IROperand, src: IROperand },
+    Cast { dest: IROperand, src: IROperand, target_type: Type },
 
     LoadPtr  { dest: IROperand, ptr_addr: IROperand },
     StorePtr { ptr_addr: IROperand, src: IROperand },
 
+    AntiEqual { left: IROperand, right: IROperand, label: String }, //Branch if false, so they are
+    Equal     { left: IROperand, right: IROperand, label: String }, //Inverted AntiEqual becomes
+    AntiMore  { left: IROperand, right: IROperand, label: String }, //Branch if not equal 
+    AntiLess  { left: IROperand, right: IROperand, label: String }, //Branch if more becomes brach
+                                                                    //If less
     Label(String),
-    Jump(String),
-    JF { cond: IROperand, label: String },
+    JF(String), //Jump if 1 == 1
 
     Call { dest: Option<IROperand>, name: String, args: Vec<IROperand> },
     Return(Option<IROperand>),
@@ -93,15 +99,65 @@ impl IR {
 }
 
 impl IR {
-    fn lower_expr(&mut self, expr: &Expr) -> IROperand {
+    fn reduce_expr(&mut self, expr: &Expr) -> IROperand {
         match expr {
             Expr::IntLiteral(a) => IROperand::SignedConstant(*a),
             Expr::HexLiteral(b) => IROperand::UnsignedConstant(*b),
             Expr::Identifier(name) => IROperand::Var(name.clone()),
 
+            Expr::Deref(mem) => {
+                let ptr_addr = self.reduce_expr(mem);
+                let dest = self.new_temp();
+                self.emit(IRInst::LoadPtr { 
+                    dest: dest.clone(),
+                    ptr_addr
+                });
+                dest
+            }
+
+            Expr::Ref(mem) => {
+                self.lower_lvalue(mem)
+            }
+
+            Expr::FunctionCall(name, argss) => {
+                let dest = self.new_temp();
+                let mut args: Vec<IROperand> = Vec::new();
+
+                for arg in argss {
+                    args.push(self.reduce_expr(arg));
+                }
+                self.emit(IRInst::Call {
+                    dest: dest.clone(),
+                    name,
+                    args,
+                });
+                dest
+            }
+
+            Expr::Cast(expr, target_type) => {
+                dest = self.new_temp();
+                src = self.reduce_expr(expr);
+                self.emit(IRInst::Cast{
+                    dest: dest.clone(),
+                    src,
+                    target_type
+                });
+            }
+
+            Expr::Unary(op, expr) => {
+                dest = self.new_temp();
+                src = self.reduce_expr(expr);
+                let inst = match op {
+                    UnaryOpKind::Not => IRInst::Not {dest: dest.clone(), src: src},
+                    UnaryOpKind::Negate => IRInst::Negate { dest: dest.clone(), src: src},
+                }
+                self.emit(inst);
+                dest
+            }
+
             Expr::Binary {left, op, right} => {
-                let l_op = self.lower_expr(left);
-                let r_op = self.lower_expr(right);
+                let l_op = self.reduce_expr(left);
+                let r_op = self.reduce_expr(right);
                 let dest = self.new_temp();
 
                 let inst = match op {
@@ -120,10 +176,13 @@ impl IR {
             }
 
             Expr::Assign {lhs, rhs} => {
-                let r_op = self.lower_expr(rhs);
+                let r_op = self.reduce_expr(rhs);
                 match lhs.as_ref() {
                     Expr::Identifier(name) => { //Just assign
-                        self.emit(IRInst::Cpy { dest: IROperand::Variable(name.clone()), src: r_op.clone() });
+                        self.emit(IRInst::Cpy {
+                            dest: IROperand::Variable(name.clone()),
+                            src: r_op.clone() 
+                        });
                         r_op
                     }
                     _ => { // Memory location, deref etc
@@ -133,14 +192,42 @@ impl IR {
                     }
                 }
             }
-            Expr::Deref(mem) => {
-                let ptr_addr = self.lower_expr(mem);
-                let dest = self.new_temp();
-                self.emit(IRInst::LoadPtr { dest: dest.clone, ptr_addr});
-                dest
+            //No MoreLessEq bc without cmp just isn't worth it and i still never use something like
+            //a = b<c, nontheless I can still use if to achieve same functionality
+            Expr::VarDecl {ty, name, initial} => {
+                if initial {
+                    let init_op = reduce_expr(initial);
+                    self.emit(IRInst::Cpy {
+                        dest: IROperand::Variable(name),
+                        src: init_op
+                    });
+                }
             }
         }
+    }
 
+    fn reduce_cond(&mut self, expr: &Expr, false_label: String) {
+        match expr {
+            Expr::MoreLessEq { lhs, op, rhs } => {
+                let l_op = self.reduce_expr(lhs);
+                let r_op = self.reduce_expr(rhs);
+                let inst = match op {
+                    MoreLess::Eq    => IRInst::AntiEqual { left: l_op, right: r_op, label: false_label },
+                    MoreLess::NotEq => IRInst::Equal     { left: l_op, right: r_op, label: false_label },
+                    MoreLess::More  => IRInst::AntiMore  { left: l_op, right: r_op, label: false_label },
+                    MoreLess::Less  => IRInst::AntiLess  { left: l_op, right: r_op, label: false_label },
+                };
+                self.emit(inst);
+            }
+            _ => { // For like while [1] or if [c]
+                let cond_op = self.reduce_expr(expr);
+                self.emit(IRInst::Beq {
+                    left: cond_op,
+                    right: IROperand::Constant(0),
+                    label: false_label,
+                });
+            }
+        }
     }
 }
 

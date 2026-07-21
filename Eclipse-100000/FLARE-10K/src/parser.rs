@@ -104,7 +104,7 @@ pub enum Expr {
 
     Identifier(String),
     Deref(Box<Expr>),
-    Reference(Box<Expr>),
+    Ref(Box<Expr>),
     FunctionCall {
         name: String,
         args: Vec<Expr>,
@@ -321,7 +321,7 @@ impl<'a> Parser<'a> {
             Some(&(Token::Ampersand, _, _)) => {
                 self.advance();
                 let target = self.parse_atomic();
-                Expr::Reference(Box::new(target))
+                Expr::Ref(Box::new(target))
             }
             _ => self.parse_cast(),
         }
