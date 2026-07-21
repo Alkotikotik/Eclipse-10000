@@ -1,3 +1,5 @@
+//3AC IR generator
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Insts {
     Add,
@@ -30,7 +32,7 @@ pub enum IROperand {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum IR {
+pub enum IRInst {
     Add { dest: IROperand, left: IROperand, right: IROperand },
     Sub { dest: IROperand, left: IROperand, right: IROperand },
     Mul { dest: IROperand, left: IROperand, right: IROperand },
@@ -41,8 +43,8 @@ pub enum IR {
     And { dest: IROperand, left: IROperand, right: IROperand },
     Sra { dest: IROperand, left: IROperand, right: IROperand },
 
-    Not  { dest: IROperand, src: IROperand },
-    Copy { dest: IROperand, src: IROperand },
+    Not { dest: IROperand, src: IROperand },
+    Cpy { dest: IROperand, src: IROperand },
 
     LoadPtr  { dest: IROperand, ptr_addr: IROperand },
     StorePtr { ptr_addr: IROperand, src: IROperand },
@@ -55,3 +57,36 @@ pub enum IR {
     Return(Option<IROperand>),
     InlineAsm(Vec<String>),
 }
+
+pub struct IR {
+    instsBuffer: Vec<IRInst>,
+    temp_counter: usize,
+}
+
+//Helpers
+impl IR {
+    pub fn new(){
+
+    }
+}
+
+impl IR {
+    fn 
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

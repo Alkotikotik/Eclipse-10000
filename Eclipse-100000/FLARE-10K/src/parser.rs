@@ -146,6 +146,7 @@ pub struct Parser<'a> {
     tokens: std::iter::Peekable<Lexer<'a>>,
 }
 
+//Helpers
 impl<'a> Parser<'a> {
     pub fn new(lexer: Lexer<'a>) -> Self {
         Parser {
