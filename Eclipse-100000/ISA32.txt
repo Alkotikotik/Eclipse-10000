@@ -4,9 +4,8 @@ Format of 32bit instructions
 opcode (6b)| rx0(5b)   |rx1(spare)| (spare/address)
 rx0 = rx0 (operation) rx1
 
-
 ALU instructions:
-000001 : Add 
+000001 : Add
 000011 : Sub
 000111 : LOMUL
 001101 : HIMUL
@@ -18,17 +17,20 @@ ALU instructions:
 001100 : SHR
 001010 : SRA
 
-Memory 
-010001 : LOAD //load instant 
+Memory
+010001 : LOAD //load instant
 100011 : LDR
-100111 : STR 
+100111 : STR
 
-Branching 
-110000 : BEQ 
-110001 : BNE 
+Branching
+110000 : BEQ
+110001 : BNE
 110011 : BS
-110111 : BG 
+110111 : BG
 111111 : JMP
+
+111000 : CALL
+111100 : RET
 
 Privilege and syscalls
 111110 : SYS //SYSCALL

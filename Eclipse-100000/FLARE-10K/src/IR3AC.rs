@@ -125,40 +125,68 @@ impl IR {
         self.insts_buffer.push(inst);
     }
 
-    //Theoretically should have done it in semantic buut idc
-    pub fn get_type_size(&self, ty: &Type) -> usize {
+    //Theoretically should have done it in semantic but idc
+    pub fn get_type_align(&self, ty: &Type) -> usize {
         match ty {
-            Type::U32 | Type::I32 => 4,
-            Type::U16 | Type::I16 => 2,
             Type::U8  | Type::I8 | Type::Bool => 1,
-            Type::Ptr(_) => 4, // For my 32-bit cpu
+            Type::U16 | Type::I16 => 2,
+            Type::U32 | Type::I32 | Type::Ptr(_) => 4,
             Type::Struct(name) => {
                 let struct_def = self.structs.get(name)
-                    .unwrap_or_else(|| panic!("You are cooked buddy unknown struct type: {}", name));
-                    //Basically .expect() but with abily to call
-
+                    .unwrap_or_else(|| panic!("Unknown struct type: {}", name));
                 struct_def.fields.iter()
-                    .map(|f| self.get_type_size(&f.ty))
-                    .sum()
+                    .map(|f| self.get_type_align(&f.ty))
+                    .max()
+                    .unwrap_or(1)
             }
         }
     }
 
+    //Calculate size based on padding and types
+    pub fn get_type_size(&self, ty: &Type) -> usize {
+        match ty {
+            Type::U32 | Type::I32 | Type::Ptr(_) => 4,
+            Type::U16 | Type::I16 => 2,
+            Type::U8  | Type::I8 | Type::Bool => 1,
+            Type::Struct(name) => {
+                let struct_def = self.structs.get(name)
+                    .unwrap_or_else(|| panic!("Unknown struct type: {}", name));
+
+                let mut current_offset = 0;
+                let mut max_align = 1;
+
+                for field in &struct_def.fields {
+                    let field_align = self.get_type_align(&field.ty);
+                    if field_align > max_align {
+                        max_align = field_align;
+                    }
+                    current_offset = align_to(current_offset, field_align);
+                    current_offset += self.get_type_size(&field.ty);
+                }
+
+                align_to(current_offset, max_align)
+            }
+        }
+    }
+    
+    //Get offset of specific field
     pub fn get_field_offset(&self, struct_name: &str, target_field: &str) -> usize {
         let struct_def = self.structs.get(struct_name)
             .unwrap_or_else(|| panic!("Unknown struct: {}", struct_name));
 
         let mut offset = 0;
         for field in &struct_def.fields {
+            let field_align = self.get_type_align(&field.ty);
+            offset = align_to(offset, field_align);
+
             if field.name == target_field {
-                return offset; //Field has been found
+                return offset;
             }
-            //Otherwise continue
             offset += self.get_type_size(&field.ty);
         }
-        panic!("Field {} not found in struct {}", target_field, struct_name);
+        panic!("Field {} not found in the struct {}", target_field, struct_name);
     }
-    
+
     //For field access
     fn infer_type(&self, expr: &Expr) -> Type {
         match expr {
@@ -551,4 +579,12 @@ impl IR {
             _ => panic!("Invalid l-value"),
         }
     }
+}
+
+#[inline] //Didn't know rust had inlines until now
+fn align_to(offset: usize, align: usize) -> usize {
+    if align == 0 {
+        return offset;
+    }
+    (offset + align - 1) & !(align - 1)
 }

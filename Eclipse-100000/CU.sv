@@ -43,7 +43,7 @@ module CU(
         EXCEPTION,
         TIMER_INTERRUPT,
         MEM_FAULT,
-        STORE
+        STORE,
     } fsm_states;
 
     fsm_states current_state, next_state;
@@ -107,7 +107,7 @@ module CU(
                     2'b00: next_state = ALU_EXE;
                     2'b11: next_state = BRANCH;
                     2'b01: next_state = LOAD;
-                    
+
                     2'b10: begin //Calculating effective address during decode bc otherwise ALU is just chilling
                         unique case(opcode)
                             6'b100111: next_state = STORE;
@@ -117,14 +117,29 @@ module CU(
                     end
                     default: next_state = ALU_EXE;
                 endcase
-                if(opcode == 6'b111110) //SYS
-                    next_state = EXCEPTION;
-                if(opcode == 6'b111101) begin //RETU 
-                    isKernelMode = 0;
-                    PCSrc = 3'b011;
-                    PCWrite = 1;
-                    next_state = FETCH;
-                end
+
+                unique case (opcode)
+                    6'b111110: next_state = EXCEPTION; //SYS
+                    6'b111101: begin //RETU
+                        isKernelMode = 0;
+                        PCSrc = 3'b011;
+                        PCWrite = 1;
+                        next_state = FETCH;
+                    end
+                    6'b111000: begin //CALL
+                        next_state = FETCH;
+                        GPRsSrc   = 2'b10;
+                        GPRsWrite = 1'b1;
+
+                        PCSrc   = 3'b000;
+                        PCWrite = 1'b1;
+                    end
+                    6'b111100: begin //RET 
+                        next_state = FETCH;
+                        PCSrc   = 3'b111; //RegX
+                        PCWrite = 1'b1;
+                    end
+                endcase
             end
             ALU_EXE: begin
                 next_state = FETCH;

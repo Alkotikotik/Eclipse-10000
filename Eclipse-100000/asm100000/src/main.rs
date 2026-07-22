@@ -80,8 +80,8 @@ fn main() -> io::Result<()> {
     opcodes.insert("JMP", 0b111111);
     opcodes.insert("SYS", 0b111110);
     opcodes.insert("RETU", 0b111101);
-    opcodes.insert("PUSH", 0b101000);
-    opcodes.insert("POP", 0b101001);
+    opcodes.insert("CALL", 0b111100);
+    opcodes.insert("RET", 0b111011);
 
     let mut output_file = File::create(output_path)?;
 
@@ -174,6 +174,34 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
+            "CALL" => {
+                if tokens.len() == 2 {
+                    rx0 = 29;
+                    let target = tokens[1].trim_start_matches('~');
+                    if let Some(&label_addr) = labels.get(target) {
+                        let offset = (label_addr as i32) - ((current_pc + 4) as i32);
+                        immediate = offset as u32;
+                    } else {
+                        immediate = target.parse::<u32>().unwrap_or(0);
+                    }
+                } else if tokens.len() > 2 {
+                    rx0 = parse_reg(tokens[1]);
+                    let target = tokens[2].trim_start_matches('~');
+                    if let Some(&label_addr) = labels.get(target) {
+                        let offset = (label_addr as i32) - ((current_pc + 4) as i32);
+                        immediate = offset as u32;
+                    } else {
+                        immediate = target.parse::<u32>().unwrap_or(0);
+                    }
+                }
+            }
+            "RET" => {
+                if tokens.len() > 1 {
+                    rx0 = parse_reg(tokens[1]);
+                } else {
+                    rx0 = 29;
+                }
+            }
             _ => {
                 if tokens.len() > 1 {
                     rx0 = parse_reg(tokens[1]);
@@ -181,20 +209,6 @@ fn main() -> io::Result<()> {
                 if tokens.len() > 2 {
                     rx1 = parse_reg(tokens[2]);
                 }
-            }
-            "PUSH" => {
-                if tokens.len() > 1 {
-                    rx0 = parse_reg(tokens[1]);
-                }
-                rx1 = 31;
-                immediate = (-4_i32) as u32;
-            }
-            "POP" => {
-                if tokens.len() > 1 {
-                    rx0 = parse_reg(tokens[1]);
-                }
-                rx1 = 31;
-                immediate = 4;
             }
         }
 
@@ -216,7 +230,10 @@ fn parse_reg(reg_str: &str) -> u32 {
         return 31;
     }
     else if upper == "KRX"{
-        return 1;
+        return 30;
+    }
+    else if upper == "LR" || upper == "RA" {
+        return 29;
     }
     let clean = upper.trim_start_matches(|c| c == 'R' || c == 'X');
     clean.parse::<u32>().unwrap_or(0)

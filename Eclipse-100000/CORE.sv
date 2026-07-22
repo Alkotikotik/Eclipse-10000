@@ -52,7 +52,7 @@ module CORE(
     logic [2:0] CompactedFlags;
 
     logic [31:0] ram_data_out;
-    
+
     logic RAM_cs; //Chip select
     logic VRAM_cs;
     logic IO_cs;
@@ -60,8 +60,8 @@ module CORE(
     logic [15:0] mmio_timer_reg;
 
     logic [31:0] active_address;
-    
-    
+
+
     //Breaking instruction down
     assign opcode = IR[31:26];
     assign rx0 = IR[25:21];
@@ -69,7 +69,7 @@ module CORE(
     assign immediate = IR[15:0];
 
     assign active_address = (IRWrite) ? PC : memTarget;
-    
+
     assign memTarget = (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY;
     assign memViolation = (!KernelMode && (memRead || memWrite) &&
                           ((active_address < memBase) ||
@@ -98,6 +98,7 @@ module CORE(
             3'b100: PCNext = 32'h00000068; // Timer Vector
             3'b101: PCNext = 32'h0000006C; // Illegal Opcode Fault Vector
             3'b110: PCNext = 32'h00000070; // Memory Protection Fault Vector
+            3'b111: PCNext = RegX;
             default: PCNext = AluResult;
         endcase
     end
@@ -111,7 +112,7 @@ module CORE(
             RegY <= 32'd0;
             EA <= 32'd0;
             KernelMode <= 1;
-            
+
             memBase    <= 32'h0;
             memLimit   <= 32'hFFFFFFFF;
             mmio_timer_reg <= 16'd10000;
@@ -145,7 +146,7 @@ module CORE(
             default: AluOpcode = 6'b000001;
         endcase
     end
-    
+
     //First 2GB(0x00000000 - 0x00000000) - regular RAM
     //Next 1MB(0x80000000 - 0x800FFFFF) - VRAM
     //Then I/O registers
@@ -187,7 +188,8 @@ module CORE(
     end
 
     assign GPRs_data_in = (GPRsSrc == 2'b01) ? cpu_mem_data_out :
-                          (GPRsSrc == 2'b11) ? { {16{immediate[15]}}, immediate } : AluResult;
+                      (GPRsSrc == 2'b10) ? PC :
+                      (GPRsSrc == 2'b11) ? sign_ext_imm : AluResult;
     
     CU control_unit (
         .clk(clk),
