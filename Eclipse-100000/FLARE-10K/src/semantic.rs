@@ -120,7 +120,7 @@ impl Semantic {
                 }
             }
 
-            Expr::Reference(inner_expr) => {
+            Expr::Ref(inner_expr) => {
                 let inner_type = self.check_expr(inner_expr, line, character);
                 Type::Ptr(Box::new(inner_type))
             }
@@ -303,25 +303,6 @@ impl Semantic {
 }
 
 impl GlobalEnv {
-    fn get_type_size(ty: &Type, structs: &HashMap<String, StructDef>) -> usize {
-        match ty {
-            Type::U32 | Type::I32 => 4,
-            Type::U16 | Type::I16 => 2,
-            Type::U8  | Type::I8  => 1,
-            Type::Bool => 1,
-            Type::Ptr(_) => 4, // For my 32bit cpu
-            Type::Struct(name) => {
-                let struct_def = structs.get(name)
-                    .expect(&format!("You are cooked buddy {}", name));
-
-                let mut total = 0;
-                for field in &struct_def.fields {
-                    total += Self::get_type_size(&field.ty, structs);
-                }
-                total
-            }
-        }
-    }
 
     fn build_global_env(program: &Program) -> GlobalEnv {
         let mut env = GlobalEnv {

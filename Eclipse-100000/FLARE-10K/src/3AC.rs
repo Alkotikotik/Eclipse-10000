@@ -56,10 +56,10 @@ pub enum IRInst {
     AntiEqual { left: IROperand, right: IROperand, label: String }, //Branch if false, so they are
     Equal     { left: IROperand, right: IROperand, label: String }, //Inverted AntiEqual becomes
     AntiMore  { left: IROperand, right: IROperand, label: String }, //Branch if not equal 
-    AntiLess  { left: IROperand, right: IROperand, label: String }, //Branch if more becomes brach
+    AntiLess  { left: IROperand, right: IROperand, label: String }, //Branch if more becomes branch
                                                                     //If less
     Label(String),
-    JF(String), //Jump if 1 == 1
+    JMP(String), //Jump if 1 == 1
 
     Call { dest: Option<IROperand>, name: String, args: Vec<IROperand> },
     Return(Option<IROperand>),
@@ -69,13 +69,29 @@ pub enum IRInst {
 pub struct IR {
     instsBuffer: Vec<IRInst>,
     temp_counter: usize,
-    label_couter: usize,
+    label_counter: usize,
+
+    structs: HashMap<String, StructDef>,
+    var_types: HashMap<String, Type>,
+    loop_exit_stack: Vec<String>,
 }
 
 //Helpers
 impl IR {
-    pub fn new(){
+    pub fn new(program: &Program) -> Self {
+        let mut structs = HashMap::new();
+        for s in &program.structs {
+            structs.insert(s.name.clone(), s.clone());
+        }
 
+        Self {
+            insts_buffer: Vec::new(),
+            temp_counter: 0,
+            label_counter: 0,
+            structs,
+            var_types: HashMap::new(),
+            loop_exit_stack: Vec::new(),
+        }
     }
     pub fn new_temp(&mut self) -> IROperand{
         let buff = IROperand::Temp(self.temp_counter)
@@ -91,11 +107,67 @@ impl IR {
         buff
     }
     pub fn reset_labels(&mut self) {
-        self.label_couter = 0;
+        self.label_counter = 0;
     }
     pub fn emit(&mut self inst: IRInst) {
         self.instsBuffer.push(inst);
     }
+
+    //Theoretically should have done it in semantic buut idc
+    pub fn get_type_size(&self, ty: &Type) -> usize {
+        match ty {
+            Type::U32 | Type::I32 => 4,
+            Type::U16 | Type::I16 => 2,
+            Type::U8  | Type::I8 | Type::Bool => 1,
+            Type::Ptr(_) => 4, // For my 32-bit cpu
+            Type::Struct(name) => {
+                let struct_def = self.structs.get(name)
+                    .unwrap_or_else(|| panic!("You are cooked buddy unknown struct type: {}", name));
+                    //Basically .expect() but with abily to call
+
+                struct_def.fields.iter()
+                    .map(|f| self.get_type_size(&f.ty))
+                    .sum()
+            }
+        }
+    }
+
+    pub fn get_field_offset(&self, struct_name: &str, target_field: &str) -> usize {
+        let struct_def = self.structs.get(struct_name)
+            .unwrap_or_else(|| panic!("Unknown struct: {}", struct_name));
+
+        let mut offset = 0;
+        for field in &struct_def.fields {
+            if field.name == target_field {
+                return offset; //Field has been found
+            }
+            //Otherwise continue
+            offset += self.get_type_size(&field.ty);
+        }
+        panic!("Field {} not found in struct {}", target_field, struct_name);
+    }
+    
+    //For field access
+    fn infer_type(&self, expr: &Expr) -> Type {
+        match expr {
+            Expr::Identifier(name) => self.var_types.get(name).cloned()
+                .unwrap_or_else(|| panic!("Unknown variable {}", name)),
+            //No derefs bc no way im field accessing deref
+            Expr::FieldAccess { expr, field } => {
+                let parent_ty = self.infer_type(expr);
+                if let Type::Struct(struct_name) = parent_ty {
+                    let s_def = &self.structs[&struct_name];
+                    let f_def = s_def.fields.iter().find(|f| f.name == *field).unwrap();
+                    f_def.ty.clone()
+                } else {
+                    panic!("Field access on non-struct(unreachable)"); //Theoretically unreachable byt who knows
+                }
+            },
+            _ => panic!("Weird field access");
+        }
+    }
+}
+
 }
 
 impl IR {
@@ -180,7 +252,7 @@ impl IR {
                 match lhs.as_ref() {
                     Expr::Identifier(name) => { //Just assign
                         self.emit(IRInst::Cpy {
-                            dest: IROperand::Variable(name.clone()),
+                            dest: IROperand::Var(name.clone()),
                             src: r_op.clone() 
                         });
                         r_op
@@ -194,14 +266,27 @@ impl IR {
             }
             //No MoreLessEq bc without cmp just isn't worth it and i still never use something like
             //a = b<c, nontheless I can still use if to achieve same functionality
-            Expr::VarDecl {ty, name, initial} => {
-                if initial {
-                    let init_op = reduce_expr(initial);
+            Expr::VarDecl { ty, name, initial } => {
+                self.var_types.insert(name.clone(), ty.clone());
+
+                if let Some(init_expr) = initial {
+                    let init_op = self.reduce_expr(init_expr);
                     self.emit(IRInst::Cpy {
-                        dest: IROperand::Variable(name),
-                        src: init_op
+                        dest: IROperand::Var(name.clone()),
+                        src: init_op,
                     });
                 }
+                IROperand::Var(name.clone())
+            }
+
+            Expr::FieldAccess {expr, field} => {
+                let addr = self.lower_lvalue(expr);
+                let dest = self.new_temp();
+                self.emit(IRInst::LoadPtr {
+                    dest: dest.clone(),
+                    ptr_addr: addr,
+                });
+                dest
             }
         }
     }
@@ -219,7 +304,7 @@ impl IR {
                 };
                 self.emit(inst);
             }
-            _ => { // For like while [1] or if [c]
+            _ => { // For like "while [1]{}" or "if [c]{}"
                 let cond_op = self.reduce_expr(expr);
                 self.emit(IRInst::Beq {
                     left: cond_op,
@@ -229,21 +314,36 @@ impl IR {
             }
         }
     }
+
+    fn lower_lvalue(&mut self, expr: &Expr) -> IROperand {
+        match expr {
+            Expr::Identifier(name) => {
+                IROperand::Var(name.clone())
+            }
+
+            Expr::Deref(ptr_expr) => {
+                self.reduce_expr(ptr_expr)
+            }
+
+            Expr::FieldAccess {expr, field} => {
+                let base_addr = self.lower_lvalue(expr);
+
+                let struct_name = match parent_type {
+                    Type::Struct(name) => name,
+                    _ => panic!("Field access on non-struct(reachable)"),
+                };
+                let offset = self.get_field_offset(struct_name, field);
+
+                let dest = self.new_temp();
+                self.emit(IRInst::Add {
+                    dest: dest.clone(),
+                    left: base_addr,
+                    right: IROperand::UnsignedConstant(offset as u32),
+                });
+                dest
+            }
+
+            _ => panic!("Expression is not a valid lvalue"),
+        }
+    }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
