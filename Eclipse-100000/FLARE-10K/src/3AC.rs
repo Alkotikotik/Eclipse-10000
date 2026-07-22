@@ -291,6 +291,96 @@ impl IR {
         }
     }
 
+    fn reduce_stmt(&mut self, stmt: &Stmt) {
+        match stmt{
+            Stmt::Expr(a) => self.reduce_expr(a),
+            Stmt::Return(expr) => {
+                let ret_val = expr.as_ref().map(|a| self.reduce_expr(a));
+                self.emit(IRInst::Return(ret_val));
+            }
+            Stmt::For{init, cond, inc, body} => {
+                let start_label = self.new_label("for_start");
+                let end_label = self.new_label("for_end");
+
+                self.reduce_expr(init);
+                self.emit(IRInst::Label(start_label.clone()));
+
+                self.reduce_cond(cond, end_label.clone());
+
+                //For break
+                self.loop_exit_stack.push(end_label.clone());
+
+                for stmt in body {
+                    self.reduce_stmt(stmt);
+                }
+                loop_exit_stack.pop();
+                self.reduce_expr(inc);
+
+                self.emit(IRInst::JMP(start_label));
+                self.emit(IRInst::Label(end_label));
+            }
+
+            Stmt::While {cond, body} => {
+                let start_label = self.new_label("while_start");
+                let end_label = self.new_label("while_end");
+
+                self.emit(IRInst::Label(start_label.clone()));
+                //Jump past if false
+                self.reduce_cond(cond, end_label.clone());
+
+                //For breaks
+                self.loop_exit_stack.push(end_label.clone());
+
+                for stmt in body {
+                    self.reduce_stmt(stmt);
+                }
+
+                self.loop_exit_stack.pop();
+
+                self.emit(IRInst::JMP(start_label));
+                self.emit(IRInst::Label(end_label));
+            }
+            Stmt::IfElse {cond, main_branch, else_branch} => {
+                let else_label = self.new_label("else");
+                let end_label = self.new_label("endif");
+
+                //If false jump to else
+                let target_label = if else_branch.is_some() {
+                    else_label.clone()
+                } else {
+                    end_label.clone()
+                };
+                self.reduce_cond(cond, target_label);
+
+                for stmt in main_branch {
+                    self.reduce_stmt(stmt);
+                }
+
+                //If there is else branch jump past it if "if" was true
+                if let Some(else_stmts) = else_branch {
+                    self.emit(IRInst::JMP(end_label.clone()));
+                    self.emit(IRInst::Label(else_label));
+
+                    for stmt in else_stmts {
+                        self.reduce_stmt(stmt);
+                    }
+                }
+                self.emit(IRInst::Label(end_label));
+            }
+            Stmt::Break => {
+                if let Some(target) = self.loop_exit_stack.last() {
+                    self.emit(IRInst::JMP(target.clone()));
+                } else {
+                    panic!("Break outside valid scope");
+                }
+            }
+            Stmt::InlineAsm(block) => {
+                let lines = block.lines().map(|s| s.trim().to_string()).collect();
+                self.emit(IRInst::InlineAsm(lines));
+            }
+        }
+    }
+
     fn reduce_cond(&mut self, expr: &Expr, false_label: String) {
         match expr {
             Expr::MoreLessEq { lhs, op, rhs } => {
