@@ -1,10 +1,12 @@
 mod lexer;
 mod parser;
 mod semantic;
+mod IR3AC;
 
 use lexer::Lexer;
 use parser::Parser;
 use semantic::Semantic;
+use IR3AC::IR;
 use std::fs;
 
 fn main() {
@@ -32,4 +34,9 @@ fn main() {
     let mut semantic_analyzer = Semantic::new(&ast);
     semantic_analyzer.check_program(&ast);
     println!("Semantic Analysis Success, you are not cooked buddy");
+
+    println!("Intermediate Representation (3AC):");
+    let mut ir_generator = IR::new(&ast);
+    let ir_program = ir_generator.reduce_everything(&ast);
+    println!("{:#?}", ir_program);
 }

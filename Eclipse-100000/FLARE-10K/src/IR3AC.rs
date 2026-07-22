@@ -1,6 +1,6 @@
 //3AC IR generator, again similar to parser, actually most of compiler parts are very similar
-
-use crate::parser::{Program, FunctionSignature, StructDef, Stmt, Expr, Type, MoreLess};
+use crate::parser::{Program, FunctionSignature, StructDef, Stmt, Expr, Type, MoreLess, BinaryOpKind, UnaryOpKind};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Insts {
@@ -43,7 +43,6 @@ pub enum IRInst {
     Xor { dest: IROperand, left: IROperand, right: IROperand },
     Or  { dest: IROperand, left: IROperand, right: IROperand },
     And { dest: IROperand, left: IROperand, right: IROperand },
-    Sra { dest: IROperand, left: IROperand, right: IROperand },
 
     Not { dest: IROperand, src: IROperand },
     Negate { dest: IROperand, src: IROperand},
@@ -66,8 +65,21 @@ pub enum IRInst {
     InlineAsm(Vec<String>),
 }
 
+#[derive(Debug, Clone)]
+pub struct IRFunction {
+    pub name: String,
+    pub params: Vec<String>,
+    pub body: Vec<IRInst>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IRProgram {
+    pub globals: Vec<Expr>,
+    pub functions: Vec<IRFunction>,
+}
+
 pub struct IR {
-    instsBuffer: Vec<IRInst>,
+    insts_buffer: Vec<IRInst>,
     temp_counter: usize,
     label_counter: usize,
 
@@ -93,8 +105,8 @@ impl IR {
             loop_exit_stack: Vec::new(),
         }
     }
-    pub fn new_temp(&mut self) -> IROperand{
-        let buff = IROperand::Temp(self.temp_counter)
+    pub fn new_temp(&mut self) -> IROperand {
+        let buff = IROperand::Temp(self.temp_counter);
         self.temp_counter += 1;
         buff
     }
@@ -109,8 +121,8 @@ impl IR {
     pub fn reset_labels(&mut self) {
         self.label_counter = 0;
     }
-    pub fn emit(&mut self inst: IRInst) {
-        self.instsBuffer.push(inst);
+    pub fn emit(&mut self, inst: IRInst) {
+        self.insts_buffer.push(inst);
     }
 
     //Theoretically should have done it in semantic buut idc
@@ -152,7 +164,17 @@ impl IR {
         match expr {
             Expr::Identifier(name) => self.var_types.get(name).cloned()
                 .unwrap_or_else(|| panic!("Unknown variable {}", name)),
-            //No derefs bc no way im field accessing deref
+
+            Expr::Deref(inner) => {
+                let inner_ty = self.infer_type(inner);
+                match inner_ty {
+                    Type::Ptr(target_ty) => *target_ty,
+                    Type::U32 | Type::U16 | Type::U8 => Type::U32,
+                    Type::Struct(s) => Type::Struct(s),
+                    _ => panic!("Cannot dereference type {:?}", inner_ty),
+                }
+            },
+
             Expr::FieldAccess { expr, field } => {
                 let parent_ty = self.infer_type(expr);
                 if let Type::Struct(struct_name) = parent_ty {
@@ -160,14 +182,13 @@ impl IR {
                     let f_def = s_def.fields.iter().find(|f| f.name == *field).unwrap();
                     f_def.ty.clone()
                 } else {
-                    panic!("Field access on non-struct(unreachable)"); //Theoretically unreachable byt who knows
+                    panic!("Field access on non-struct type {:?}", parent_ty); //Theoretically
+                    //unreachable but who knows
                 }
             },
-            _ => panic!("Weird field access");
+            _ => panic!("Error expression in infer_type: {:?}", expr),
         }
     }
-}
-
 }
 
 impl IR {
@@ -191,38 +212,41 @@ impl IR {
                 self.lower_lvalue(mem)
             }
 
-            Expr::FunctionCall(name, argss) => {
+            Expr::FunctionCall {name, args} => {
                 let dest = self.new_temp();
-                let mut args: Vec<IROperand> = Vec::new();
+                let mut reduced_args = Vec::new();
 
-                for arg in argss {
-                    args.push(self.reduce_expr(arg));
+                for arg in args {
+                    reduced_args.push(self.reduce_expr(arg));
                 }
+
                 self.emit(IRInst::Call {
+                    dest: Some(dest.clone()),
+                    name: name.clone(),
+                    args: reduced_args,
+                });
+
+                dest
+            }
+
+            Expr::Cast { expr, target_type } => {
+                let dest = self.new_temp();
+                let src = self.reduce_expr(expr);
+                self.emit(IRInst::Cast {
                     dest: dest.clone(),
-                    name,
-                    args,
+                    src,
+                    target_type: target_type.clone(),
                 });
                 dest
             }
 
-            Expr::Cast(expr, target_type) => {
-                dest = self.new_temp();
-                src = self.reduce_expr(expr);
-                self.emit(IRInst::Cast{
-                    dest: dest.clone(),
-                    src,
-                    target_type
-                });
-            }
-
-            Expr::Unary(op, expr) => {
-                dest = self.new_temp();
-                src = self.reduce_expr(expr);
+            Expr::Unary { op, expr } => {
+                let dest = self.new_temp();
+                let src = self.reduce_expr(expr);
                 let inst = match op {
-                    UnaryOpKind::Not => IRInst::Not {dest: dest.clone(), src: src},
-                    UnaryOpKind::Negate => IRInst::Negate { dest: dest.clone(), src: src},
-                }
+                    UnaryOpKind::Not => IRInst::Not { dest: dest.clone(), src },
+                    UnaryOpKind::Negate => IRInst::Negate { dest: dest.clone(), src },
+                };
                 self.emit(inst);
                 dest
             }
@@ -241,7 +265,7 @@ impl IR {
                     BinaryOpKind::BitwiseAnd => IRInst::And { dest: dest.clone(), left: l_op, right: r_op },
                     BinaryOpKind::BitwiseOr  => IRInst::Or  { dest: dest.clone(), left: l_op, right: r_op },
                     BinaryOpKind::BitwiseXor => IRInst::Xor { dest: dest.clone(), left: l_op, right: r_op },
-                    _ => panic!("Division isn't implemented yet");
+                    _ => panic!("Division isn't implemented yet"),
                 };
                 self.emit(inst);
                 dest
@@ -279,7 +303,7 @@ impl IR {
                 IROperand::Var(name.clone())
             }
 
-            Expr::FieldAccess {expr, field} => {
+            Expr::FieldAccess {expr, ..} => {
                 let addr = self.lower_lvalue(expr);
                 let dest = self.new_temp();
                 self.emit(IRInst::LoadPtr {
@@ -288,12 +312,30 @@ impl IR {
                 });
                 dest
             }
+            _ => panic!("Unsupported expression format"),
         }
     }
 
     fn reduce_stmt(&mut self, stmt: &Stmt) {
-        match stmt{
-            Stmt::Expr(a) => self.reduce_expr(a),
+        match stmt {
+            Stmt::Expr(expr) => {
+                match expr {
+                    //Function with no dest
+                    Expr::FunctionCall {name, args} => {
+                        let mut reduced_args = Vec::new();
+                        for arg in args {
+                            reduced_args.push(self.reduce_expr(arg));
+                        }
+
+                        self.emit(IRInst::Call {
+                            dest: None,
+                            name: name.clone(),
+                            args: reduced_args,
+                        });
+                    }
+                    _ => { self.reduce_expr(expr); } //In any other case
+                }
+            }
             Stmt::Return(expr) => {
                 let ret_val = expr.as_ref().map(|a| self.reduce_expr(a));
                 self.emit(IRInst::Return(ret_val));
@@ -313,7 +355,7 @@ impl IR {
                 for stmt in body {
                     self.reduce_stmt(stmt);
                 }
-                loop_exit_stack.pop();
+                self.loop_exit_stack.pop();
                 self.reduce_expr(inc);
 
                 self.emit(IRInst::JMP(start_label));
@@ -381,11 +423,67 @@ impl IR {
         }
     }
 
+    pub fn reduce_everything(&mut self, program: &Program) -> IRProgram {
+
+        let mut ir_globals: Vec<Expr> = Vec::new();
+        for global in &program.globals {
+            if let Expr::VarDecl { ty, name, .. } = &global.decl {
+                self.var_types.insert(name.clone(), ty.clone());
+            }
+            ir_globals.push(global.decl.clone());
+        }
+
+        let mut ir_funcs = Vec::new();
+        for func in &program.functions {
+            let ir_func = self.reduce_func(func);
+            ir_funcs.push(ir_func);
+        }
+
+        IRProgram {
+            globals: ir_globals,
+            functions: ir_funcs,
+        }
+
+    }
+
+    fn reduce_func(&mut self, func: &FunctionSignature) -> IRFunction {
+        self.insts_buffer.clear();
+        self.reset_temp();
+
+        self.emit(IRInst::Label(func.name.clone()));
+
+        let mut param_names = Vec::new();
+        for param in &func.params { //Params are basically just regular vars in 3AC
+            self.var_types.insert(param.name.clone(), param.ty.clone());
+            param_names.push(param.name.clone());
+        }
+
+        for stmt in &func.body {
+            self.reduce_stmt(stmt);
+        }
+
+        let is_def_ret_needed = match self.insts_buffer.last() {
+            Some(IRInst::Return(_)) => false,
+            _ => true,
+        };
+
+        if is_def_ret_needed {
+            self.emit(IRInst::Return(None));
+        }
+
+        IRFunction {
+            name: func.name.clone(),
+            params: param_names,
+            body: self.insts_buffer.clone(),
+        }
+
+    }
+
     fn reduce_cond(&mut self, expr: &Expr, false_label: String) {
         match expr {
-            Expr::MoreLessEq { lhs, op, rhs } => {
-                let l_op = self.reduce_expr(lhs);
-                let r_op = self.reduce_expr(rhs);
+            Expr::MoreLessEq { left, op, right } => {
+                let l_op = self.reduce_expr(left);
+                let r_op = self.reduce_expr(right);
                 let inst = match op {
                     MoreLess::Eq    => IRInst::AntiEqual { left: l_op, right: r_op, label: false_label },
                     MoreLess::NotEq => IRInst::Equal     { left: l_op, right: r_op, label: false_label },
@@ -396,9 +494,9 @@ impl IR {
             }
             _ => { // For like "while [1]{}" or "if [c]{}"
                 let cond_op = self.reduce_expr(expr);
-                self.emit(IRInst::Beq {
+                self.emit(IRInst::AntiEqual {
                     left: cond_op,
-                    right: IROperand::Constant(0),
+                    right: IROperand::SignedConstant(0),
                     label: false_label,
                 });
             }
@@ -415,25 +513,42 @@ impl IR {
                 self.reduce_expr(ptr_expr)
             }
 
-            Expr::FieldAccess {expr, field} => {
-                let base_addr = self.lower_lvalue(expr);
-
+            Expr::FieldAccess { expr, field } => {
+                let parent_type = self.infer_type(expr);
                 let struct_name = match parent_type {
                     Type::Struct(name) => name,
-                    _ => panic!("Field access on non-struct(reachable)"),
+                    _ => panic!("Field access on non-struct"),
                 };
-                let offset = self.get_field_offset(struct_name, field);
+                let offset = self.get_field_offset(&struct_name, field);
 
-                let dest = self.new_temp();
-                self.emit(IRInst::Add {
-                    dest: dest.clone(),
-                    left: base_addr,
-                    right: IROperand::UnsignedConstant(offset as u32),
-                });
-                dest
-            }
-
-            _ => panic!("Expression is not a valid lvalue"),
+                match expr.as_ref() {
+                    Expr::Deref(ptr_expr) => {
+                        let base_addr = self.reduce_expr(ptr_expr);
+                        if offset == 0 {
+                            base_addr
+                        } else {
+                            let dest = self.new_temp();
+                            self.emit(IRInst::Add {
+                                dest: dest.clone(),
+                                left: base_addr,
+                                right: IROperand::UnsignedConstant(offset as u32),
+                            });
+                            dest
+                        }
+                    }
+                    _ => {
+                        let base_addr = self.lower_lvalue(expr);
+                        let dest = self.new_temp();
+                        self.emit(IRInst::Add {
+                            dest: dest.clone(),
+                            left: base_addr,
+                            right: IROperand::UnsignedConstant(offset as u32),
+                        });
+                        dest
+                    }
+                }
+            },
+            _ => panic!("Invalid l-value"),
         }
     }
 }
