@@ -14,6 +14,10 @@ module CORE(
     logic [31:0] RegX, RegY;
     logic [31:0] EPC;
 
+    logic [31:0] SP, KSP, LR, KScratch;
+    logic [31:0] ActiveSP;
+    assign ActiveSP = KernelMode ? KSP : SP;
+
     logic [31:0] PCNext;
 
     logic [5:0] opcode;
@@ -24,6 +28,7 @@ module CORE(
     logic XWrite, YWrite, IRWrite, PCWrite, GPRsWrite, EAWrite;
     logic memRead, memWrite;
     logic memViolation;
+    logic isCallState;
     logic [31:0] memBase;
     logic [31:0] memLimit;
     logic [31:0] memTarget;
@@ -98,7 +103,7 @@ module CORE(
             3'b100: PCNext = 32'h00000068; // Timer Vector
             3'b101: PCNext = 32'h0000006C; // Illegal Opcode Fault Vector
             3'b110: PCNext = 32'h00000070; // Memory Protection Fault Vector
-            3'b111: PCNext = RegX;
+            3'b111: PCNext = LR;
             default: PCNext = AluResult;
         endcase
     end
@@ -112,6 +117,10 @@ module CORE(
             RegY <= 32'd0;
             EA <= 32'd0;
             KernelMode <= 1;
+            SP  <= 32'h03FFFFFC;
+            KSP <= 32'h00000FFC;
+            LR  <= 32'd0;
+            KScratch <= 32'd0;
 
             memBase    <= 32'h0;
             memLimit   <= 32'hFFFFFFFF;
@@ -125,12 +134,19 @@ module CORE(
             if (EPCWrite) EPC <= PC;
             KernelMode <= isKernelMode;
 
+            if (isCallState && opcode == 6'b111000) begin
+                LR <= PC + 32'd4; //Save pc + 4 on call
+            end
+
             if (memWrite && IO_cs && KernelMode) begin
                 unique case (memTarget)
                     32'hFFFFFF04: mmio_timer_reg <= RegX[15:0];
                     32'hFFFFFF08: memBase <= RegX;
                     32'hFFFFFF0C: memLimit <= RegX;
                     32'hFFFFFF10: EPC <= RegX;
+                    32'hFFFFFF14: SP <= RegX;
+                    32'hFFFFFF18: KSP <= RegX;
+                    32'hFFFFFF1C: KScratch <= RegX;
                     default: ;
                 endcase
             end
@@ -139,9 +155,9 @@ module CORE(
 
     always_comb begin
         unique case (aluOpSel)
-            2'b00: AluOpcode = 6'b000001; // Force ADD (for PC+4 or Effective Address calculation)
-            2'b01: AluOpcode = 6'b000011; // Force SUB (for PC-relative Branch comparison)
-            2'b10: AluOpcode = opcode;    // Use raw Opcode from IR (for actuall Instruction Execution)
+            2'b00: AluOpcode = 6'b000001; // PC + 4
+            2'b01: AluOpcode = 6'b000011; // Sub for cmp
+            2'b10: AluOpcode = opcode;    // IR opcode for regular ALUs
 
             default: AluOpcode = 6'b000001;
         endcase
@@ -180,6 +196,11 @@ module CORE(
             unique case (memTarget)
                 32'hFFFFFF00: cpu_mem_data_out = {24'd0, ENC_10K_KeyIn};
                 32'hFFFFFF04: cpu_mem_data_out = {16'd0, mmio_timer_reg};
+                32'hFFFFFF14: cpu_mem_data_out = SP;
+                32'hFFFFFF18: cpu_mem_data_out = KSP;
+                32'hFFFFFF1C: cpu_mem_data_out = KScratch;
+                32'hFFFFFF20: cpu_mem_data_out = ActiveSP;
+                32'hFFFFFF24: cpu_mem_data_out = LR;
                 default:      cpu_mem_data_out = 32'd0; 
             endcase
         end else begin
@@ -188,8 +209,8 @@ module CORE(
     end
 
     assign GPRs_data_in = (GPRsSrc == 2'b01) ? cpu_mem_data_out :
-                      (GPRsSrc == 2'b10) ? PC :
-                      (GPRsSrc == 2'b11) ? sign_ext_imm : AluResult;
+                          (GPRsSrc == 2'b10) ? PC :
+                          (GPRsSrc == 2'b11) ? sign_ext_imm : AluResult;
     
     CU control_unit (
         .clk(clk),
@@ -213,7 +234,8 @@ module CORE(
         .aluSrcY(aluSrcY),
         .PCSrc(PCSrc),
         .GPRsSrc(GPRsSrc),
-        .aluOpSel(aluOpSel)
+        .aluOpSel(aluOpSel),
+        .isCallState(isCallState)
     );
 
     ALU cpu_alu (
@@ -230,7 +252,6 @@ module CORE(
         .clk(clk),
         .reset(reset),
         .reg_write(GPRsWrite),
-        .KernelMode(KernelMode),
         .rr0(rx0),
         .rr1(rx1),
         .rw0(rx0),

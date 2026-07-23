@@ -1,37 +1,58 @@
-Format of 32bit instructions
+Format of 32-bit instructions
 
-000000     | 00000 | 00000    | 0000000000000000
-opcode (6b)| rx0(5b)   |rx1(spare)| (spare/address)
-rx0 = rx0 (operation) rx1
+R-Type (Standard ALU & System)
+[31:26]  Opcode     (6 bits)
+[25:19]  rx0        (7 bits: 5-bit Reg ID + 2-bit Size/Offset)
+[18:12]  rx1        (7 bits: 5-bit Reg ID + 2-bit Size/Offset)
+[11:0]   Spare      (12 bits)
 
-ALU instructions:
-000001 : Add
-000011 : Sub
-000111 : LOMUL
-001101 : HIMUL
-000010 : XOR
-000110 : OR
-001110 : AND
-001111 : NOT
-001000 : SHL
-001100 : SHR
-001010 : SRA
+I-Type (Immediate Operations & Direct Local Branches)
+[31:26]  Opcode     (6 bits)
+[25:19]  rx0        (7 bits: 5-bit Reg ID + 2-bit Size/Offset)
+[18:12]  rx1        (7 bits: 5-bit Reg ID + 2-bit Size/Offset)
+[11:0]   Immediate  (12 bits: Signed offset / Constant)
 
-Memory
-010001 : LOAD //load instant
-100011 : LDR
-100111 : STR
+J-Type (Massive Load / Direct Jumps)
+[31:26]  Opcode     (6 bits)
+[25:0]   Immediate  (26 bits: Imm26)
 
-Branching
-110000 : BEQ
-110001 : BNE
-110011 : BS
-110111 : BG
-111111 : JMP
+//Opcodes
+ALU Instructions (R-Type)
+000001 : ADD    rx0, rx1
+000011 : SUB    rx0, rx1
+000111 : LOMUL  rx0, rx1
+001101 : HIMUL  rx0, rx1
+000010 : XOR    rx0, rx1
+000110 : OR     rx0, rx1
+001110 : AND    rx0, rx1
+001111 : NOT    rx0, rx1
+001000 : SHL    rx0, rx1
+001100 : SHR    rx0, rx1
+001010 : SRA    rx0, rx1
 
-111000 : CALL
-111100 : RET
+Memory Instructions
+010001 : LOAD   rx0, imm12
+011111 : LMA    imm26 //Loads into rx31
+100011 : LDR    rx0, rx1, imm12 // Load from memory [rx1 +- imm12]
+100111 : STR    rx0, rx1, imm12
 
-Privilege and syscalls
-111110 : SYS //SYSCALL
-111101 : RETU //Return to user
+Direct Branching (I-Type - PC-Relative using imm12)
+110000 : BEQ    rx0, rx1, imm12   // Branch to (PC + imm12) if rx0 == rx1
+110001 : BNE    rx0, rx1, imm12   // Branch to (PC + imm12) if rx0 != rx1
+110011 : BS     rx0, rx1, imm12   // Branch to (PC + imm12) if rx0 < rx1
+110111 : BG     rx0, rx1, imm12   // Branch to (PC + imm12) if rx0 > rx1
+
+Massive / Register-Indirect Branching (R-Type - Branch to Register rx1)
+110010 : BEQM   rx0, rx1          ; Branch to address in rx1 if rx0 == rx1
+110100 : BNEM   rx0, rx1          ; Branch to address in rx1 if rx0 != rx1
+110101 : BSM    rx0, rx1          ; Branch to address in rx1 if rx0 < rx1
+110110 : BGM    rx0, rx1          ; Branch to address in rx1 if rx0 > rx1
+
+Jumps & Subroutines
+111111 : JMP    imm26             ; Unconditional Jump to imm26 address
+111000 : CALL   imm26             ; Save PC+4 to LR and Jump to imm26 address
+111100 : RET                      ; Return from subroutine (PC = LR)
+
+Privilege and Syscalls
+111110 : SYS                      ; System Call Exception
+111101 : RETU                     ; Return to User Mode from Exception

@@ -29,7 +29,8 @@ module CU(
     output logic [2:0] PCSrc, //pc+4, effective address
     output logic [1:0] GPRsSrc, //alu result, memory, spare
     
-    output logic [1:0] aluOpSel
+    output logic [1:0] aluOpSel,
+    output logic isCallState
 
 );
 
@@ -43,14 +44,14 @@ module CU(
         EXCEPTION,
         TIMER_INTERRUPT,
         MEM_FAULT,
-        STORE,
+        STORE
     } fsm_states;
 
     fsm_states current_state, next_state;
 
     logic [15:0] counter;
     logic timer_interrupt_pending;
-    
+
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -59,7 +60,7 @@ module CU(
             timer_interrupt_pending <= 0;
         end else begin
             current_state <= next_state;
-            
+
             if (counter == 16'd0) begin
                 counter <= mmio_timer_reg;
                 timer_interrupt_pending <= 1;
@@ -68,7 +69,7 @@ module CU(
             end
 
             if (current_state == TIMER_INTERRUPT)
-                timer_interrupt_pending <= 1'b0;
+                timer_interrupt_pending <= 0;
         end
     end
 
@@ -118,7 +119,7 @@ module CU(
                     default: next_state = ALU_EXE;
                 endcase
 
-                unique case (opcode)
+                case (opcode)
                     6'b111110: next_state = EXCEPTION; //SYS
                     6'b111101: begin //RETU
                         isKernelMode = 0;
@@ -128,17 +129,17 @@ module CU(
                     end
                     6'b111000: begin //CALL
                         next_state = FETCH;
-                        GPRsSrc   = 2'b10;
-                        GPRsWrite = 1'b1;
-
                         PCSrc   = 3'b000;
-                        PCWrite = 1'b1;
+                        PCWrite = 1;
+                        isCallState = 1;
                     end
                     6'b111100: begin //RET 
                         next_state = FETCH;
-                        PCSrc   = 3'b111; //RegX
-                        PCWrite = 1'b1;
+                        PCSrc   = 3'b111;
+                        PCWrite = 1;
                     end
+
+                    default: ;
                 endcase
             end
             ALU_EXE: begin
@@ -201,7 +202,7 @@ module CU(
             end 
             default: next_state = FETCH;
         endcase
-    
+
         //Jump straight to exeption
         if (next_state == FETCH && timer_interrupt_pending && !current_kernel_mode && current_state != EXCEPTION)
             next_state = TIMER_INTERRUPT;
