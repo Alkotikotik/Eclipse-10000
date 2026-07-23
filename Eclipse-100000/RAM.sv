@@ -11,18 +11,18 @@ module RAM(
 );
 
     logic [7:0] ramm [0:67108863]; //64MB
-    
+
     initial begin
         $readmemh("program.hex", ramm);
     end
-    
+
     logic [5:0] unused_bits;
     assign unused_bits = address[31:26]; //So compiler wouldn't compain
 
-    assign data_out = (mem_read) ? {ramm[address[25:0] + 3], 
-                                    ramm[address[25:0] + 2], 
-                                    ramm[address[25:0] + 1], 
-                                    ramm[address[25:0]]} : 32'b0;
+    assign data_out = (mem_read) ? {ramm[address + 3],
+                                    ramm[address + 2],
+                                    ramm[address + 1],
+                                    ramm[address]} : 32'h0;
 
     always_ff @(posedge clk) begin
         if (mem_write) begin

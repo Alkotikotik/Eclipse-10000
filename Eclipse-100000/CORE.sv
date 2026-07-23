@@ -24,6 +24,7 @@ module CORE(
     logic [6:0] rx0;
     logic [6:0] rx1;
     logic [11:0] immediate;
+    logic [31:0] j_imm_signed;
 
     logic XWrite, YWrite, IRWrite, PCWrite, GPRsWrite, EAWrite;
     logic memRead, memWrite;
@@ -36,7 +37,7 @@ module CORE(
     logic aluSrcX;
     logic [1:0] aluSrcY;
     logic [2:0] PCSrc;
-    logic [1:0] GPRsSrc;
+    logic [2:0] GPRsSrc;
     logic [31:0] sign_ext_imm;
     assign sign_ext_imm = { {20{immediate[11]}}, immediate };
 
@@ -47,6 +48,7 @@ module CORE(
     logic [31:0] GPRs_data_out0;
     logic [31:0] GPRs_data_out1;
     logic [31:0] GPRs_data_in;
+    logic [6:0] gpr_rw0_sel;
 
     logic [31:0] AluMuxX;
     logic [31:0] AluMuxY;
@@ -70,11 +72,19 @@ module CORE(
     logic [3:0] ram_byte_enable;
     logic [31:0] ram_data_in_aligned;
 
+    logic [21:0] immediate_22;
+    assign immediate_22 = IR[21:0];
+
+    logic [31:0] sign_ext_imm22;
+    assign sign_ext_imm22 = { {10{immediate_22[21]}}, immediate_22 };
+
     //Breaking instruction down
     assign opcode = IR[31:26];
     assign rx0 = IR[25:19];
     assign rx1 = IR[18:12];
     assign immediate = IR[11:0];
+    assign j_imm_signed = {{6{IR[25]}}, IR[25:0]};
+    assign gpr_rw0_sel = (opcode == 6'b011111) ? {IR[25:22], 3'b000} : rx0;
 
     assign active_address = (IRWrite) ? PC : memTarget;
 
@@ -90,6 +100,7 @@ module CORE(
         unique case (aluSrcY)
             2'b00: AluMuxY = 32'd4;
             2'b01: AluMuxY = RegY;
+            2'b10: AluMuxY = j_imm_signed;
             2'b11: AluMuxY = { {20{immediate[11]}}, immediate };
 
             default: AluMuxY = RegY;
@@ -235,10 +246,12 @@ module CORE(
         end
     end
 
-    assign GPRs_data_in = (GPRsSrc == 2'b01) ? cpu_mem_data_out :
-                          (GPRsSrc == 2'b10) ? PC :
-                          (GPRsSrc == 2'b11) ? sign_ext_imm : AluResult;
-    
+    assign GPRs_data_in = (GPRsSrc == 3'b001) ? cpu_mem_data_out :
+                      (GPRsSrc == 3'b010) ? PC :
+                      (GPRsSrc == 3'b011) ? sign_ext_imm :
+                      (GPRsSrc == 3'b100) ? sign_ext_imm22 :
+                      AluResult;
+
     CU control_unit (
         .clk(clk),
         .reset(reset),
@@ -284,7 +297,7 @@ module CORE(
         .reg_write(GPRsWrite),
         .rr0(rx0),
         .rr1(rx1),
-        .rw0(rx0),
+        .rw0(gpr_rw0_sel),
         .data_in(GPRs_data_in),
         .data_out0(GPRs_data_out0),
         .data_out1(GPRs_data_out1)

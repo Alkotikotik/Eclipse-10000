@@ -34,16 +34,16 @@ ALU Instructions (R-Type)
 001010 : SRA    rx0, rx1
 
 Memory Instructions
-010001 : LOAD   rx0, imm12
-011111 : LMA    imm26 //Loads into rx31
-100011 : LDR    rx0, rx1, imm12 // Load from memory [rx1 +- imm12]
-100111 : STR    rx0, rx1, imm12
+010001 : LOAD   rx0, imm12 //Loads imm into rx0
+011111 : LMA rx0  imm22 //Loads Massive
+100011 : LDR    rx0, rx1 +- imm12 // Load from memory [rx1 +- imm12]
+100111 : STR    rx0, rx1 +- imm12
 
 CMP:
-110000 : CMP rx1 rx0
+110000 : CMP rx0 rx1
 
 Unsigned branching
-111110 : BEQ
+111110 : BEQ ~Label
 111100 : BNE
 110001 : BGU
 110011 : BSU
@@ -53,8 +53,8 @@ Signed branching
 111010 : BSS
 
 Jumps & Subroutines
-111111 : JMP   imm26     // Unconditional Jump to imm26 address
-110111 : JR rx1          // Unconditional Jump to rx1
+111111 : JMP   imm26     // Unconditional Jump to imm26 address/label
+110111 : JR rx0          // Unconditional Jump to rx0
 111000 : CALL   imm26    // Save PC+4 to LR and Jump to imm26 address
 110010 : RET             // Return from subroutine (PC = LR)
 

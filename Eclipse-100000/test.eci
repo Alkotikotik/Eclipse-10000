@@ -1,0 +1,16 @@
+~Init:
+    LMA rx1 <- 4
+    LMA rx2 <- 4
+    LMA rx3 <- 100
+
+    STR [rx1, rx1]
+
+    CMP rx1, rx1
+    BEQ ~Loop
+
+~Loop:
+    ADD [rx1, rx2]
+    STR [rx1, rx1]
+
+    CMP rx1, rx3
+    BSS ~Loop

@@ -27,7 +27,7 @@ module CU(
     output logic aluSrcX, //X, PC
     output logic [1:0] aluSrcY, //fetch: 4, alu_exe/branch = y, mem_calc = spare
     output logic [2:0] PCSrc, //pc+4, effective address
-    output logic [1:0] GPRsSrc, //alu result, memory, spare
+    output logic [2:0] GPRsSrc, //alu result, memory, spare
 
     output logic [1:0] aluOpSel,
     output logic isCallState,
@@ -85,9 +85,10 @@ module CU(
         EPCWrite = 0; isKernelMode = current_kernel_mode;
         memRead = 0; memWrite = 0;
         aluSrcX = 0; aluSrcY = 2'b00;
-        PCSrc = 3'b000; GPRsSrc = 2'b00;
+        PCSrc = 3'b000; GPRsSrc = 3'b000;
         aluOpSel = 2'b00;
         flagsWrite = 0;
+        isCallState = 0;
 
         unique case (current_state) //allows for parralellization
             FETCH: begin
@@ -118,6 +119,14 @@ module CU(
                         unique case(opcode)
                             6'b100111: next_state = STORE;
                             6'b100011: next_state = READ_DATA;
+                            6'b110000: next_state = ALU_EXE;  // CMP
+                            6'b111111: begin //JMP
+                                next_state = FETCH;
+                                aluSrcY = 2'b10;
+                                PCSrc   = 3'b000;
+                                PCWrite = 1;
+                            end
+
                             default:   next_state = STORE;
                         endcase
                     end
@@ -134,11 +143,12 @@ module CU(
                     end
                     6'b111000: begin //CALL
                         next_state = FETCH;
+                        aluSrcY = 2'b10;
                         PCSrc   = 3'b000;
                         PCWrite = 1;
                         isCallState = 1;
                     end
-                    6'b111100: begin //RET 
+                    6'b111100: begin //RET
                         next_state = FETCH;
                         PCSrc   = 3'b101;
                         PCWrite = 1;
@@ -157,7 +167,7 @@ module CU(
                 aluSrcY   = 2'b01;
                 aluSrcX   = 0;
                 aluOpSel  = 2'b10;
-                GPRsSrc = 2'b00;
+                GPRsSrc = 3'b000;
 
                 if (opcode == 6'b110000) begin // CMP
                     flagsWrite = 1;
@@ -207,13 +217,13 @@ module CU(
             end
             LOAD: begin
                 next_state = FETCH;
-                GPRsWrite = 1; //Load value into specified gpr
-                GPRsSrc = 2'b11;
-            end 
-            READ_DATA: begin 
+                GPRsWrite  = 1;
+                GPRsSrc    = (opcode == 6'b011111) ? 3'b100 : 3'b011;
+            end
+            READ_DATA: begin
                 next_state = FETCH;
                 memRead = 1;
-                GPRsSrc = 2'b01; 
+                GPRsSrc = 3'b001;
                 GPRsWrite = 1;
             end
             STORE: begin

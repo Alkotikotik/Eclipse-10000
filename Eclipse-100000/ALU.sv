@@ -37,6 +37,7 @@ module ALU (
             6'b001000: result = x << y[4:0]; //lower 5
             6'b001100: result = x >> y[4:0];
             6'b001010: result = $signed($signed(x) >>> y[4:0]); //JIC
+            6'b110000: result = x - y; //CMP
 
             default: result = 32'b0;
         endcase
