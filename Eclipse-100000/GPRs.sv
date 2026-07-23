@@ -14,11 +14,20 @@ module GPRs (
 
     logic [31:0] GPRs [15:0]; //16 32bit registers
 
-    logic [3:0] base_id0 = rr0[6:3];
-    logic [2:0] offset0  = rr0[2:0];
+    logic [3:0] base_id0;
+    logic [2:0] offset0;
+    assign base_id0 = rr0[6:3];
+    assign offset0  = rr0[2:0];
 
-    logic [3:0] base_id1 = rr1[6:3];
-    logic [2:0] offset1  = rr1[2:0];
+    logic [3:0] base_id1;
+    logic [2:0] offset1;
+    assign base_id1 = rr1[6:3];
+    assign offset1  = rr1[2:0];
+
+    logic [3:0] base_id_w0;
+    logic [2:0] offset_w0;
+    assign base_id_w0 = rw0[6:3];
+    assign offset_w0  = rw0[2:0];
 
     logic [31:0] raw_val_r0;
     assign raw_val_r0 = GPRs[base_id0];
@@ -57,9 +66,6 @@ module GPRs (
             default: data_out1 = raw_val_r1;
         endcase
     end
-
-    logic [3:0] base_id_w0 = rw0[6:3];
-    logic [2:0] offset_w0  = rw0[2:0];
 
     logic [31:0] write_mask;
     logic [31:0] shifted_data_in;

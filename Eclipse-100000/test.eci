@@ -1,16 +1,27 @@
 ~Init:
-    LMA rx1 <- 4
-    LMA rx2 <- 4
-    LMA rx3 <- 100
-
-    STR [rx1, rx1]
-
-    CMP rx1, rx1
-    BEQ ~Loop
+    LMA rx0 <- 0
+    LMA rx1 <- 1
+    LOAD rx2 <- 0
+    LMA rx3 <- 100000
+    LMA rx4 <- 1024
+    LMA rx5 <- 4
 
 ~Loop:
-    ADD [rx1, rx2]
-    STR [rx1, rx1]
+    CMP rx0, rx3
+    BGU ~End
 
-    CMP rx1, rx3
-    BSS ~Loop
+    STR [rx0, rx4]
+    ADD [rx4, rx5]
+
+    ADD [rx2, rx1]
+
+    ADD [rx1, rx0]
+
+    XOR [rx0, rx0]
+    ADD [rx0, rx2]
+
+    XOR [rx2, rx2]
+
+    JMP ~Loop
+
+~End:

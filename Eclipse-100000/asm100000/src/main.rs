@@ -182,10 +182,10 @@ fn main() -> io::Result<()> {
             }
             "CMP" => {
                 if tokens.len() > 1 {
-                    rx1 = parse_reg(tokens[1]);
+                    rx0 = parse_reg(tokens[1]);
                 }
                 if tokens.len() > 2 {
-                    rx0 = parse_reg(tokens[2]);
+                    rx1 = parse_reg(tokens[2]);
                 }
             }
             "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" => {

@@ -119,13 +119,6 @@ module CU(
                         unique case(opcode)
                             6'b100111: next_state = STORE;
                             6'b100011: next_state = READ_DATA;
-                            6'b110000: next_state = ALU_EXE;  // CMP
-                            6'b111111: begin //JMP
-                                next_state = FETCH;
-                                aluSrcY = 2'b10;
-                                PCSrc   = 3'b000;
-                                PCWrite = 1;
-                            end
 
                             default:   next_state = STORE;
                         endcase
@@ -156,6 +149,13 @@ module CU(
                     6'b110111: begin //JR
                         next_state = FETCH;
                         PCSrc   = 3'b111;
+                        PCWrite = 1;
+                    end
+                    6'b110000: next_state = ALU_EXE;  // CMP
+                    6'b111111: begin //JMP
+                        next_state = FETCH;
+                        aluSrcY = 2'b10;
+                        PCSrc   = 3'b000;
                         PCWrite = 1;
                     end
 
