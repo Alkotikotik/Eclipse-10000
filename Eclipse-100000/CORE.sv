@@ -53,8 +53,9 @@ module CORE(
     logic [31:0] AluResult;
     logic [1:0] aluOpSel;
     logic [5:0] AluOpcode;
-    logic OverflowFlag, NegativeFlag, ZeroFlag;
-    logic [2:0] CompactedFlags;
+    logic flagsWrite;
+    logic OverflowFlag, NegativeFlag, ZeroFlag, CarryFlag;
+    logic [3:0] compactedFlags;
 
     logic [31:0] ram_data_out;
 
@@ -66,6 +67,8 @@ module CORE(
 
     logic [31:0] active_address;
 
+    logic [3:0] ram_byte_enable;
+    logic [31:0] ram_data_in_aligned;
 
     //Breaking instruction down
     assign opcode = IR[31:26];
@@ -82,7 +85,6 @@ module CORE(
 
     //Muxes
     assign AluMuxX = (aluSrcX == 1'b1) ? PC : RegX;
-    assign CompactedFlags = {NegativeFlag, OverflowFlag, ZeroFlag};
 
     always_comb begin
         unique case (aluSrcY)
@@ -101,9 +103,9 @@ module CORE(
             3'b010: PCNext = 32'h00000064; // Syscall Vector
             3'b011: PCNext = EPC;          // RETU
             3'b100: PCNext = 32'h00000068; // Timer Vector
-            3'b101: PCNext = 32'h0000006C; // Illegal Opcode Fault Vector
+            3'b101: PCNext = LR;           // RET
             3'b110: PCNext = 32'h00000070; // Memory Protection Fault Vector
-            3'b111: PCNext = LR;
+            3'b111: PCNext = RegX;         // JR
             default: PCNext = AluResult;
         endcase
     end
@@ -125,6 +127,8 @@ module CORE(
             memBase    <= 32'h0;
             memLimit   <= 32'hFFFFFFFF;
             mmio_timer_reg <= 16'd10000;
+
+            compactedFlags <= 4'b0000;
         end else begin
             if (PCWrite) PC <= PCNext;
             if (IRWrite) IR <= ram_data_out;
@@ -132,6 +136,7 @@ module CORE(
             if (YWrite) RegY <= GPRs_data_out1;
             if (EAWrite) EA <= AluResult;
             if (EPCWrite) EPC <= PC;
+            if (flagsWrite) compactedFlags <= {CarryFlag, NegativeFlag, OverflowFlag, ZeroFlag};
             KernelMode <= isKernelMode;
 
             if (isCallState && opcode == 6'b111000) begin
@@ -189,6 +194,28 @@ module CORE(
         end
     end
 
+    always_comb begin
+        if (IRWrite) begin
+            ram_byte_enable = 4'b1111;
+            ram_data_in_aligned = RegX;
+        end else begin
+            unique case (rx0[2:0])
+                3'b011, 3'b100, 3'b101, 3'b110: begin // 8-bit
+                    ram_byte_enable = 4'b0001 << memTarget[1:0];
+                    ram_data_in_aligned = {4{RegX[7:0]}};
+                end
+                3'b001, 3'b010: begin // 16-bit
+                    ram_byte_enable = 4'b0011 << memTarget[1:0];
+                    ram_data_in_aligned = {2{RegX[15:0]}};
+                end
+                default: begin // 32-bit
+                    ram_byte_enable = 4'b1111;
+                    ram_data_in_aligned = RegX;
+                end
+            endcase
+        end
+    end
+
     always_comb begin 
         if (RAM_cs) begin 
             cpu_mem_data_out = ram_data_out;
@@ -216,7 +243,7 @@ module CORE(
         .clk(clk),
         .reset(reset),
         .opcode(opcode),
-        .flags(CompactedFlags),
+        .flags(compactedFlags),
         .mmio_timer_reg(mmio_timer_reg),
         .current_kernel_mode(KernelMode),
         .memViolation(memViolation),
@@ -235,15 +262,18 @@ module CORE(
         .PCSrc(PCSrc),
         .GPRsSrc(GPRsSrc),
         .aluOpSel(aluOpSel),
-        .isCallState(isCallState)
+        .isCallState(isCallState),
+        .flagsWrite(flagsWrite)
     );
 
     ALU cpu_alu (
         .x(AluMuxX),
         .y(AluMuxY),
         .opcode(AluOpcode),
+        .op_size(rx0[2:0]),
         .result(AluResult),
         .OverflowFlag(OverflowFlag),
+        .CarryFlag(CarryFlag),
         .NegativeFlag(NegativeFlag),
         .ZeroFlag(ZeroFlag)
     );
@@ -263,7 +293,8 @@ module CORE(
     RAM system_ram (
         .clk(clk),
         .address((IRWrite) ? PC : (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY),
-        .data_in(RegX),
+        .data_in(ram_data_in_aligned),
+        .byte_enable(ram_byte_enable),
         .mem_write(memWrite && !memViolation && RAM_cs),
         .mem_read(memRead && !memViolation && RAM_cs),
         .data_out(ram_data_out)

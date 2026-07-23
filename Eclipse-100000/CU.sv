@@ -4,7 +4,7 @@ module CU(
 
     input logic [5:0] opcode,
 
-    input logic [2:0] flags, //3 flags(Z, V, N) compacted into 3bit variable
+    input logic [3:0] flags, //3 flags(C, N, V, Z) compacted into 3bit variable
     input logic [15:0] mmio_timer_reg,
 
     input logic current_kernel_mode,
@@ -30,7 +30,8 @@ module CU(
     output logic [1:0] GPRsSrc, //alu result, memory, spare
 
     output logic [1:0] aluOpSel,
-    output logic isCallState
+    output logic isCallState,
+    output logic flagsWrite
 
 );
 
@@ -51,6 +52,9 @@ module CU(
 
     logic [15:0] counter;
     logic timer_interrupt_pending;
+
+    logic C, N, V, Z;
+    assign {C, N, V, Z} = flags;
 
 
     always_ff @(posedge clk or posedge reset) begin
@@ -74,7 +78,7 @@ module CU(
     end
 
     always_comb begin
-        
+
         next_state = FETCH;
         XWrite = 0; YWrite = 0;
         IRWrite = 0; PCWrite = 0; GPRsWrite = 0; EAWrite = 0;
@@ -83,6 +87,7 @@ module CU(
         aluSrcX = 0; aluSrcY = 2'b00;
         PCSrc = 3'b000; GPRsSrc = 2'b00;
         aluOpSel = 2'b00;
+        flagsWrite = 0;
 
         unique case (current_state) //allows for parralellization
             FETCH: begin
@@ -135,6 +140,11 @@ module CU(
                     end
                     6'b111100: begin //RET 
                         next_state = FETCH;
+                        PCSrc   = 3'b101;
+                        PCWrite = 1;
+                    end
+                    6'b110111: begin //JR
+                        next_state = FETCH;
                         PCSrc   = 3'b111;
                         PCWrite = 1;
                     end
@@ -144,25 +154,35 @@ module CU(
             end
             ALU_EXE: begin
                 next_state = FETCH;
-                aluSrcY = 2'b01;
+                aluSrcY   = 2'b01;
+                aluSrcX   = 0;
+                aluOpSel  = 2'b10;
                 GPRsSrc = 2'b00;
-                aluSrcX = 0;
-                aluOpSel = 2'b10;
-                GPRsWrite = 1;
-            end 
-            BRANCH: begin 
+
+                if (opcode == 6'b110000) begin // CMP
+                    flagsWrite = 1;
+                    GPRsWrite = 0;
+                end else begin
+                    GPRsWrite = 1;
+                end
+            end
+
+            BRANCH: begin
                 next_state = FETCH;
-                PCSrc = 3'b000; 
-                aluOpSel = 2'b01;
+                PCSrc = 3'b000;
+
                 unique case (opcode)
-                    6'b110000: PCWrite = (flags[0] == 1); //BEQ 
-                    6'b110001: PCWrite = (flags[0] == 0); //BNE
-                    6'b110011: PCWrite = ((flags[1] ^ flags[2]) == 1); //BS
-                    6'b110111: PCWrite = (!((flags[1] ^ flags[2]) || !flags[0])); //BG
-                    6'b111111: PCWrite = 1;
-                    default:   PCWrite = 0;
+                    6'b110001: PCWrite = Z; //BEQ
+                    6'b110010: PCWrite = !Z; //BNE
+
+                    6'b110011: PCWrite = (C && !Z); //BGU
+                    6'b110100: PCWrite = !C; //BSU
+
+                    6'b110101: PCWrite = ((N == V) && !Z); //BGS
+                    6'b110110: PCWrite = (N != V); //BSS
+
+                    default: PCWrite = 0;
                 endcase
-                aluSrcY = 2'b01;
             end
             EXCEPTION: begin
                 EPCWrite = 1;
