@@ -21,9 +21,9 @@ module CORE(
     logic [31:0] PCNext;
 
     logic [5:0] opcode;
-    logic [4:0] rx0;
-    logic [4:0] rx1;
-    logic [15:0] immediate;
+    logic [6:0] rx0;
+    logic [6:0] rx1;
+    logic [11:0] immediate;
 
     logic XWrite, YWrite, IRWrite, PCWrite, GPRsWrite, EAWrite;
     logic memRead, memWrite;
@@ -38,7 +38,7 @@ module CORE(
     logic [2:0] PCSrc;
     logic [1:0] GPRsSrc;
     logic [31:0] sign_ext_imm;
-    assign sign_ext_imm = { {16{immediate[15]}}, immediate };
+    assign sign_ext_imm = { {20{immediate[11]}}, immediate };
 
     logic KernelMode;
     logic EPCWrite;
@@ -69,9 +69,9 @@ module CORE(
 
     //Breaking instruction down
     assign opcode = IR[31:26];
-    assign rx0 = IR[25:21];
-    assign rx1 = IR[20:16];
-    assign immediate = IR[15:0];
+    assign rx0 = IR[25:19];
+    assign rx1 = IR[18:12];
+    assign immediate = IR[11:0];
 
     assign active_address = (IRWrite) ? PC : memTarget;
 
@@ -88,7 +88,7 @@ module CORE(
         unique case (aluSrcY)
             2'b00: AluMuxY = 32'd4;
             2'b01: AluMuxY = RegY;
-            2'b11: AluMuxY = { {16{immediate[15]}}, immediate };
+            2'b11: AluMuxY = { {20{immediate[11]}}, immediate };
 
             default: AluMuxY = RegY;
         endcase

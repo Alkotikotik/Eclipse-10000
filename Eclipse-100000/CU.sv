@@ -28,7 +28,7 @@ module CU(
     output logic [1:0] aluSrcY, //fetch: 4, alu_exe/branch = y, mem_calc = spare
     output logic [2:0] PCSrc, //pc+4, effective address
     output logic [1:0] GPRsSrc, //alu result, memory, spare
-    
+
     output logic [1:0] aluOpSel,
     output logic isCallState
 

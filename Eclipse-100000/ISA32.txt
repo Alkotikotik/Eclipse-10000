@@ -2,19 +2,22 @@ Format of 32-bit instructions
 
 R-Type (Standard ALU & System)
 [31:26]  Opcode     (6 bits)
-[25:19]  rx0        (7 bits: 5-bit Reg ID + 2-bit Size/Offset)
-[18:12]  rx1        (7 bits: 5-bit Reg ID + 2-bit Size/Offset)
+[25:19]  rx0        (7 bits: 4-bit Reg ID + 3-bit Size/Offset)
+[18:12]  rx1        (7 bits: 4-bit Reg ID + 3-bit Size/Offset)
 [11:0]   Spare      (12 bits)
 
 I-Type (Immediate Operations & Direct Local Branches)
 [31:26]  Opcode     (6 bits)
-[25:19]  rx0        (7 bits: 5-bit Reg ID + 2-bit Size/Offset)
-[18:12]  rx1        (7 bits: 5-bit Reg ID + 2-bit Size/Offset)
+[25:19]  rx0        (7 bits: 4-bit Reg ID + 3-bit Size/Offset)
+[18:12]  rx1        (7 bits: 4-bit Reg ID + 3-bit Size/Offset)
 [11:0]   Immediate  (12 bits: Signed offset / Constant)
 
 J-Type (Massive Load / Direct Jumps)
 [31:26]  Opcode     (6 bits)
 [25:0]   Immediate  (26 bits: Imm26)
+
+//Register
+Registers are fractured, visual representation is in Fracture.svg file.
 
 //Opcodes
 ALU Instructions (R-Type)
@@ -36,23 +39,25 @@ Memory Instructions
 100011 : LDR    rx0, rx1, imm12 // Load from memory [rx1 +- imm12]
 100111 : STR    rx0, rx1, imm12
 
-Direct Branching (I-Type - PC-Relative using imm12)
-110000 : BEQ    rx0, rx1, imm12   // Branch to (PC + imm12) if rx0 == rx1
-110001 : BNE    rx0, rx1, imm12   // Branch to (PC + imm12) if rx0 != rx1
-110011 : BS     rx0, rx1, imm12   // Branch to (PC + imm12) if rx0 < rx1
-110111 : BG     rx0, rx1, imm12   // Branch to (PC + imm12) if rx0 > rx1
+CMP:
+110000 : CMP rx1 rx0
 
-Massive / Register-Indirect Branching (R-Type - Branch to Register rx1)
-110010 : BEQM   rx0, rx1          ; Branch to address in rx1 if rx0 == rx1
-110100 : BNEM   rx0, rx1          ; Branch to address in rx1 if rx0 != rx1
-110101 : BSM    rx0, rx1          ; Branch to address in rx1 if rx0 < rx1
-110110 : BGM    rx0, rx1          ; Branch to address in rx1 if rx0 > rx1
+Unsigned branching
+111110 : BEQ
+111100 : BNE
+110001 : BGU
+110011 : BSU
+
+Signed branching
+110101 : BGS
+111010 : BSS
 
 Jumps & Subroutines
-111111 : JMP    imm26             ; Unconditional Jump to imm26 address
-111000 : CALL   imm26             ; Save PC+4 to LR and Jump to imm26 address
-111100 : RET                      ; Return from subroutine (PC = LR)
+111111 : JMP   imm26     // Unconditional Jump to imm26 address
+110111 : JR rx1          // Unconditional Jump to rx1
+111000 : CALL   imm26    // Save PC+4 to LR and Jump to imm26 address
+110010 : RET             // Return from subroutine (PC = LR)
 
 Privilege and Syscalls
-111110 : SYS                      ; System Call Exception
-111101 : RETU                     ; Return to User Mode from Exception
+110110 : SYS             // System Call Exception
+111101 : RETU            // Return to User Mode from Exception
