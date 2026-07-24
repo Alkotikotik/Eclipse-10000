@@ -68,6 +68,8 @@ fn main() -> io::Result<()> {
     // Exact Opcode Mappings matched to Control Unit Hardware Spec
     let mut opcodes: HashMap<&str, u32> = HashMap::new();
     opcodes.insert("PAD",   0b000000);
+
+    opcodes.insert("MOV",   0b000100);
     opcodes.insert("ADD",   0b000001);
     opcodes.insert("SUB",   0b000011);
     opcodes.insert("MUL",   0b000111);

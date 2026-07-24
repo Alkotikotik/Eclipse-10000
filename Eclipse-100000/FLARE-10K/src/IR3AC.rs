@@ -54,9 +54,9 @@ pub enum IRInst {
 
     AntiEqual { left: IROperand, right: IROperand, label: String }, //Branch if false, so they are
     Equal     { left: IROperand, right: IROperand, label: String }, //Inverted AntiEqual becomes
-    AntiMore  { left: IROperand, right: IROperand, label: String }, //Branch if not equal 
-    AntiLess  { left: IROperand, right: IROperand, label: String }, //Branch if more becomes branch
-                                                                    //If less
+    AntiMore  { left: IROperand, right: IROperand, label: String, signed: bool }, //Branch if not equal 
+    AntiLess  { left: IROperand, right: IROperand, label: String, signed: bool }, //Branch if more becomes branch
+                                                                                  //If less
     Label(String),
     JMP(String), //Jump if 1 == 1
 
@@ -190,6 +190,8 @@ impl IR {
     //For field access
     fn infer_type(&self, expr: &Expr) -> Type {
         match expr {
+            Expr::IntLiteral(_) => Type::I32,
+            Expr::HexLiteral(_) => Type::U32,
             Expr::Identifier(name) => self.var_types.get(name).cloned()
                 .unwrap_or_else(|| panic!("Unknown variable {}", name)),
 
@@ -512,11 +514,15 @@ impl IR {
             Expr::MoreLessEq { left, op, right } => {
                 let l_op = self.reduce_expr(left);
                 let r_op = self.reduce_expr(right);
+
+                let left_ty = self.infer_type(left);
+                let right_ty = self.infer_type(right);
+                let is_signed = left_ty == right_ty && matches!(left_ty, Type::I32 | Type::I16 | Type::I8);
                 let inst = match op {
                     MoreLess::Eq    => IRInst::AntiEqual { left: l_op, right: r_op, label: false_label },
                     MoreLess::NotEq => IRInst::Equal     { left: l_op, right: r_op, label: false_label },
-                    MoreLess::More  => IRInst::AntiMore  { left: l_op, right: r_op, label: false_label },
-                    MoreLess::Less  => IRInst::AntiLess  { left: l_op, right: r_op, label: false_label },
+                    MoreLess::More  => IRInst::AntiMore  { left: l_op, right: r_op, label: false_label, signed: is_signed },
+                    MoreLess::Less  => IRInst::AntiLess  { left: l_op, right: r_op, label: false_label, signed: is_signed },
                 };
                 self.emit(inst);
             }

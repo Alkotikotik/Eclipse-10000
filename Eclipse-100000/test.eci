@@ -34,5 +34,6 @@
     RET
 
 ~End:
-    LOAD rx0 <- 0
+    LOAD rx1 <- 4
+    MOV [rx0, rx1]
     JR rx0

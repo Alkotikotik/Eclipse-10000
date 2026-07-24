@@ -116,7 +116,7 @@ module CORE(
             3'b100: PCNext = 32'h00000068; // Timer Vector
             3'b101: PCNext = LR;           // RET
             3'b110: PCNext = 32'h00000070; // Memory Protection Fault Vector
-            3'b111: PCNext = GPRs_data_out0; // JR — was RegX (stale by one cycle)
+            3'b111: PCNext = GPRs_data_out0; // JR
             default: PCNext = AluResult;
         endcase
     end

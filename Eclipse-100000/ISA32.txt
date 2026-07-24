@@ -21,6 +21,7 @@ Registers are fractured, visual representation is in Fracture.svg file.
 
 //Opcodes
 ALU Instructions (R-Type)
+000100 : MOV    rx0, rx1
 000001 : ADD    rx0, rx1
 000011 : SUB    rx0, rx1
 000111 : LOMUL  rx0, rx1
@@ -32,6 +33,7 @@ ALU Instructions (R-Type)
 001000 : SHL    rx0, rx1
 001100 : SHR    rx0, rx1
 001010 : SRA    rx0, rx1
+
 
 Memory Instructions
 010001 : LOAD   rx0, imm12 //Loads imm into rx0
