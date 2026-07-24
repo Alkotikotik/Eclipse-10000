@@ -56,13 +56,12 @@ int main(int argc, char **argv) {
     std::cout << "Simulation finished. Waveform saved to 'waveform.vcd'" << std::endl;
 
     // --- ADD THIS MEMORY DUMP BLOCK HERE ---
-    std::cout << "\n--- RAM DUMP (Addresses 4000 down to 3950) ---" << std::endl;
-    for (int addr = 4096; addr >= 0; addr -= 4) {
-        // Translate the byte address into the 12-bit array index: address[13:2]
-        int index = (addr >> 2) & 0xFFF;
-
-        // Access the internal 'ramm' array inside your system_ram instance
-        unsigned int val = top->rootp->CORE__DOT__system_ram__DOT__ramm[index];
+    std::cout << "\n--- RAM DUMP ---" << std::endl;
+    for (int addr = 0; addr <= 4096; addr += 4) {
+        unsigned int val = (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr]) |
+                           (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 8) |
+                           (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 2] << 16) |
+                           (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 3] << 24);
 
         std::cout << "Address [" << std::dec << addr << "]: 0x" << std::hex << val << " ("
                   << std::dec << val << ")" << std::endl;

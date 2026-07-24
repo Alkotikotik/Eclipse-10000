@@ -90,7 +90,7 @@ fn main() -> io::Result<()> {
 
     // Unsigned Branching
     opcodes.insert("BEQ",   0b110001);
-    opcodes.insert("BNE",   0b110010);
+    opcodes.insert("BNE",   0b111100);
     opcodes.insert("BGU",   0b110011);
     opcodes.insert("BSU",   0b110100);
 
@@ -102,7 +102,7 @@ fn main() -> io::Result<()> {
     opcodes.insert("JMP",   0b111111);
     opcodes.insert("JR",    0b110111);
     opcodes.insert("CALL",  0b111000);
-    opcodes.insert("RET",   0b111100);
+    opcodes.insert("RET",   0b110010);
     opcodes.insert("SYS",   0b111110);
     opcodes.insert("RETU",  0b111101);
 
@@ -290,12 +290,14 @@ fn parse_reg(reg_str: &str) -> u32 {
     match prefix {
         "RZ" => {
             let reg_id = (num / 10) & 0x0F;
-            let offset = (num % 10) & 0x07;
+            let byte_sel = (num % 10) & 0x03;
+            let offset = 0b011 + byte_sel;
             (reg_id << 3) | offset
         }
         "RY" => {
             let reg_id = (num / 10) & 0x0F;
-            let offset = if (num % 10) > 0 { 0b010 } else { 0b000 };
+            let half_sel = (num % 10) & 0x01;
+            let offset = 0b001 + half_sel;
             (reg_id << 3) | offset
         }
         _ => {

@@ -3,15 +3,20 @@
     LMA rx1 <- 1
     LOAD rx2 <- 0
     LMA rx3 <- 100000
-    LMA rx4 <- 1024
-    LMA rx5 <- 4
+
+    LMA r4 <- 4088
+    LOAD rz50 <- 2
+    LOAD ry51 <- 2
+
+    CALL ~A
 
 ~Loop:
     CMP rx0, rx3
     BGU ~End
 
     STR [rx0, rx4]
-    ADD [rx4, rx5]
+    SUB [rx4, rz50]
+    SUB [rx4, ry51]
 
     ADD [rx2, rx1]
 
@@ -24,4 +29,10 @@
 
     JMP ~Loop
 
+~A:
+    STR [rx3, rx4 + 4]
+    RET
+
 ~End:
+    LOAD rx0 <- 0
+    JR rx0

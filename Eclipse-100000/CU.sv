@@ -137,11 +137,11 @@ module CU(
                     6'b111000: begin //CALL
                         next_state = FETCH;
                         aluSrcY = 2'b10;
-                        PCSrc   = 3'b000;
+                        PCSrc   = 3'b001;
                         PCWrite = 1;
                         isCallState = 1;
                     end
-                    6'b111100: begin //RET
+                    6'b110010: begin //RET
                         next_state = FETCH;
                         PCSrc   = 3'b101;
                         PCWrite = 1;
@@ -155,7 +155,7 @@ module CU(
                     6'b111111: begin //JMP
                         next_state = FETCH;
                         aluSrcY = 2'b10;
-                        PCSrc   = 3'b000;
+                        PCSrc   = 3'b001;
                         PCWrite = 1;
                     end
 
@@ -183,7 +183,7 @@ module CU(
 
                 unique case (opcode)
                     6'b110001: PCWrite = Z; //BEQ
-                    6'b110010: PCWrite = !Z; //BNE
+                    6'b111100: PCWrite = !Z; //BNE
 
                     6'b110011: PCWrite = (C && !Z); //BGU
                     6'b110100: PCWrite = !C; //BSU
