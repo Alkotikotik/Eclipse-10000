@@ -201,7 +201,7 @@ fn main() -> io::Result<()> {
             }
             "JR" => {
                 if tokens.len() > 1 {
-                    rx1 = parse_reg(tokens[1]);
+                    rx0 = parse_reg(tokens[1]);
                 }
             }
             "JMP" | "CALL" => {
