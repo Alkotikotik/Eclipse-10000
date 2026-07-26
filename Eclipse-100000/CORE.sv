@@ -23,6 +23,7 @@ module CORE(
     logic [5:0] opcode;
     logic [6:0] rx0;
     logic [6:0] rx1;
+    logic [6:0] rx2;
     logic [11:0] immediate;
     logic [31:0] j_imm_signed;
 
@@ -82,9 +83,12 @@ module CORE(
     assign opcode = IR[31:26];
     assign rx0 = IR[25:19];
     assign rx1 = IR[18:12];
+    assign rx2 = IR[11:5];
     assign immediate = IR[11:0];
     assign j_imm_signed = {{6{IR[25]}}, IR[25:0]};
-    assign gpr_rw0_sel = (opcode == 6'b011111) ? {IR[25:22], 3'b000} : rx0;
+    assign gpr_rw0_sel = (opcode == 6'b011111) ? {IR[25:22], 3'b000} : // LMA
+                         (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111)   ? rx2 :
+                         rx0;
 
     assign active_address = (IRWrite) ? PC : memTarget;
 

@@ -12,6 +12,7 @@ module GPRs (
     output logic [31:0] data_out1
 );
 
+
     logic [31:0] GPRs [15:0]; //16 32bit registers
 
     logic [3:0] base_id0;

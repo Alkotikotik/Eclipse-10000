@@ -22,9 +22,9 @@ Registers are fractured, visual representation is in Fragmentation.svg file.
 //Opcodes
 ALU Instructions (R-Type)
 000100 : MOV    rx0, rx1
-000001 : ADD    rx0, rx1
-000011 : SUB    rx0, rx1
-000111 : LOMUL  rx0, rx1
+000001 : ADD    rx0, rx1, rx2
+000011 : SUB    rx0, rx1, rx2
+000111 : LOMUL  rx0, rx1, rx2
 001101 : HIMUL  rx0, rx1
 000010 : XOR    rx0, rx1
 000110 : OR     rx0, rx1

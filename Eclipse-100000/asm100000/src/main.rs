@@ -182,6 +182,28 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
+            "ADD" | "SUB" | "MUL" => {
+                let mut dest_reg: u32 = 0;
+                let mut src1_reg: u32 = 0;
+                let src2_reg: u32;
+
+                if tokens.len() > 1 {
+                    dest_reg = parse_reg(tokens[1]);
+                }
+                if tokens.len() > 2 {
+                    src1_reg = parse_reg(tokens[2]);
+                }
+                if tokens.len() > 3 {
+                    src2_reg = parse_reg(tokens[3]);
+                } else {
+                    src2_reg = src1_reg;
+                    src1_reg = dest_reg;
+                }
+
+                rx0 = src1_reg;
+                rx1 = src2_reg;
+                immediate = (dest_reg as i64) << 5;
+            }
             "CMP" => {
                 if tokens.len() > 1 {
                     rx0 = parse_reg(tokens[1]);

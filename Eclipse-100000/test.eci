@@ -1,22 +1,24 @@
 ~Init:
-    LMA rx0 <- 0
+    LMA rx0 <- 2
     LMA rx1 <- 1
     LOAD rx2 <- 0
     LMA rx3 <- 100000
+    SHL [rx3, rx0]
+    LMA rx0 <- 0
 
     LMA rx4 <- 4088
     LOAD rz50 <- 2
     LOAD ry51 <- 2
 
     MOV ry61 <- rz50
-    STR [ry61, rx4 - 104]
+    STR [ry61, rx4 - 152]
     MOV rz50 <- ry61
-    STR [rz50, rx4 - 108]
+    STR [rz50, rx4 - 156]
 
     MOV rx6 <- ry51
-    STR [rx6, rx4 - 112]
+    STR [rx6, rx4 - 160]
     MOV ry51 <- rx6
-    STR [ry51, rx4 - 116]
+    STR [ry51, rx4 - 164]
 
     CALL ~A
 
@@ -25,17 +27,13 @@
     BGU ~End
 
     STR [rx0, rx4]
-    SUB [rx4, rz50]
-    SUB [rx4, ry51]
 
-    ADD [rx2, rx1]
+    SUB [rx4, rx4, rz50]
+    SUB [rx4, rx4, ry51]
 
-    ADD [rx1, rx0]
-
-    XOR [rx0, rx0]
-    ADD [rx0, rx2]
-
-    XOR [rx2, rx2]
+    ADD [rx2, rx0, rx1]
+    MOV rx0 <- rx1
+    MOV rx1 <- rx2
 
     JMP ~Loop
 
