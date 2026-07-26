@@ -1,12 +1,12 @@
+mod IR3AC;
 mod lexer;
 mod parser;
 mod semantic;
-mod IR3AC;
 
+use IR3AC::IR;
 use lexer::Lexer;
 use parser::Parser;
 use semantic::Semantic;
-use IR3AC::IR;
 use std::fs;
 
 fn main() {

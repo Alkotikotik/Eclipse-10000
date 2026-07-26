@@ -17,7 +17,7 @@ J-Type (Massive Load / Direct Jumps)
 [25:0]   Immediate  (26 bits: Imm26)
 
 //Register
-Registers are fractured, visual representation is in Fracture.svg file.
+Registers are fractured, visual representation is in Fragmentation.svg file.
 
 //Opcodes
 ALU Instructions (R-Type)

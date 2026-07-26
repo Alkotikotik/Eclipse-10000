@@ -1,5 +1,5 @@
 //Semantic analysis for FLARE-10K, its pretty lightweight but I don't like it
-use crate::parser::{Program, FunctionSignature, StructDef, Stmt, Expr, Type};
+use crate::parser::{Expr, FunctionSignature, Program, Stmt, StructDef, Type};
 use std::collections::HashMap;
 
 pub struct GlobalEnv {
@@ -30,12 +30,17 @@ impl Semantic {
     }
 
     pub fn pop_scope(&mut self) {
-        self.scope_stack.pop().expect("Semantic Error: Scope stack underflow, you are cooked buddy");
+        self.scope_stack
+            .pop()
+            .expect("Semantic Error: Scope stack underflow, you are cooked buddy");
     }
 
     //Panic helper
     fn sem_panic(&self, message: &str, line: usize, character: usize) -> ! {
-        panic!("Semantic Error: {}; line: {}, char: {}", message, line, character);
+        panic!(
+            "Semantic Error: {}; line: {}, char: {}",
+            message, line, character
+        );
     }
 }
 
@@ -54,13 +59,21 @@ impl Semantic {
         if self.is_integer(expected) && self.is_integer(actual) {
             return;
         }
-        self.sem_panic(&format!("Type mismatch: expected {:?}, got {:?}", expected, actual), line, character);
+        self.sem_panic(
+            &format!("Type mismatch: expected {:?}, got {:?}", expected, actual),
+            line,
+            character,
+        );
     }
 
     fn declare(&mut self, name: String, ty: Type, line: usize, character: usize) {
         if let Some(current_scope) = self.scope_stack.last_mut() {
             if current_scope.insert(name.clone(), ty).is_some() {
-                self.sem_panic(&format!("Variable {} redefinition in this scope", name), line, character);
+                self.sem_panic(
+                    &format!("Variable {} redefinition in this scope", name),
+                    line,
+                    character,
+                );
             }
         } else {
             self.sem_panic("Cannot declare variable outside the scope", line, character);
@@ -115,7 +128,11 @@ impl Semantic {
                     Type::Ptr(base_type) => *base_type, //Default deref
                     Type::U32 | Type::I32 => Type::U32, // Allow raw memory address dereferencing
                     _ => {
-                        self.sem_panic(&format!("Cannot dereference non-pointer type {:?}", inner_type), line, character);
+                        self.sem_panic(
+                            &format!("Cannot dereference non-pointer type {:?}", inner_type),
+                            line,
+                            character,
+                        );
                     }
                 }
             }
@@ -129,10 +146,15 @@ impl Semantic {
                 let left_ty = self.check_expr(left, line, character);
                 let right_ty = self.check_expr(right, line, character);
 
-                if left_ty != right_ty && !(self.is_integer(&left_ty) && self.is_integer(&right_ty)) {
+                if left_ty != right_ty && !(self.is_integer(&left_ty) && self.is_integer(&right_ty))
+                {
                     self.sem_panic(
-                        &format!("Type mismatch in binary operation: {:?} and {:?}", left_ty, right_ty),
-                        line, character
+                        &format!(
+                            "Type mismatch in binary operation: {:?} and {:?}",
+                            left_ty, right_ty
+                        ),
+                        line,
+                        character,
                     );
                 }
                 left_ty
@@ -142,24 +164,44 @@ impl Semantic {
                 let left_ty = self.check_expr(left, line, character);
                 let right_ty = self.check_expr(right, line, character);
 
-                if left_ty != right_ty && !(self.is_integer(&left_ty) && self.is_integer(&right_ty)) {
+                if left_ty != right_ty && !(self.is_integer(&left_ty) && self.is_integer(&right_ty))
+                {
                     self.sem_panic(
-                        &format!("Type mismatch in comparison: {:?} and {:?}", left_ty, right_ty),
-                        line, character
+                        &format!(
+                            "Type mismatch in comparison: {:?} and {:?}",
+                            left_ty, right_ty
+                        ),
+                        line,
+                        character,
                     );
                 }
                 Type::Bool
             }
 
             Expr::FunctionCall { name, args } => {
-                let func_sig = self.env.functions.get(name)
-                    .unwrap_or_else(|| self.sem_panic(&format!("Call to undefined function '{}'", name), line, character))
+                let func_sig = self
+                    .env
+                    .functions
+                    .get(name)
+                    .unwrap_or_else(|| {
+                        self.sem_panic(
+                            &format!("Call to undefined function '{}'", name),
+                            line,
+                            character,
+                        )
+                    })
                     .clone();
 
                 if args.len() != func_sig.params.len() {
                     self.sem_panic(
-                        &format!("Function {} expects {} arguments, but got {}", name, func_sig.params.len(), args.len()),
-                        line, character
+                        &format!(
+                            "Function {} expects {} arguments, but got {}",
+                            name,
+                            func_sig.params.len(),
+                            args.len()
+                        ),
+                        line,
+                        character,
                     );
                 }
 
@@ -168,7 +210,7 @@ impl Semantic {
                     self.check_compatibility(&param.ty, &arg_ty, line, character);
                 }
 
-                func_sig.to_return.unwrap_or(Type::U32) 
+                func_sig.to_return.unwrap_or(Type::U32)
             }
 
             Expr::Assign { lhs, rhs } => {
@@ -193,10 +235,16 @@ impl Semantic {
             Expr::FieldAccess { expr, field } => {
                 let expr_ty = self.check_expr(expr, line, character);
                 if let Type::Struct(struct_name) = expr_ty {
-                    let struct_def = self.env.structs.get(&struct_name)
+                    let struct_def = self
+                        .env
+                        .structs
+                        .get(&struct_name)
                         .unwrap_or_else(|| self.sem_panic("Unknown struct", line, character));
 
-                    let field_def = struct_def.fields.iter().find(|f| f.name == *field)
+                    let field_def = struct_def
+                        .fields
+                        .iter()
+                        .find(|f| f.name == *field)
                         .unwrap_or_else(|| self.sem_panic("Field not found", line, character));
 
                     field_def.ty.clone()
@@ -210,30 +258,39 @@ impl Semantic {
                 target_type.clone()
             }
 
-            Expr::Unary { op: _, expr } => {
-                self.check_expr(expr, line, character)
-            }
+            Expr::Unary { op: _, expr } => self.check_expr(expr, line, character),
         }
     }
 
     fn check_stmt(&mut self, stmt: &Stmt, expected_return: &Option<Type>) {
-        let line = 0; 
+        let line = 0;
         let character = 0;
 
         match stmt {
-            Stmt::For { init, cond, inc, body } => {
+            Stmt::For {
+                init,
+                cond,
+                inc,
+                body,
+            } => {
                 self.push_scope();
                 self.check_expr(init, line, character);
 
                 let cond_ty = self.check_expr(cond, line, character);
                 if cond_ty != Type::Bool && !self.is_integer(&cond_ty) {
-                    self.sem_panic("'For' cond must evaluate to bool or int equivalent(1/0)", line, character);
+                    self.sem_panic(
+                        "'For' cond must evaluate to bool or int equivalent(1/0)",
+                        line,
+                        character,
+                    );
                 }
 
                 self.check_expr(inc, line, character);
 
                 self.loop_depth += 1;
-                for s in body { self.check_stmt(s, expected_return); }
+                for s in body {
+                    self.check_stmt(s, expected_return);
+                }
                 self.loop_depth -= 1;
 
                 self.pop_scope();
@@ -242,27 +299,45 @@ impl Semantic {
             Stmt::While { cond, body } => {
                 let cond_ty = self.check_expr(cond, line, character);
                 if cond_ty != Type::Bool && !self.is_integer(&cond_ty) {
-                    self.sem_panic("'While' cond must evaluate to bool or int equivalent(1/0)", line, character);
+                    self.sem_panic(
+                        "'While' cond must evaluate to bool or int equivalent(1/0)",
+                        line,
+                        character,
+                    );
                 }
 
                 self.loop_depth += 1;
-                for s in body { self.check_stmt(s, expected_return); }
+                for s in body {
+                    self.check_stmt(s, expected_return);
+                }
                 self.loop_depth -= 1;
             }
 
-            Stmt::IfElse { cond, main_branch, else_branch } => {
+            Stmt::IfElse {
+                cond,
+                main_branch,
+                else_branch,
+            } => {
                 let cond_ty = self.check_expr(cond, line, character);
                 if cond_ty != Type::Bool && !self.is_integer(&cond_ty) {
-                    self.sem_panic("'If' cond must evaluate to boolean or int equivalent(1/0)", line, character);
+                    self.sem_panic(
+                        "'If' cond must evaluate to boolean or int equivalent(1/0)",
+                        line,
+                        character,
+                    );
                 }
 
                 self.push_scope();
-                for s in main_branch { self.check_stmt(s, expected_return); }
+                for s in main_branch {
+                    self.check_stmt(s, expected_return);
+                }
                 self.pop_scope();
 
                 if let Some(else_stmts) = else_branch {
                     self.push_scope();
-                    for s in else_stmts { self.check_stmt(s, expected_return); }
+                    for s in else_stmts {
+                        self.check_stmt(s, expected_return);
+                    }
                     self.pop_scope();
                 }
             }
@@ -303,7 +378,6 @@ impl Semantic {
 }
 
 impl GlobalEnv {
-
     fn build_global_env(program: &Program) -> GlobalEnv {
         let mut env = GlobalEnv {
             structs: HashMap::new(),
@@ -324,14 +398,20 @@ impl GlobalEnv {
 
             if let Some(Type::Struct(ref struct_name)) = f.to_return {
                 if !env.structs.contains_key(struct_name) {
-                    panic!("Semantic error: Unknown type in function {}, type {}", f.name, struct_name);
+                    panic!(
+                        "Semantic error: Unknown type in function {}, type {}",
+                        f.name, struct_name
+                    );
                 }
             }
 
             for param in &f.params {
                 if let Type::Struct(ref struct_name) = param.ty {
                     if !env.structs.contains_key(struct_name) {
-                        panic!("Semantic error: Unknown type in {}, {}, {}", f.name, param.name, struct_name);
+                        panic!(
+                            "Semantic error: Unknown type in {}, {}, {}",
+                            f.name, param.name, struct_name
+                        );
                     }
                 }
             }

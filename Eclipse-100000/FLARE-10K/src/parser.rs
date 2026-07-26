@@ -62,8 +62,12 @@ pub enum Stmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    U8, U16, U32,
-    I8, I16, I32,
+    U8,
+    U16,
+    U32,
+    I8,
+    I16,
+    I32,
     Bool,
     Struct(String),
     Ptr(Box<Type>),
@@ -201,13 +205,16 @@ impl<'a> Parser<'a> {
         let mut current_type = match tok {
             Token::TypeU32 => Type::U32,
             Token::TypeU16 => Type::U16,
-            Token::TypeU8  => Type::U8,
+            Token::TypeU8 => Type::U8,
             Token::TypeI32 => Type::I32,
             Token::TypeI16 => Type::I16,
-            Token::TypeI8  => Type::I8,
+            Token::TypeI8 => Type::I8,
             Token::TypeBool => Type::Bool,
             Token::Identifier(name) => Type::Struct(name),
-            other => panic!("Parser Error: Expected type, found {:?} at line {}, character {}", other, line, col),
+            other => panic!(
+                "Parser Error: Expected type, found {:?} at line {}, character {}",
+                other, line, col
+            ),
         };
 
         for _ in 0..pointer_count {
@@ -228,7 +235,7 @@ impl<'a> Parser<'a> {
             Token::IntLiteral(val) => Expr::IntLiteral(val),
             Token::HexLiteral(val) => Expr::HexLiteral(val),
             Token::BinaryLiteral(val) => Expr::HexLiteral(val),
-            Token::BoolLiteral(val) => {Expr::IntLiteral(if val { 1 } else { 0 })},
+            Token::BoolLiteral(val) => Expr::IntLiteral(if val { 1 } else { 0 }),
             Token::Identifier(name) => Expr::Identifier(name),
             Token::LBracket => {
                 let inner_expr = self.parse_assign();
@@ -255,14 +262,18 @@ impl<'a> Parser<'a> {
             match token {
                 Token::Dot => {
                     self.advance();
-                    let (next_tok, f_line, f_col) = self.tokens.next().expect("Unexpected EOF after '.'");
+                    let (next_tok, f_line, f_col) =
+                        self.tokens.next().expect("Unexpected EOF after '.'");
                     if let Token::Identifier(field_name) = next_tok {
                         expr = Expr::FieldAccess {
                             expr: Box::new(expr),
                             field: field_name,
                         };
                     } else {
-                        panic!("Parser Error: Expected field ID after after dot, found {:?} at line {}, character {}", next_tok, f_line, f_col);
+                        panic!(
+                            "Parser Error: Expected field ID after after dot, found {:?} at line {}, character {}",
+                            next_tok, f_line, f_col
+                        );
                     }
                 }
                 //Function call
@@ -273,7 +284,10 @@ impl<'a> Parser<'a> {
                     if let Expr::Identifier(name) = expr {
                         expr = Expr::FunctionCall { name, args };
                     } else {
-                        panic!("Parser Error: Left-hand side of function call must be an identifier at line {}, character {}", line, col);
+                        panic!(
+                            "Parser Error: Left-hand side of function call must be an identifier at line {}, character {}",
+                            line, col
+                        );
                     }
                 }
                 _ => break,
@@ -288,7 +302,7 @@ impl<'a> Parser<'a> {
         if let Some(&(Token::As, _, _)) = self.tokens.peek() {
             self.advance();
 
-            let target_type = self.match_type(); 
+            let target_type = self.match_type();
             expr = Expr::Cast {
                 expr: Box::new(expr),
                 target_type,
@@ -402,7 +416,7 @@ impl<'a> Parser<'a> {
             };
             self.advance();
 
-            let right= self.parse_term();
+            let right = self.parse_term();
 
             expr = Expr::Binary {
                 left: Box::new(expr),
@@ -535,7 +549,8 @@ impl<'a> Parser<'a> {
             match &lhs {
                 Expr::Identifier(_) | Expr::Deref(_) | Expr::FieldAccess { .. } => {}
                 other => panic!(
-                    "Parser Error: Invalid lhs value: Only variables or memory addresses can be assigned, found {:?}", other
+                    "Parser Error: Invalid lhs value: Only variables or memory addresses can be assigned, found {:?}",
+                    other
                 ),
             }
 
@@ -988,4 +1003,3 @@ impl<'a> Parser<'a> {
         StructDef { name, fields }
     }
 }
-

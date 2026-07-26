@@ -2,9 +2,18 @@
 #def u32 X_BOUND = 360;
 #def u32 Y_BOUND = 240;
 
+>_ regular struct
 arch PageTableEntry{
     u32 Entry;
     u8 flags;
+};
+
+>_ Struct that is stored in register, total size must be 4 bytes
+regarch rgba {
+    u8 r;
+    u8 g;
+    u8 b;
+    u8 a;
 };
 
 func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 {
@@ -24,6 +33,7 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 {
     sigma.Entry = 20;
     sigma.flags = 1;
 
+    u8 arr[4] = {0, 1, 2, 3};
 
     [0xFFFFFF08] = 4096; >_ standalone value in square brackets always means contents of the address specified
     [0xFFFFFF0C] = 16384;
@@ -33,10 +43,12 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 {
     [value1] = 512; >_ now value = 512
 
 
-    i32 a = 256;
+    #rx0 i32 a = 256; >_ a is stored in rx0 no matter what
     i16 b;
     b = a * -256;
     u8 c;
+    c = arr[0]; >_ c = 0
+
 
     for [u32 i = 0; i < 128; i = i + 1] {
         c = c + 1;

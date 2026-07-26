@@ -4,9 +4,19 @@
     LOAD rx2 <- 0
     LMA rx3 <- 100000
 
-    LMA r4 <- 4088
+    LMA rx4 <- 4088
     LOAD rz50 <- 2
     LOAD ry51 <- 2
+
+    MOV ry61 <- rz50
+    STR [ry61, rx4 - 104]
+    MOV rz50 <- ry61
+    STR [rz50, rx4 - 108]
+
+    MOV rx6 <- ry51
+    STR [rx6, rx4 - 112]
+    MOV ry51 <- rx6
+    STR [ry51, rx4 - 116]
 
     CALL ~A
 

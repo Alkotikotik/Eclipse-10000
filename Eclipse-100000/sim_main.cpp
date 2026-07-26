@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
     std::cout << "Beginning execution with waveform tracing..." << std::endl;
 
     // Main Simulation Loop
-    while (sim_time < 5000 && !Verilated::gotFinish()) {
+    while (sim_time < 21000 && !Verilated::gotFinish()) {
         sim_time++;
         top->clk = !top->clk;
         top->eval();
