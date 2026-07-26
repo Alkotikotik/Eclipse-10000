@@ -1,12 +1,13 @@
 ~Init:
-    LMA rx0 <- 2
-    LMA rx1 <- 1
+    LOAD rx0 <- 0
+    LOAD rx1 <- 1
     LOAD rx2 <- -2042
-    LMA rx3 <- 100000
+    LMA 33000000
+    MOV rx3 <- rx15
     SHL [rx3, rx0]
-    LMA rx0 <- 0
+    LOAD rx0 <- 0
 
-    LMA rx4 <- 4088
+    LOAD rx4 <- 4088
     LOAD rz50 <- 2
     LOAD ry51 <- 2
 

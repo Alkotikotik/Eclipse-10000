@@ -134,7 +134,6 @@ fn main() -> io::Result<()> {
         let mut rx0: u32 = 0;
         let mut rx1: u32 = 0;
         let mut immediate: i64 = 0;
-        let mut dest_reg_4bit: u32 = 0;
 
         match instr.as_str() {
             "LOAD" => {
@@ -147,14 +146,11 @@ fn main() -> io::Result<()> {
             }
             "LMA" => {
                 if tokens.len() > 1 {
-                    dest_reg_4bit = parse_reg_4bit(tokens[1]);
-                }
-                if tokens.len() > 2 {
-                    let target = tokens[2].trim_start_matches('~');
+                    let target = tokens[1].trim_start_matches('~');
                     if let Some(&label_addr) = labels.get(target) {
                         immediate = label_addr as i64;
                     } else {
-                        immediate = parse_imm64(tokens[2]);
+                        immediate = parse_imm64(tokens[1]);
                     }
                 }
             }
@@ -256,8 +252,7 @@ fn main() -> io::Result<()> {
         let machine_code: u32 = match instr.as_str() {
             "LMA" => {
                 ((opcode & 0x3F) << 26)
-                    | ((dest_reg_4bit & 0x0F) << 22)
-                    | (imm_u32 & 0x003F_FFFF)
+                    | ((immediate as u32) & 0x03FF_FFFF)
             }
             "JMP" | "CALL" => {
                 ((opcode & 0x3F) << 26) | (imm_u32 & 0x03FF_FFFF)
@@ -336,7 +331,3 @@ fn parse_reg(reg_str: &str) -> u32 {
     }
 }
 
-fn parse_reg_4bit(reg_str: &str) -> u32 {
-    let addr_7b = parse_reg(reg_str);
-    (addr_7b >> 3) & 0x0F
-}

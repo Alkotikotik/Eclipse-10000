@@ -76,8 +76,8 @@ module CORE(
     logic [31:0] sign_ext_imm19;
     assign sign_ext_imm19 = { {13{IR[18]}}, IR[18:0] };
 
-    logic [31:0] sign_ext_imm22;
-    assign sign_ext_imm22 = { {10{IR[21]}}, IR[21:0] };
+    logic [31:0] sign_ext_imm26;
+    assign sign_ext_imm26 = { {6{IR[25]}}, IR[25:0] };
 
     //Breaking instruction down
     assign opcode = IR[31:26];
@@ -86,9 +86,9 @@ module CORE(
     assign rx2 = IR[11:5];
     assign immediate = IR[11:0];
     assign j_imm_signed = {{6{IR[25]}}, IR[25:0]};
-    assign gpr_rw0_sel = (opcode == 6'b011111) ? {IR[25:22], 3'b000} : // LMA
-                         (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111)   ? rx2 :
-                         rx0;
+    assign gpr_rw0_sel = (opcode == 6'b011111) ? (7'd15 << 3) : // LMA to rx15
+                     (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111) ? rx2 :
+                     rx0;
 
     assign active_address = (IRWrite) ? PC : memTarget;
 
@@ -253,7 +253,7 @@ module CORE(
     assign GPRs_data_in = (GPRsSrc == 3'b001) ? cpu_mem_data_out :
                       (GPRsSrc == 3'b010) ? PC :
                       (GPRsSrc == 3'b011) ? sign_ext_imm19 :
-                      (GPRsSrc == 3'b100) ? sign_ext_imm22 :
+                      (GPRsSrc == 3'b100) ? sign_ext_imm26 :
                       AluResult;
 
     CU control_unit (
