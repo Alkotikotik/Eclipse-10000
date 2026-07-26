@@ -1,7 +1,7 @@
 ~Init:
     LMA rx0 <- 2
     LMA rx1 <- 1
-    LOAD rx2 <- 0
+    LOAD rx2 <- -2042
     LMA rx3 <- 100000
     SHL [rx3, rx0]
     LMA rx0 <- 0
@@ -9,6 +9,10 @@
     LMA rx4 <- 4088
     LOAD rz50 <- 2
     LOAD ry51 <- 2
+
+    STR [rx2, rx4 - 170]
+    LOAD rx10 <- 2043
+    ADD [rx2, rx10]
 
     MOV ry61 <- rz50
     STR [ry61, rx4 - 152]

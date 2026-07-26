@@ -73,11 +73,11 @@ module CORE(
     logic [3:0] ram_byte_enable;
     logic [31:0] ram_data_in_aligned;
 
-    logic [21:0] immediate_22;
-    assign immediate_22 = IR[21:0];
+    logic [31:0] sign_ext_imm19;
+    assign sign_ext_imm19 = { {13{IR[18]}}, IR[18:0] };
 
     logic [31:0] sign_ext_imm22;
-    assign sign_ext_imm22 = { {10{immediate_22[21]}}, immediate_22 };
+    assign sign_ext_imm22 = { {10{IR[21]}}, IR[21:0] };
 
     //Breaking instruction down
     assign opcode = IR[31:26];
@@ -252,7 +252,7 @@ module CORE(
 
     assign GPRs_data_in = (GPRsSrc == 3'b001) ? cpu_mem_data_out :
                       (GPRsSrc == 3'b010) ? PC :
-                      (GPRsSrc == 3'b011) ? sign_ext_imm :
+                      (GPRsSrc == 3'b011) ? sign_ext_imm19 :
                       (GPRsSrc == 3'b100) ? sign_ext_imm22 :
                       AluResult;
 

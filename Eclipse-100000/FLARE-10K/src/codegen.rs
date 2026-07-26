@@ -1,7 +1,7 @@
 //Codegen, lets see what's it about
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RegType {
-    B16,
+    B8,
     B16,
     B32,
 }
@@ -23,20 +23,12 @@ pub enum AsmOperand {
 #[derive(Debug, Clone)]
 pub enum AsmInst {
     Mov(AsmOperand, AsmOperand),
-    Add(AsmOperand, AsmOperand),
-    Sub(AsmOperand, AsmOperand),
-    Mul(AsmOperand, AsmOperand),
+    Add(AsmOperand, AsmOperand, AsmOperand),
+    Sub(AsmOperand, AsmOperand, AsmOperand),
+    Mul(AsmOperand, AsmOperand, AsmOperand),
     Xor(AsmOperand, AsmOperand),
     Or (AsmOperand, AsmOperand),
     And(AsmOperand, AsmOperand),
     Not(AsmOperand),
 }
 
-
-
-
-
-
-
-
-}

@@ -262,6 +262,11 @@ fn main() -> io::Result<()> {
             "JMP" | "CALL" => {
                 ((opcode & 0x3F) << 26) | (imm_u32 & 0x03FF_FFFF)
             }
+            "LOAD" => {
+                ((opcode & 0x3F) << 26)
+                    | ((rx0 & 0x7F) << 19)
+                    | ((immediate as u32) & 0x0007_FFFF)
+            }
             _ => {
                 ((opcode & 0x3F) << 26)
                     | ((rx0 & 0x7F) << 19)
