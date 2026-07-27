@@ -1,0 +1,39 @@
+inline [
+    #ORG 60
+    ~Boot:
+        JMP 0x78
+    ~JmpSyscall:
+        JMP ~HandleSyscall
+    ~JmpTimer:
+        JMP ~HandleTimer
+    ~JmpMemfault:
+        JMP ~HandleMemfault
+outline];
+
+func boot() {
+    >_Boot
+}
+
+inline [
+    ~HandleSyscall
+outline];
+
+func HandleSyscall() {
+    >_ handle syscall
+}
+
+inline [
+    ~HandleTimer
+outline];
+
+func HandleTimer() {
+    >_ handle timer
+}
+
+inline [
+    ~HandleMemfault
+outline];
+
+func HandleMemfault() {
+    >_ handle Memfault
+}
