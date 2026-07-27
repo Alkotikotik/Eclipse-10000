@@ -1,7 +1,5 @@
 //3AC IR generator, again similar to parser, actually most of compiler parts are very similar
-use crate::parser::{
-    BinaryOpKind, Expr, FunctionSignature, MoreLess, Program, Stmt, StructDef, Type, UnaryOpKind,
-};
+use crate::parser::{Program, FunctionSignature, StructDef, Stmt, Expr, Type, MoreLess, BinaryOpKind, UnaryOpKind};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -14,107 +12,37 @@ pub enum IROperand {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum IRInst {
-    Add {
-        dest: IROperand,
-        left: IROperand,
-        right: IROperand,
-    },
-    Sub {
-        dest: IROperand,
-        left: IROperand,
-        right: IROperand,
-    },
-    Mul {
-        dest: IROperand,
-        left: IROperand,
-        right: IROperand,
-    },
-    Shl {
-        dest: IROperand,
-        left: IROperand,
-        right: IROperand,
-    },
-    Shr {
-        dest: IROperand,
-        left: IROperand,
-        right: IROperand,
-    },
-    Xor {
-        dest: IROperand,
-        left: IROperand,
-        right: IROperand,
-    },
-    Or {
-        dest: IROperand,
-        left: IROperand,
-        right: IROperand,
-    },
-    And {
-        dest: IROperand,
-        left: IROperand,
-        right: IROperand,
-    },
+    Add { dest: IROperand, left: IROperand, right: IROperand },
+    Sub { dest: IROperand, left: IROperand, right: IROperand },
+    Mul { dest: IROperand, left: IROperand, right: IROperand },
+    Div { dest: IROperand, left: IROperand, right: IROperand, signed: bool },
+    Mod { dest: IROperand, left: IROperand, right: IROperand, signed: bool },
+    Shl { dest: IROperand, left: IROperand, right: IROperand },
+    Shr { dest: IROperand, left: IROperand, right: IROperand },
+    Xor { dest: IROperand, left: IROperand, right: IROperand },
+    Or  { dest: IROperand, left: IROperand, right: IROperand },
+    And { dest: IROperand, left: IROperand, right: IROperand },
 
-    Not {
-        dest: IROperand,
-        src: IROperand,
-    },
-    Negate {
-        dest: IROperand,
-        src: IROperand,
-    },
-    Cpy {
-        dest: IROperand,
-        src: IROperand,
-    },
-    Cast {
-        dest: IROperand,
-        src: IROperand,
-        target_type: Type,
-    },
+    Not { dest: IROperand, src: IROperand },
+    Negate { dest: IROperand, src: IROperand},
+    Cpy { dest: IROperand, src: IROperand },
+    Cast { dest: IROperand, src: IROperand, target_type: Type },
 
-    LoadPtr {
-        dest: IROperand,
-        ptr_addr: IROperand,
-    },
-    StorePtr {
-        ptr_addr: IROperand,
-        src: IROperand,
-    },
+    LoadPtr  { dest: IROperand, ptr_addr: IROperand },
+    StorePtr { ptr_addr: IROperand, src: IROperand },
 
-    AntiEqual {
-        left: IROperand,
-        right: IROperand,
-        label: String,
-    }, //Branch if false, so they are
-    Equal {
-        left: IROperand,
-        right: IROperand,
-        label: String,
-    }, //Inverted AntiEqual becomes
-    AntiMore {
-        left: IROperand,
-        right: IROperand,
-        label: String,
-        signed: bool,
-    }, //Branch if not equal
-    AntiLess {
-        left: IROperand,
-        right: IROperand,
-        label: String,
-        signed: bool,
-    }, //Branch if more becomes branch
-    //If less
+    AntiEqual { left: IROperand, right: IROperand, label: String }, //Branch if false, so they are
+    Equal     { left: IROperand, right: IROperand, label: String }, //Inverted AntiEqual becomes
+    AntiMore  { left: IROperand, right: IROperand, label: String, signed: bool }, //Branch if not equal 
+    AntiLess  { left: IROperand, right: IROperand, label: String, signed: bool }, //Branch if more becomes branch
+                                                                                  //If less
     Label(String),
     JMP(String), //Jump if 1 == 1
 
-    Call {
-        dest: Option<IROperand>,
-        name: String,
-        args: Vec<IROperand>,
-    },
+    Call { dest: Option<IROperand>, name: String, args: Vec<IROperand> },
     Return(Option<IROperand>),
     InlineAsm(Vec<String>),
+    Pin { var: String, register: String },
 }
 
 #[derive(Debug, Clone)]
@@ -180,20 +108,21 @@ impl IR {
     //Theoretically should have done it in semantic but idc
     pub fn get_type_align(&self, ty: &Type) -> usize {
         match ty {
-            Type::U8 | Type::I8 | Type::Bool => 1,
+            Type::U8  | Type::I8 | Type::Bool => 1,
             Type::U16 | Type::I16 => 2,
             Type::U32 | Type::I32 | Type::Ptr(_) => 4,
+            Type::Array(elem_ty, _) => self.get_type_align(elem_ty),
             Type::Struct(name) => {
-                let struct_def = self
-                    .structs
-                    .get(name)
+                let struct_def = self.structs.get(name)
                     .unwrap_or_else(|| panic!("Unknown struct type: {}", name));
-                struct_def
-                    .fields
-                    .iter()
-                    .map(|f| self.get_type_align(&f.ty))
-                    .max()
-                    .unwrap_or(1)
+                if struct_def.is_reg {
+                    4
+                } else {
+                    struct_def.fields.iter()
+                        .map(|f| self.get_type_align(&f.ty))
+                        .max()
+                        .unwrap_or(1)
+                }
             }
         }
     }
@@ -203,51 +132,51 @@ impl IR {
         match ty {
             Type::U32 | Type::I32 | Type::Ptr(_) => 4,
             Type::U16 | Type::I16 => 2,
-            Type::U8 | Type::I8 | Type::Bool => 1,
+            Type::U8  | Type::I8 | Type::Bool => 1,
+            Type::Array(elem_ty, count) => self.get_type_size(elem_ty) * *count,
             Type::Struct(name) => {
-                let struct_def = self
-                    .structs
-                    .get(name)
+                let struct_def = self.structs.get(name)
                     .unwrap_or_else(|| panic!("Unknown struct type: {}", name));
 
-                let mut current_offset = 0;
-                let mut max_align = 1;
+                if struct_def.is_reg {
+                    struct_def.fields.iter().map(|f| self.get_type_size(&f.ty)).sum()
+                } else {
+                    let mut current_offset = 0;
+                    let mut max_align = 1;
 
-                for field in &struct_def.fields {
-                    let field_align = self.get_type_align(&field.ty);
-                    if field_align > max_align {
-                        max_align = field_align;
+                    for field in &struct_def.fields {
+                        let field_align = self.get_type_align(&field.ty);
+                        if field_align > max_align {
+                            max_align = field_align;
+                        }
+                        current_offset = align_to(current_offset, field_align);
+                        current_offset += self.get_type_size(&field.ty);
                     }
-                    current_offset = align_to(current_offset, field_align);
-                    current_offset += self.get_type_size(&field.ty);
-                }
 
-                align_to(current_offset, max_align)
+                    align_to(current_offset, max_align)
+                }
             }
         }
     }
-
+    
     //Get offset of specific field
     pub fn get_field_offset(&self, struct_name: &str, target_field: &str) -> usize {
-        let struct_def = self
-            .structs
-            .get(struct_name)
+        let struct_def = self.structs.get(struct_name)
             .unwrap_or_else(|| panic!("Unknown struct: {}", struct_name));
 
         let mut offset = 0;
         for field in &struct_def.fields {
-            let field_align = self.get_type_align(&field.ty);
-            offset = align_to(offset, field_align);
+            if !struct_def.is_reg {
+                let field_align = self.get_type_align(&field.ty);
+                offset = align_to(offset, field_align);
+            }
 
             if field.name == target_field {
                 return offset;
             }
             offset += self.get_type_size(&field.ty);
         }
-        panic!(
-            "Field {} not found in the struct {}",
-            target_field, struct_name
-        );
+        panic!("Field {} not found in the struct {}", target_field, struct_name);
     }
 
     //For field access
@@ -255,10 +184,7 @@ impl IR {
         match expr {
             Expr::IntLiteral(_) => Type::I32,
             Expr::HexLiteral(_) => Type::U32,
-            Expr::Identifier(name) => self
-                .var_types
-                .get(name)
-                .cloned()
+            Expr::Identifier(name) => self.var_types.get(name).cloned()
                 .unwrap_or_else(|| panic!("Unknown variable {}", name)),
 
             Expr::Deref(inner) => {
@@ -269,7 +195,16 @@ impl IR {
                     Type::Struct(s) => Type::Struct(s),
                     _ => panic!("Cannot dereference type {:?}", inner_ty),
                 }
-            }
+            },
+
+            Expr::Index { array, .. } => {
+                let array_ty = self.infer_type(array);
+                match array_ty {
+                    Type::Array(elem_ty, _) => *elem_ty,
+                    Type::Ptr(elem_ty) => *elem_ty,
+                    _ => panic!("Cannot index type {:?}", array_ty),
+                }
+            },
 
             Expr::FieldAccess { expr, field } => {
                 let parent_ty = self.infer_type(expr);
@@ -281,7 +216,7 @@ impl IR {
                     panic!("Field access on non-struct type {:?}", parent_ty); //Theoretically
                     //unreachable but who knows
                 }
-            }
+            },
             _ => panic!("Error expression in infer_type: {:?}", expr),
         }
     }
@@ -297,16 +232,25 @@ impl IR {
             Expr::Deref(mem) => {
                 let ptr_addr = self.reduce_expr(mem);
                 let dest = self.new_temp();
-                self.emit(IRInst::LoadPtr {
+                self.emit(IRInst::LoadPtr { 
                     dest: dest.clone(),
-                    ptr_addr,
+                    ptr_addr
                 });
                 dest
             }
 
-            Expr::Ref(mem) => self.lower_lvalue(mem),
+            Expr::Ref(mem) => {
+                self.lower_lvalue(mem)
+            }
 
-            Expr::FunctionCall { name, args } => {
+            Expr::Index { array, index } => {
+                let addr = self.compute_index_addr(array, index);
+                let dest = self.new_temp();
+                self.emit(IRInst::LoadPtr { dest: dest.clone(), ptr_addr: addr });
+                dest
+            }
+
+            Expr::FunctionCall {name, args} => {
                 let dest = self.new_temp();
                 let mut reduced_args = Vec::new();
 
@@ -338,109 +282,115 @@ impl IR {
                 let dest = self.new_temp();
                 let src = self.reduce_expr(expr);
                 let inst = match op {
-                    UnaryOpKind::Not => IRInst::Not {
-                        dest: dest.clone(),
-                        src,
-                    },
-                    UnaryOpKind::Negate => IRInst::Negate {
-                        dest: dest.clone(),
-                        src,
-                    },
+                    UnaryOpKind::Not => IRInst::Not { dest: dest.clone(), src },
+                    UnaryOpKind::Negate => IRInst::Negate { dest: dest.clone(), src },
                 };
                 self.emit(inst);
                 dest
             }
 
-            Expr::Binary { left, op, right } => {
-                let l_op = self.reduce_expr(left);
-                let r_op = self.reduce_expr(right);
-                let dest = self.new_temp();
+            Expr::Binary {left, op, right} => {
+                if matches!(op, BinaryOpKind::Div | BinaryOpKind::Mod) {
+                    let left_ty = self.infer_type(left);
+                    let right_ty = self.infer_type(right);
+                    let is_signed = left_ty == right_ty && matches!(left_ty, Type::I32 | Type::I16 | Type::I8);
 
-                let inst = match op {
-                    BinaryOpKind::Add => IRInst::Add {
-                        dest: dest.clone(),
-                        left: l_op,
-                        right: r_op,
-                    },
-                    BinaryOpKind::Sub => IRInst::Sub {
-                        dest: dest.clone(),
-                        left: l_op,
-                        right: r_op,
-                    },
-                    BinaryOpKind::Mul => IRInst::Mul {
-                        dest: dest.clone(),
-                        left: l_op,
-                        right: r_op,
-                    },
-                    BinaryOpKind::Shl => IRInst::Shl {
-                        dest: dest.clone(),
-                        left: l_op,
-                        right: r_op,
-                    },
-                    BinaryOpKind::Shr => IRInst::Shr {
-                        dest: dest.clone(),
-                        left: l_op,
-                        right: r_op,
-                    },
-                    BinaryOpKind::BitwiseAnd => IRInst::And {
-                        dest: dest.clone(),
-                        left: l_op,
-                        right: r_op,
-                    },
-                    BinaryOpKind::BitwiseOr => IRInst::Or {
-                        dest: dest.clone(),
-                        left: l_op,
-                        right: r_op,
-                    },
-                    BinaryOpKind::BitwiseXor => IRInst::Xor {
-                        dest: dest.clone(),
-                        left: l_op,
-                        right: r_op,
-                    },
-                    _ => panic!("Division isn't implemented yet"),
-                };
-                self.emit(inst);
-                dest
+                    let l_op = self.reduce_expr(left);
+                    let r_op = self.reduce_expr(right);
+                    let dest = self.new_temp();
+
+                    let inst = if matches!(op, BinaryOpKind::Div) {
+                        IRInst::Div { dest: dest.clone(), left: l_op, right: r_op, signed: is_signed }
+                    } else {
+                        IRInst::Mod { dest: dest.clone(), left: l_op, right: r_op, signed: is_signed }
+                    };
+                    self.emit(inst);
+                    dest
+                } else {
+                    let l_op = self.reduce_expr(left);
+                    let r_op = self.reduce_expr(right);
+                    let dest = self.new_temp();
+
+                    let inst = match op {
+                        BinaryOpKind::Add => IRInst::Add { dest: dest.clone(), left: l_op, right: r_op },
+                        BinaryOpKind::Sub => IRInst::Sub { dest: dest.clone(), left: l_op, right: r_op },
+                        BinaryOpKind::Mul => IRInst::Mul { dest: dest.clone(), left: l_op, right: r_op },
+                        BinaryOpKind::Shl => IRInst::Shl { dest: dest.clone(), left: l_op, right: r_op },
+                        BinaryOpKind::Shr => IRInst::Shr { dest: dest.clone(), left: l_op, right: r_op },
+                        BinaryOpKind::BitwiseAnd => IRInst::And { dest: dest.clone(), left: l_op, right: r_op },
+                        BinaryOpKind::BitwiseOr  => IRInst::Or  { dest: dest.clone(), left: l_op, right: r_op },
+                        BinaryOpKind::BitwiseXor => IRInst::Xor { dest: dest.clone(), left: l_op, right: r_op },
+                        BinaryOpKind::Div | BinaryOpKind::Mod => unreachable!(),
+                    };
+                    self.emit(inst);
+                    dest
+                }
             }
 
-            Expr::Assign { lhs, rhs } => {
+            Expr::Assign {lhs, rhs} => {
                 let r_op = self.reduce_expr(rhs);
                 match lhs.as_ref() {
-                    Expr::Identifier(name) => {
-                        //Just assign
+                    Expr::Identifier(name) => { //Just assign
                         self.emit(IRInst::Cpy {
                             dest: IROperand::Var(name.clone()),
-                            src: r_op.clone(),
+                            src: r_op.clone() 
                         });
                         r_op
                     }
-                    _ => {
-                        // Memory location, deref etc
+                    _ => { // Memory location, deref etc
                         let ptr_op = self.lower_lvalue(lhs);
-                        self.emit(IRInst::StorePtr {
-                            ptr_addr: ptr_op,
-                            src: r_op.clone(),
-                        });
+                        self.emit(IRInst::StorePtr { ptr_addr: ptr_op, src: r_op.clone() });
                         r_op
                     }
                 }
             }
             //No MoreLessEq bc without cmp just isn't worth it and i still never use something like
             //a = b<c, nontheless I can still use if to achieve same functionality
-            Expr::VarDecl { ty, name, initial } => {
+            Expr::VarDecl { ty, name, initial, pin } => {
                 self.var_types.insert(name.clone(), ty.clone());
 
-                if let Some(init_expr) = initial {
-                    let init_op = self.reduce_expr(init_expr);
-                    self.emit(IRInst::Cpy {
-                        dest: IROperand::Var(name.clone()),
-                        src: init_op,
-                    });
+                if let Some(reg) = pin {
+                    self.emit(IRInst::Pin { var: name.clone(), register: reg.clone() });
+                }
+
+                match ty {
+                    Type::Array(elem_ty, _) => {
+                        if let Some(init_expr) = initial {
+                            if let Expr::ArrayLiteral(elems) = &**init_expr {
+                                let elem_size = self.get_type_size(elem_ty);
+                                for (i, elem_expr) in elems.iter().enumerate() {
+                                    let val_op = self.reduce_expr(elem_expr);
+                                    let base = IROperand::Var(name.clone());
+                                    let addr = if i == 0 {
+                                        base
+                                    } else {
+                                        let off_temp = self.new_temp();
+                                        self.emit(IRInst::Add {
+                                            dest: off_temp.clone(),
+                                            left: base,
+                                            right: IROperand::UnsignedConstant((i * elem_size) as u32),
+                                        });
+                                        off_temp
+                                    };
+                                    self.emit(IRInst::StorePtr { ptr_addr: addr, src: val_op });
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        if let Some(init_expr) = initial {
+                            let init_op = self.reduce_expr(init_expr);
+                            self.emit(IRInst::Cpy {
+                                dest: IROperand::Var(name.clone()),
+                                src: init_op,
+                            });
+                        }
+                    }
                 }
                 IROperand::Var(name.clone())
             }
 
-            Expr::FieldAccess { expr, .. } => {
+            Expr::FieldAccess {expr, ..} => {
                 let addr = self.lower_lvalue(expr);
                 let dest = self.new_temp();
                 self.emit(IRInst::LoadPtr {
@@ -458,7 +408,7 @@ impl IR {
             Stmt::Expr(expr) => {
                 match expr {
                     //Function with no dest
-                    Expr::FunctionCall { name, args } => {
+                    Expr::FunctionCall {name, args} => {
                         let mut reduced_args = Vec::new();
                         for arg in args {
                             reduced_args.push(self.reduce_expr(arg));
@@ -470,21 +420,14 @@ impl IR {
                             args: reduced_args,
                         });
                     }
-                    _ => {
-                        self.reduce_expr(expr);
-                    } //In any other case
+                    _ => { self.reduce_expr(expr); } //In any other case
                 }
             }
             Stmt::Return(expr) => {
                 let ret_val = expr.as_ref().map(|a| self.reduce_expr(a));
                 self.emit(IRInst::Return(ret_val));
             }
-            Stmt::For {
-                init,
-                cond,
-                inc,
-                body,
-            } => {
+            Stmt::For{init, cond, inc, body} => {
                 let start_label = self.new_label("for_start");
                 let end_label = self.new_label("for_end");
 
@@ -506,7 +449,7 @@ impl IR {
                 self.emit(IRInst::Label(end_label));
             }
 
-            Stmt::While { cond, body } => {
+            Stmt::While {cond, body} => {
                 let start_label = self.new_label("while_start");
                 let end_label = self.new_label("while_end");
 
@@ -526,11 +469,7 @@ impl IR {
                 self.emit(IRInst::JMP(start_label));
                 self.emit(IRInst::Label(end_label));
             }
-            Stmt::IfElse {
-                cond,
-                main_branch,
-                else_branch,
-            } => {
+            Stmt::IfElse {cond, main_branch, else_branch} => {
                 let else_label = self.new_label("else");
                 let end_label = self.new_label("endif");
 
@@ -572,6 +511,7 @@ impl IR {
     }
 
     pub fn reduce_everything(&mut self, program: &Program) -> IRProgram {
+
         let mut ir_globals: Vec<Expr> = Vec::new();
         for global in &program.globals {
             if let Expr::VarDecl { ty, name, .. } = &global.decl {
@@ -590,6 +530,7 @@ impl IR {
             globals: ir_globals,
             functions: ir_funcs,
         }
+
     }
 
     fn reduce_func(&mut self, func: &FunctionSignature) -> IRFunction {
@@ -599,8 +540,7 @@ impl IR {
         self.emit(IRInst::Label(func.name.clone()));
 
         let mut param_names = Vec::new();
-        for param in &func.params {
-            //Params are basically just regular vars in 3AC
+        for param in &func.params { //Params are basically just regular vars in 3AC
             self.var_types.insert(param.name.clone(), param.ty.clone());
             param_names.push(param.name.clone());
         }
@@ -623,6 +563,7 @@ impl IR {
             params: param_names,
             body: self.insts_buffer.clone(),
         }
+
     }
 
     fn reduce_cond(&mut self, expr: &Expr, false_label: String) {
@@ -633,36 +574,16 @@ impl IR {
 
                 let left_ty = self.infer_type(left);
                 let right_ty = self.infer_type(right);
-                let is_signed =
-                    left_ty == right_ty && matches!(left_ty, Type::I32 | Type::I16 | Type::I8);
+                let is_signed = left_ty == right_ty && matches!(left_ty, Type::I32 | Type::I16 | Type::I8);
                 let inst = match op {
-                    MoreLess::Eq => IRInst::AntiEqual {
-                        left: l_op,
-                        right: r_op,
-                        label: false_label,
-                    },
-                    MoreLess::NotEq => IRInst::Equal {
-                        left: l_op,
-                        right: r_op,
-                        label: false_label,
-                    },
-                    MoreLess::More => IRInst::AntiMore {
-                        left: l_op,
-                        right: r_op,
-                        label: false_label,
-                        signed: is_signed,
-                    },
-                    MoreLess::Less => IRInst::AntiLess {
-                        left: l_op,
-                        right: r_op,
-                        label: false_label,
-                        signed: is_signed,
-                    },
+                    MoreLess::Eq    => IRInst::AntiEqual { left: l_op, right: r_op, label: false_label },
+                    MoreLess::NotEq => IRInst::Equal     { left: l_op, right: r_op, label: false_label },
+                    MoreLess::More  => IRInst::AntiMore  { left: l_op, right: r_op, label: false_label, signed: is_signed },
+                    MoreLess::Less  => IRInst::AntiLess  { left: l_op, right: r_op, label: false_label, signed: is_signed },
                 };
                 self.emit(inst);
             }
-            _ => {
-                // For like "while [1]{}" or "if [c]{}"
+            _ => { // For like "while [1]{}" or "if [c]{}"
                 let cond_op = self.reduce_expr(expr);
                 self.emit(IRInst::AntiEqual {
                     left: cond_op,
@@ -675,9 +596,17 @@ impl IR {
 
     fn lower_lvalue(&mut self, expr: &Expr) -> IROperand {
         match expr {
-            Expr::Identifier(name) => IROperand::Var(name.clone()),
+            Expr::Identifier(name) => {
+                IROperand::Var(name.clone())
+            }
 
-            Expr::Deref(ptr_expr) => self.reduce_expr(ptr_expr),
+            Expr::Deref(ptr_expr) => {
+                self.reduce_expr(ptr_expr)
+            }
+
+            Expr::Index { array, index } => {
+                self.compute_index_addr(array, index)
+            }
 
             Expr::FieldAccess { expr, field } => {
                 let parent_type = self.infer_type(expr);
@@ -713,8 +642,36 @@ impl IR {
                         dest
                     }
                 }
-            }
+            },
             _ => panic!("Invalid l-value"),
+        }
+    }
+
+    fn compute_index_addr(&mut self, array: &Expr, index: &Expr) -> IROperand {
+        let array_ty = self.infer_type(array);
+        let (elem_ty, base_addr) = match array_ty {
+            Type::Array(elem_ty, _) => (*elem_ty, self.lower_lvalue(array)),
+            Type::Ptr(elem_ty) => (*elem_ty, self.reduce_expr(array)),
+            other => panic!("Cannot index into type {:?}", other),
+        };
+
+        let elem_size = self.get_type_size(&elem_ty);
+        let index_op = self.reduce_expr(index);
+
+        if elem_size == 1 {
+            let addr = self.new_temp();
+            self.emit(IRInst::Add { dest: addr.clone(), left: base_addr, right: index_op });
+            addr
+        } else {
+            let offset = self.new_temp();
+            self.emit(IRInst::Mul {
+                dest: offset.clone(),
+                left: index_op,
+                right: IROperand::UnsignedConstant(elem_size as u32),
+            });
+            let addr = self.new_temp();
+            self.emit(IRInst::Add { dest: addr.clone(), left: base_addr, right: offset });
+            addr
         }
     }
 }

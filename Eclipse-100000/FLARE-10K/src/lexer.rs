@@ -14,6 +14,7 @@ pub enum Token {
     Def,
     Return,
     Arch,
+    Regarch,
 
     Identifier(String),
     IntLiteral(i32),
@@ -38,6 +39,7 @@ pub enum Token {
     Asterix,
     Dot,
     Div,
+    Percent,
     Comma,
     Colon,
     Semicolon,
@@ -60,6 +62,7 @@ pub enum Token {
     RBrace,
 
     InlineBlock(String),
+    Pin(String),
 }
 
 #[derive(Clone)]
@@ -119,6 +122,12 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        if let Some(reg_name) = ident.strip_prefix("#r") {
+            if !reg_name.is_empty() && reg_name.chars().all(|c| c.is_alphanumeric()) {
+                return Token::Pin(format!("r{}", reg_name));
+            }
+        }
+
         match ident.as_str() {
             "func" => Token::Func,
             "for" => Token::For,
@@ -137,10 +146,12 @@ impl<'a> Lexer<'a> {
             "bool" => Token::TypeBool,
             "#def" => Token::Def,
             "arch" => Token::Arch,
+            "regarch" => Token::Regarch,
             "return" => Token::Return,
             "as" => Token::As,
             "true" => Token::BoolLiteral(true),
             "false" => Token::BoolLiteral(false),
+            "NULL" => Token::IntLiteral(0),
             _ => Token::Identifier(ident),
         }
     }
@@ -255,6 +266,7 @@ impl<'a> Iterator for Lexer<'a> {
             '-' => Token::Sub,
             '*' => Token::Asterix,
             '/' => Token::Div,
+            '%' => Token::Percent,
             '.' => Token::Dot,
             '^' => Token::Hat,
             '|' => Token::Line,
@@ -276,10 +288,10 @@ impl<'a> Iterator for Lexer<'a> {
                     self.advance();
                     self.skip_comment();
                     return self.next();
-                } else if self.peek() == Some(&'>') {
+                }  else if self.peek() == Some(&'>'){
                     self.advance();
                     Token::Shr
-                } else {
+                }  else {
                     Token::More
                 }
             }

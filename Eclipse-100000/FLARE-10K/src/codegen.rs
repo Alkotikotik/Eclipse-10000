@@ -65,7 +65,7 @@ pub enum AsmInst {
     Bss (Label),
 
     Jmp (Label),
-    Jr (AsmOperand),
+    Jr  (AsmOperand),
     Call (Label),
     Ret,
 
