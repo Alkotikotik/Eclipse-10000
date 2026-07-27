@@ -2,6 +2,8 @@ use crate::IR3AC::{IRInst, IRFunction, IROperand};
 use std::collections::HashMap;
 use std::collections::HashSet;
 //Codegen, lets see what's it about
+//Technically when I use "alive" its incorrect because the right term for it is just "live"
+//But I don't like how plain "live" sound so ill use "alive"
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RegType {
@@ -30,6 +32,10 @@ pub struct BasicBlock {
     pub body: Vec<IRInst>,
     pub predecessors: Vec<usize>,
     pub successors: Vec<usize>,
+    pub uevar: HashSet<IROperand>,
+    pub varkill: HashSet<IROperand>,
+    pub live_in: HashSet<IROperand>, //Alive at the start of the block
+    pub live_out: HashSet<IROperand>, //Alive at the end of the block
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -82,6 +88,9 @@ pub enum AsmInst {
 }
 
 impl IRInst {
+    pub fn is_var(&self) -> bool {
+        matches!(self, IROperand::Var(_) | IROperand::Temp(_))
+    }
     //If the value is being read
     pub fn uses(&self) -> Vec<IROperand> {
         let mut ls = Vec::new();
@@ -170,7 +179,7 @@ impl IRInst {
 //If it isn't being read though, it is dead. If value is overwritten before its being read from its
 //dead too
 impl BasicBlock {
-    pub fn compute_uevar_varkill(&self) -> (HashSet<IROperand>, HashSet<IROperand>) {
+    pub fn compute_uevar_varkill(&mut self){
         //Upward Exposed Variable meaning it is read in current
         //block but not declared so it relies on predecessors to declare it
         let mut uevar = HashSet::new();
@@ -190,7 +199,8 @@ impl BasicBlock {
             }
         }
 
-        (uevar, varkill)
+        self.uevar = uevar;
+        self.varkill = varkill;
     }
 }
 
@@ -216,12 +226,7 @@ impl<'a> Codegen<'a> {
         codegen.build_cfg(&ir_func.instructions);
         codegen
     }
-
-    pub fn is_var(&self) -> bool {
-        matches!(self, IROperand::Var(_) | IROperand::Temp(_))
-    }
-
-    }
+}
 
 impl<'a> Codegen<'a> {
 
@@ -341,5 +346,43 @@ impl<'a> Codegen<'a> {
         self.build_suc_prec();
         self.cfg.clone()
 
+    }
+
+    fn compute_liveness(&mut self) {
+        for block in self.cfg {
+            self.cfg.blocks[block].compute_uevar_varkill();
+        }
+        let mut changed = true;
+
+        //Looping while live_in/live_out are changing
+        while changed {
+            changed = false;
+            //Looping in reverse because im don't feel like explaining
+            for i in (0..self.cfg.len()).rev() {
+
+                //Computing new live_out
+                //LiveOut = Union of LiveIn[succ] for all succs
+                let mut new_live_out = HashSet::new();
+                for &succ_id in &self.cfg[i].successors {
+                    new_live_out.extend(self.cfg[succ_id].live_in.clone());
+                }
+
+                //Computing new live_in 
+                //LiveIn = UEVar[current] union (LiveOut[current] minus VarKill[current])
+                let mut new_live_in = self.cfg[i].uevar.clone();.
+                for var in &new_live_out {
+                    if !self.cfg[i].varkill.contains(var) { //Minus VarKill
+                        new_live_in.insert(var.clone()); //Union with LiveOut
+                    }
+                }
+
+                //Check if new_live_out or new_live_in have changed if yes, continue if no, break
+                if new_live_out != self.cfg[i].live_out || new_live_in != self.cfg[i].live_in {
+                    self.cfg[i].live_out = new_live_out;
+                    self.cfg[i].live_in = new_live_in;
+                    changed = true;
+                }
+            }
+        }
     }
 }
