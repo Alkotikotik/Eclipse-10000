@@ -1,5 +1,6 @@
-use crate::IR3AC::{IRInst, IRFunction};
+use crate::IR3AC::{IRInst, IRFunction, IROperand};
 use std::collections::HashMap;
+use std::collections::HashSet;
 //Codegen, lets see what's it about
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -80,6 +81,119 @@ pub enum AsmInst {
 
 }
 
+impl IRInst {
+    //If the value is being read
+    pub fn uses(&self) -> Vec<IROperand> {
+        let mut ls = Vec::new();
+
+        match self {
+            IRInst::Add { left, right, .. } 
+            | IRInst::Sub { left, right, .. }
+            | IRInst::Mul { left, right, .. }
+            | IRInst::Div { left, right, .. }
+            | IRInst::Mod { left, right, .. }
+            | IRInst::Shl { left, right, .. }
+            | IRInst::Shr { left, right, .. }
+            | IRInst::Xor { left, right, .. }
+            | IRInst::Or  { left, right, .. }
+            | IRInst::And { left, right, .. }
+            | IRInst::AntiEqual { left, right, .. }
+            | IRInst::Equal { left, right, .. }
+            | IRInst::AntiMore { left, right, .. }
+            | IRInst::AntiLess { left, right, .. } => {
+                if left.is_var() { ls.push(left.clone()); }
+                if right.is_var() { ls.push(right.clone()); }
+            }
+
+            IRInst::Not { src, .. }
+            | IRInst::Negate { src, .. }
+            | IRInst::Cpy { src, .. }
+            | IRInst::Cast { src, .. }
+            | IRInst::LoadPtr { ptr_addr: src, .. } => {
+                if src.is_var() { ls.push(src.clone()); }
+            }
+
+            IRInst::StorePtr { ptr_addr, src } => {
+                if ptr_addr.is_var() { ls.push(ptr_addr.clone()); }
+                if src.is_var() { ls.push(src.clone()); }
+            }
+
+            IRInst::Call { args, .. } => {
+                for arg in args {
+                    if arg.is_var() { ls.push(arg.clone()); }
+                }
+            }
+
+            IRInst::Return(Some(val)) => {
+                if val.is_var() { ls.push(val.clone()); }
+            }
+
+            _ => {}
+        }
+        ls
+    }
+
+
+    //If a value is being rewritten(killed)
+    pub fn kills(&self) -> Vec<IROperand> {
+        let mut ls = Vec::new();
+        match self {
+            IRInst::Add { dest, .. }
+            | IRInst::Sub { dest, .. }
+            | IRInst::Mul { dest, .. }
+            | IRInst::Div { dest, .. }
+            | IRInst::Mod { dest, .. }
+            | IRInst::Shl { dest, .. }
+            | IRInst::Shr { dest, .. }
+            | IRInst::Xor { dest, .. }
+            | IRInst::Or  { dest, .. }
+            | IRInst::And { dest, .. }
+            | IRInst::Not { dest, .. }
+            | IRInst::Negate { dest, .. }
+            | IRInst::Cpy { dest, .. }
+            | IRInst::Cast { dest, .. }
+            | IRInst::LoadPtr { dest, .. } => {
+                if dest.is_var() { ls.push(dest.clone()); }
+            }
+
+            IRInst::Call { dest: Some(dest), .. } => {
+                if dest.is_var() { ls.push(dest.clone()); }
+            }
+
+            _ => {}
+        }
+        ls
+    }
+}
+
+//Calculating variable's liveless variable is alive if it is read from in any of the successors
+//If it isn't being read though, it is dead. If value is overwritten before its being read from its
+//dead too
+impl BasicBlock {
+    pub fn compute_uevar_varkill(&self) -> (HashSet<IROperand>, HashSet<IROperand>) {
+        //Upward Exposed Variable meaning it is read in current
+        //block but not declared so it relies on predecessors to declare it
+        let mut uevar = HashSet::new();
+        //If the variable is overwritten in the current block
+        let mut varkill = HashSet::new();
+
+        for inst in &self.body {
+            //If variable is read before it has been varkilled(or not varkilled at all) in the current block it goes into uever
+            for var in inst.uses() {
+                if !varkill.contains(&var) {
+                    uevar.insert(var);
+                }
+            }
+            //If variable is killed in that block we insert it into varkill
+            for var in inst.kills() {
+                varkill.insert(var);
+            }
+        }
+
+        (uevar, varkill)
+    }
+}
+
 pub struct Codegen<'a> {
     ir_func: &'a IRFunction,
     cfg: Vec<BasicBlock>,
@@ -103,7 +217,11 @@ impl<'a> Codegen<'a> {
         codegen
     }
 
-}
+    pub fn is_var(&self) -> bool {
+        matches!(self, IROperand::Var(_) | IROperand::Temp(_))
+    }
+
+    }
 
 impl<'a> Codegen<'a> {
 

@@ -2,7 +2,7 @@
 use crate::parser::{Program, FunctionSignature, StructDef, Stmt, Expr, Type, MoreLess, BinaryOpKind, UnaryOpKind};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IROperand {
     SignedConstant(i32),
     UnsignedConstant(u32),
