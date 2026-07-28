@@ -66,6 +66,7 @@ pub struct IR {
     structs: HashMap<String, StructDef>,
     var_types: HashMap<String, Type>,
     loop_exit_stack: Vec<String>,
+    current_return_var: Option<String>,
 }
 
 //Helpers
@@ -83,6 +84,7 @@ impl IR {
             structs,
             var_types: HashMap::new(),
             loop_exit_stack: Vec::new(),
+            current_return_var: None,
         }
     }
     pub fn new_temp(&mut self) -> IROperand {
@@ -424,7 +426,10 @@ impl IR {
                 }
             }
             Stmt::Return(expr) => {
-                let ret_val = expr.as_ref().map(|a| self.reduce_expr(a));
+                let ret_val = match expr {
+                    Some(e) => Some(self.reduce_expr(e)),
+                    None => self.current_return_var.as_ref().map(|n| IROperand::Var(n.clone())),
+                };
                 self.emit(IRInst::Return(ret_val));
             }
             Stmt::For{init, cond, inc, body} => {
@@ -536,13 +541,22 @@ impl IR {
     fn reduce_func(&mut self, func: &FunctionSignature) -> IRFunction {
         self.insts_buffer.clear();
         self.reset_temp();
+        self.current_return_var = func.return_name.clone();
 
         self.emit(IRInst::Label(func.name.clone()));
 
         let mut param_names = Vec::new();
-        for param in &func.params { //Params are basically just regular vars in 3AC
+        for param in &func.params {
             self.var_types.insert(param.name.clone(), param.ty.clone());
             param_names.push(param.name.clone());
+        }
+
+        if let (Some(ret_name), Some(ret_ty)) = (&func.return_name, &func.to_return) {
+            self.var_types.insert(ret_name.clone(), ret_ty.clone());
+            self.emit(IRInst::Cpy { dest: IROperand::Var(ret_name.clone()), src: IROperand::SignedConstant(0) });
+            if let Some(reg) = &func.return_pin {
+                self.emit(IRInst::Pin { var: ret_name.clone(), register: reg.clone() });
+            }
         }
 
         for stmt in &func.body {
@@ -555,7 +569,8 @@ impl IR {
         };
 
         if is_def_ret_needed {
-            self.emit(IRInst::Return(None));
+            let implicit_ret = self.current_return_var.as_ref().map(|n| IROperand::Var(n.clone()));
+            self.emit(IRInst::Return(implicit_ret));
         }
 
         IRFunction {
@@ -563,7 +578,6 @@ impl IR {
             params: param_names,
             body: self.insts_buffer.clone(),
         }
-
     }
 
     fn reduce_cond(&mut self, expr: &Expr, false_label: String) {

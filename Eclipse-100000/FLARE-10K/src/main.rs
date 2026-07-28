@@ -17,7 +17,7 @@ fn main() {
     println!("Lexer:");
     let lexer_debug = Lexer::new(&src, 1, 1);
     for token in lexer_debug {
-        println!("[ {:?} ]", token);
+        //println!("[ {:?} ]", token);
     }
 
     println!("Parser");
@@ -28,7 +28,7 @@ fn main() {
     let ast = parser.parse_everything();
 
     println!("Parser Success! Generated AST:");
-    println!("{:#?}", ast);
+    //println!("{:#?}", ast);
 
     println!("Semantic");
     let mut semantic_analyzer = Semantic::new(&ast);

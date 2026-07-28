@@ -18,6 +18,8 @@ pub struct FunctionSignature {
     pub name: String,
     pub params: Vec<ParamField>,
     pub to_return: Option<Type>,
+    pub return_name: Option<String>,
+    pub return_pin: Option<String>,
     pub body: Vec<Stmt>,
 }
 
@@ -166,6 +168,7 @@ impl<'a> Parser<'a> {
     }
 
     fn advance(&mut self) -> Token {
+        //Unexpected EOF often indicates forgotten bracket, brace of paran
         let (tok, _line, _col) = self.tokens.next().expect("Unexpected EOF");
         tok
     }
@@ -258,7 +261,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    //Parse function calls and postfixes(field access)
+    //Parse function calls and postfixes(field access like Struct.field)
     fn parse_postfix(&mut self) -> Expr {
         let mut expr = self.parse_atomic();
 
@@ -301,7 +304,7 @@ impl<'a> Parser<'a> {
         }
         expr
     }
-    //Cast works just as in rust, its pretty convinient falls to atomic
+    //Cast works just as in rust, its pretty convinient falls to postfix
     fn parse_cast(&mut self) -> Expr {
         let mut expr = self.parse_postfix();
 
@@ -316,7 +319,7 @@ impl<'a> Parser<'a> {
         }
         expr
     }
-    //Unary is singalar values operations, like -val or !val, falls to cast if no ! or -
+    //Unary is singalar values operations, like -val or !val, falls to cast if no ! or postfix
     fn parse_unary(&mut self) -> Expr {
         match self.tokens.peek() {
             Some(&(Token::Sub, _, _)) => {
@@ -356,7 +359,6 @@ impl<'a> Parser<'a> {
                     self.advance();
                     let right = self.parse_unary(); //Parsing RHS with unary bc it can be eg -val
 
-                    //Store as node for code generation later
                     expr = Expr::Binary {
                         left: Box::new(expr),
                         op: BinaryOpKind::Mul,
@@ -658,7 +660,7 @@ impl<'a> Parser<'a> {
                 Token::Comma => {}
                 Token::RBrace => break,
                 other => panic!(
-                    "Parser Error: Expected ',' or '}}' in array literal, but found {:?} at line {}, character {}",
+                    "Parser Error: Expected , or '}}' in array literal, but found {:?} at line {}, character {}",
                     other, line, col
                 ),
             }
@@ -856,7 +858,14 @@ impl<'a> Parser<'a> {
         args
     }
 
-    //Parsing whole program, very top of precedence table
+    //Parsing whole program, in other words generating AST
+    //Abstract Syntax Tree (AST) is a tree where nodes data elements like 
+    //stmts, exprs identifiers, operations hex/int literals and etc 
+    //And edges are connections between then. For example comsider 
+    //Popular example of a+b*c, AST for it is
+    // a +
+    //    /\
+    //    b*c
     pub fn parse_everything(&mut self) -> Program {
         let mut program = Program {
             structs: Vec::new(),
@@ -876,6 +885,13 @@ impl<'a> Parser<'a> {
                 }
                 Token::Def => {
                     self.advance();
+                    let pin = if let Some(&(Token::Pin(ref reg), _, _)) = self.tokens.peek() {
+                        let r = reg.clone();
+                        self.advance();
+                        Some(r)
+                    } else {
+                        None
+                    };
                     let var_expr = self.parse_var_decl(None);
                     self.expect(Token::Semicolon);
                     program.globals.push(GlobalDef { decl: var_expr });
@@ -898,6 +914,9 @@ impl<'a> Parser<'a> {
         let mut params: Vec<ParamField> = Vec::new();
         let to_return: Option<Type>;
         let mut body: Vec<Stmt> = Vec::new();
+
+        let mut return_name: Option<String> = None;
+        let mut return_pin: Option<String> = None;
 
         if let Some(&(Token::Identifier(ref a), _, _)) = self.tokens.peek() {
             name = a.clone();
@@ -972,6 +991,11 @@ impl<'a> Parser<'a> {
         if let Some(&(Token::ToRet, _, _)) = self.tokens.peek() {
             self.advance();
 
+            if let Some(&(Token::Pin(ref reg), _, _)) = self.tokens.peek() {
+                return_pin = Some(reg.clone());
+                self.advance();
+            }
+
             if let Some(&(ref token, line, col)) = self.tokens.peek() {
                 if matches!(
                     token,
@@ -995,6 +1019,11 @@ impl<'a> Parser<'a> {
             } else {
                 panic!("Parser Error: Expected return type after =>, reached End of File");
             }
+
+            if let Some(&(Token::Identifier(ref n), _, _)) = self.tokens.peek() {
+                return_name = Some(n.clone());
+                self.advance();
+            }
         } else {
             to_return = None;
         }
@@ -1012,6 +1041,8 @@ impl<'a> Parser<'a> {
             name,
             params,
             to_return,
+            return_name,
+            return_pin,
             body,
         }
     }

@@ -38,6 +38,11 @@ pub struct BasicBlock {
     pub live_out: HashSet<IROperand>, //Alive at the end of the block
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterferenceGraph {
+    pub everything: HashMap<IROperand, HashSet<IROperand>>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Reg {
     Virtual(usize, RegType),
@@ -204,6 +209,27 @@ impl BasicBlock {
     }
 }
 
+impl InterferenceGraph {
+    pub fn new() -> Self {
+        Self {everything: HashMap::new()}
+    }
+
+    pub fn add_node(&mut self, node: IROperand) {
+        //or_default returns &mut to current value if the
+        //key exists or just inserts it if it doesn't
+        self.everything.entry(node).or_default();
+    }
+
+    pub fn add_edge(&mut self, first: IROperand, second: IROperand) {
+        if first != second {
+            //This addsd undirected edge meaning its a two way interference, if A interferes with B 
+            //B automatically interference with A which makes sense
+            self.everything.entry(first.clone()).or_default().insert(second.clone());
+            self.everything.entry(second).or_default().insert(first);
+        }
+    }
+}
+
 pub struct Codegen<'a> {
     ir_func: &'a IRFunction,
     cfg: Vec<BasicBlock>,
@@ -349,8 +375,8 @@ impl<'a> Codegen<'a> {
     }
 
     fn compute_liveness(&mut self) {
-        for block in self.cfg {
-            self.cfg.blocks[block].compute_uevar_varkill();
+        for block in &mut self.cfg {
+            block.compute_uevar_varkill();
         }
         let mut changed = true;
 
@@ -384,5 +410,36 @@ impl<'a> Codegen<'a> {
                 }
             }
         }
+    }
+    //InterferenceGraph where nodes are Var or Temp representing data that needs to be somewhere
+    //during execution, so in registers or memory. And edges represent Interference meaning they
+    //live at the same time and physically cannot share the same register and technically memory
+    //location too, but it doesn't even matter
+    pub fn build_iterf_graph(&mut self) -> InterferenceGraph {
+        let mut graph = InterferenceGraph::new();
+
+        for block in &self.cfg {
+            let mut live = block.live_out.clone();
+
+            for var in &live {
+                graph.add_node(var.clone());
+            }
+
+            for inst in block.body.iter().rev() {
+                for definition in inst.kills() {
+                    graph.add_node(definition.clone())
+                    for live_var in &live {
+                        graph.add_edge(definition.clone(), live_var.clone());
+                    }
+                    live.remove(&definition)
+                }
+
+                for use_var in inst.uses() {
+                    graph.add_node(use_var.clone());
+                    live.insert(use_var);
+                }
+            }
+        }
+        graph
     }
 }

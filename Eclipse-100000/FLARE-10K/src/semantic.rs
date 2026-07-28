@@ -12,6 +12,7 @@ pub struct Semantic {
     env: GlobalEnv,
     scope_stack: Vec<HashMap<String, Type>>,
     loop_depth: usize,
+    current_return_name: Option<String>,
 }
 
 impl Semantic {
@@ -22,6 +23,7 @@ impl Semantic {
             env: global_env,
             scope_stack: Vec::new(),
             loop_depth: 0,
+            current_return_name: None,
         }
     }
 
@@ -94,9 +96,14 @@ impl Semantic {
     fn check_function(&mut self, func: &FunctionSignature) {
         self.push_scope();
         self.loop_depth = 0;
+        self.current_return_name = func.return_name.clone();
 
         for param in &func.params {
             self.declare(param.name.clone(), param.ty.clone(), 0, 0);
+        }
+
+        if let (Some(ret_name), Some(ret_ty)) = (&func.return_name, &func.to_return) {
+            self.declare(ret_name.clone(), ret_ty.clone(), 0, 0);
         }
 
         for stmt in &func.body {
@@ -342,7 +349,8 @@ impl Semantic {
                         let ret_ty = self.check_expr(expr, line, character);
                         self.check_compatibility(expected_ty, &ret_ty, line, character);
                     }
-                    (None, None) => {} //Void return
+                    (None, None) => {}
+                    (None, Some(_)) if self.current_return_name.is_some() => {}
                     _ => self.sem_panic("Function exit", line, character),
                 }
             }
