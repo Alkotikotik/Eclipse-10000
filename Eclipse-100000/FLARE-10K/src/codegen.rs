@@ -5,6 +5,8 @@ use std::collections::HashSet;
 //Technically when I use "alive" its incorrect because the right term for it is just "live"
 //But I don't like how plain "live" sound so ill use "alive"
 
+const REGS_N = 31; //rx31 scratchpad/0
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RegType {
     B8,
@@ -40,7 +42,7 @@ pub struct BasicBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterferenceGraph {
-    pub everything: HashMap<IROperand, HashSet<IROperand>>,
+    pub adjacent: HashMap<IROperand, HashSet<IROperand>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -211,22 +213,28 @@ impl BasicBlock {
 
 impl InterferenceGraph {
     pub fn new() -> Self {
-        Self {everything: HashMap::new()}
+        Self {adjacent: HashMap::new()}
     }
 
     pub fn add_node(&mut self, node: IROperand) {
         //or_default returns &mut to current value if the
         //key exists or just inserts it if it doesn't
-        self.everything.entry(node).or_default();
+        self.adjacent.entry(node).or_default();
     }
 
     pub fn add_edge(&mut self, first: IROperand, second: IROperand) {
         if first != second {
             //This addsd undirected edge meaning its a two way interference, if A interferes with B 
             //B automatically interference with A which makes sense
-            self.everything.entry(first.clone()).or_default().insert(second.clone());
-            self.everything.entry(second).or_default().insert(first);
+            self.adjacent.entry(first.clone()).or_default().insert(second.clone());
+            self.adjacent.entry(second).or_default().insert(first);
         }
+    }
+    pub fn get_degree(&self, node: &IROperand, active_nodes: &HashSet<IROperand>) -> usize {
+        self.adj
+            .get(node)
+            .map(|neighbors| neighbors.iter().filter(|n| active_nodes.contains(n)).count())
+            .unwrap_or(0)
     }
 }
 
@@ -252,6 +260,7 @@ impl<'a> Codegen<'a> {
         codegen.build_cfg(&ir_func.instructions);
         codegen
     }
+
 }
 
 impl<'a> Codegen<'a> {
@@ -441,5 +450,49 @@ impl<'a> Codegen<'a> {
             }
         }
         graph
+    }
+
+    //This is Chaitin-Briggs Register Allocation algorithm I really like it its NP-Complete btw, so 
+    //I first constructed interference graph, now its time to color it, where each color represents
+    //one physcial register and also isn't actually a color but just a number.
+    //First step is coloring, each node(variable) has a degree and if degree is less than number of physical
+    //registers then node will get into physical register no matter what, it is just common sense.
+    //So we first find such as nodes and remove it from the graph by setting its degree to -1, thus
+    //decreasing degree of every neighbor by 1 and then pushing it on the allocation stack.
+    //However the problem arises: what if we are left with only registers who's degree is more than
+    //number of physcial registers, well then we just remove any node from the graph and pushing it
+    //on the stack. And later if there are no avaliable register in the time of that variable it
+    //will be spilled, however if there is we will just put it in the register.
+    pub fn coloring(&mut self) -> Vec<IROperand> {
+        let graph = self.build_iterf_graph();
+
+        // Set of nodes in the current graph
+        let mut active_nodes: HashSet<IROperand> = graph.adj.keys().cloned().collect();
+        let mut alloc_stack: Vec<IROperand> = Vec::new();
+
+        while !active_nodes.is_empty() {
+            // Find nodes with degree < REGS_N
+            let candidate = active_nodes
+                .iter()
+                .find(|node| graph.get_degree(node, &active_nodes) < REGS_N)
+                .cloned();
+
+            let chosen_node = match candidate {
+                Some(node) => node,
+                None => {
+                    //Put any(highest degree) on the stack and remove from the graph
+                    active_nodes
+                        .iter()
+                        .max_by_key(|node| graph.get_degree(node, &active_nodes))
+                        .cloned()
+                        .unwrap()
+                }
+            };
+
+            active_nodes.remove(&chosen_node);
+            alloc_stack.push(chosen_node);
+        }
+
+        alloc_stack
     }
 }
