@@ -1,11 +1,12 @@
-use crate::IR3AC::{IRInst, IRFunction, IROperand};
-use std::collections::HashMap;
-use std::collections::HashSet;
 //Codegen, lets see what's it about
 //Technically when I use "alive" its incorrect because the right term for it is just "live"
 //But I don't like how plain "live" sound so ill use "alive"
 
-const REGS_N = 31; //rx31 scratchpad/0
+use crate::IR3AC::{IRInst, IRFunction, IROperand};
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+pub const REGS_BYTES: usize = 124; //rx31 is scratchpad/0
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RegType {
@@ -19,6 +20,11 @@ pub struct Register {
     pub id: u8,
     pub reg_type: RegType,
     pub sub_index: u8,
+}
+
+pub struct RegisterTracker {
+    //31 registers made up of 4 bytes, bool indicates whether bytes are used or not
+    slots: [[bool; 4]; 31],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +98,56 @@ pub enum AsmInst {
     Call(String),
     Ret,
 
+}
+
+impl RegisterTracker {
+    pub fn mark(&mut self, reg_id: u8, reg_type: RegType, sub_idx: u8) {
+        let num_bytes = reg_type.get_size();
+        let start = sub_idx as usize;
+        let regidasusize = reg_id as usize;
+
+        for i in start..(start + num_bytes) {
+            self.slots[regidasusize][i] = true;
+        }
+    }
+
+    pub fn find_free(&mut self, operand_type: Regtype) -> Opton<(u8, u8)> {
+        for reg_id in 0..31 {
+            match reg_type {
+                Regtype::B8 => {
+                    for sub_idx in 0..4 {
+                        if !self.slots[reg_id][sub_idx] {
+                            return Some((reg_id as u8, sub_idx as u8));
+                        }
+                    }
+                }
+                RegType::B16 => {
+                    if !self.slots[reg_id][0] && !self.slots[reg_id][1] {
+                        return Some((reg_id as u8, 0));
+                    }
+                    if !self.slots[reg_id][2] && !self.slots[reg_id][3] {
+                        return Some((reg_id as u8, 2));
+                    }
+                }
+                RegType::B32 => {
+                    if self.slots[reg_id].iter().all(|&occupied| !occupied) {
+                        return Some((reg_id as u8, 0));
+                    }
+                }
+            }
+        }
+        None //You are cooked buddy, no avaliable slots
+    }
+}
+
+impl RegType {
+    pub fn get_size(&self) -> usize {
+        match self {
+            RegType::B8 => 1,
+            RegType::B16 => 2,
+            RegType::B32 => 4,
+        }
+    }
 }
 
 impl IRInst {
@@ -230,10 +286,17 @@ impl InterferenceGraph {
             self.adjacent.entry(second).or_default().insert(first);
         }
     }
-    pub fn get_degree(&self, node: &IROperand, active_nodes: &HashSet<IROperand>) -> usize {
+    //Weighted Degree is sum of neighbor's sizes in bytes
+    pub fn get_weighted_degree(&self, node: &IROperand, active_nodes: &HashSet<IROperand>) -> usize {
         self.adj
             .get(node)
-            .map(|neighbors| neighbors.iter().filter(|n| active_nodes.contains(n)).count())
+            .map(|neighbors| {
+                neighbors
+                    .iter()
+                    .filter(|n| active_nodes.contains(n))
+                    .map(|n| n.get_type().get_size())
+                    .sum()
+            })
             .unwrap_or(0)
     }
 }
@@ -241,8 +304,9 @@ impl InterferenceGraph {
 pub struct Codegen<'a> {
     ir_func: &'a IRFunction,
     cfg: Vec<BasicBlock>,
-    allocations: HashMap<String, Location>,
+    allocations: HashMap<IROperand, Location>,
     frame_size: usize,
+    slots: RegisterTracker,
     wait_for_the_final_result: Vec<AsmInst>,
 }
 
@@ -452,7 +516,7 @@ impl<'a> Codegen<'a> {
         graph
     }
 
-    //This is Chaitin-Briggs Register Allocation algorithm I really like it its NP-Complete btw, so 
+    //This is Chaitin-Briggs Register Allocation algorithm I really like, problem is NP-Complete btw, so
     //I first constructed interference graph, now its time to color it, where each color represents
     //one physcial register and also isn't actually a color but just a number.
     //First step is coloring, each node(variable) has a degree and if degree is less than number of physical
@@ -463,27 +527,29 @@ impl<'a> Codegen<'a> {
     //number of physcial registers, well then we just remove any node from the graph and pushing it
     //on the stack. And later if there are no avaliable register in the time of that variable it
     //will be spilled, however if there is we will just put it in the register.
-    pub fn coloring(&mut self) -> Vec<IROperand> {
-        let graph = self.build_iterf_graph();
+    pub fn color(&mut self, graph: InterferenceGraph) -> Vec<IROperand> {
 
-        // Set of nodes in the current graph
         let mut active_nodes: HashSet<IROperand> = graph.adj.keys().cloned().collect();
         let mut alloc_stack: Vec<IROperand> = Vec::new();
 
         while !active_nodes.is_empty() {
-            // Find nodes with degree < REGS_N
-            let candidate = active_nodes
+            let candidate = active_nodes //find node where Weighted degree is less than REGS_BYTES
                 .iter()
-                .find(|node| graph.get_degree(node, &active_nodes) < REGS_N)
+                .find(|node| {
+                    let neighbor_bytes = graph.get_weighted_degree(node, &active_nodes);
+                    let node_bytes = node.get_type().get_size();
+
+                    neighbor_bytes + node_bytes <= REGS_BYTES
+                })
                 .cloned();
 
             let chosen_node = match candidate {
                 Some(node) => node,
                 None => {
-                    //Put any(highest degree) on the stack and remove from the graph
-                    active_nodes
+                    active_nodes //Remove any(in this case highest degree) node, he will be our
+                        //optimistic candidate
                         .iter()
-                        .max_by_key(|node| graph.get_degree(node, &active_nodes))
+                        .max_by_key(|node| graph.get_weighted_degree(node, &active_nodes))
                         .cloned()
                         .unwrap()
                 }
@@ -494,5 +560,44 @@ impl<'a> Codegen<'a> {
         }
 
         alloc_stack
+    }
+
+    //Actually allocate the registers, first check which registers are used up by neighbors and then
+    //just put variable into first fitting register. If every register is used-up though, meaning
+    //optimistic cadidate failed(RIP), spill it
+    pub fn allocate(&mut self, mut alloc_stack: Vec<IROperand>, graph: &InterferenceGraph) {
+        while let Some(operand) = alloc_stack.pop() {
+            let mut tracker = RegisterTracker::new();
+
+            if let Some(neighbors) = graph.adjacent.get(&operand) {
+                for neighbor in neighbors {
+                    if let Some(Location::Register(reg)) = self.allocations.get(neighbor) {
+                        tracker.mark(reg.id, reg.reg_type, reg.sub_index);
+                    }
+                }
+
+            }
+            let operand_type = operand.get_type();
+            if let Some((phys_reg_id, sub_index)) = tracker.find_free(operand_type) {
+                let assigned_reg = Register{
+                    id: phys_reg_id,
+                    reg_type: operand_type,
+                    sub_index,
+                };
+                self.allocations.insert(operand, Location::Register(assigned_reg));
+            } else { //Spill
+                let offset = self.frame_size;
+                self.frame_size += operand_type.get_size();
+                self.allocations.insert(operand, Location::StackOffset(offset));
+            }
+        }
+    }
+
+    //Final allocator step
+    pub fn run_allocator(&mut self) {
+        self.compute_liveness();
+        let graph = self.build_iterf_graph();
+        let alloc_stack = self.color(graph.clone());
+        self.allocate(alloc_stack, &graph);
     }
 }
