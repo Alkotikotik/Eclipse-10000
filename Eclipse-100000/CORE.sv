@@ -21,9 +21,9 @@ module CORE(
     logic [31:0] PCNext;
 
     logic [5:0] opcode;
-    logic [6:0] rx0;
-    logic [6:0] rx1;
-    logic [6:0] rx2;
+    logic [7:0] rx0;
+    logic [7:0] rx1;
+    logic [7:0] rx2;
     logic [11:0] immediate;
     logic [31:0] j_imm_signed;
 
@@ -39,8 +39,8 @@ module CORE(
     logic [1:0] aluSrcY;
     logic [2:0] PCSrc;
     logic [2:0] GPRsSrc;
-    logic [31:0] sign_ext_imm;
-    assign sign_ext_imm = { {20{immediate[11]}}, immediate };
+    logic [31:0] sign_ext_imm10;
+    assign sign_ext_imm10 = { {22{IR[9]}}, IR[9:0] };
 
     logic KernelMode;
     logic EPCWrite;
@@ -49,7 +49,7 @@ module CORE(
     logic [31:0] GPRs_data_out0;
     logic [31:0] GPRs_data_out1;
     logic [31:0] GPRs_data_in;
-    logic [6:0] gpr_rw0_sel;
+    logic [7:0] gpr_rw0_sel;
 
     logic [31:0] AluMuxX;
     logic [31:0] AluMuxY;
@@ -73,26 +73,26 @@ module CORE(
     logic [3:0] ram_byte_enable;
     logic [31:0] ram_data_in_aligned;
 
-    logic [31:0] sign_ext_imm19;
-    assign sign_ext_imm19 = { {13{IR[18]}}, IR[18:0] };
+    logic [31:0] sign_ext_imm18;
+    assign sign_ext_imm18 = { {14{IR[17]}}, IR[17:0] };
 
     logic [31:0] sign_ext_imm26;
     assign sign_ext_imm26 = { {6{IR[25]}}, IR[25:0] };
 
     //Breaking instruction down
     assign opcode = IR[31:26];
-    assign rx0 = IR[25:19];
-    assign rx1 = IR[18:12];
-    assign rx2 = IR[11:5];
+    assign rx0 = IR[25:18];
+    assign rx1 = IR[17:10];
+    assign rx2 = IR[9:2];
     assign immediate = IR[11:0];
     assign j_imm_signed = {{6{IR[25]}}, IR[25:0]};
-    assign gpr_rw0_sel = (opcode == 6'b011111) ? (7'd15 << 3) : // LMA to rx15
-                     (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111) ? rx2 :
-                     rx0;
+    assign gpr_rw0_sel = (opcode == 6'b011111) ? (8'd31 << 3) : //LMA rx31
+                 (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111) ? rx2 :
+                 rx0;
 
     assign active_address = (IRWrite) ? PC : memTarget;
 
-    assign memTarget = (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY;
+    assign memTarget = (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm10) : RegY;
     assign memViolation = (!KernelMode && (memRead || memWrite) &&
                           ((active_address < memBase) ||
                           (33'(active_address) >= (33'(memBase) + 33'(memLimit)))));
@@ -252,7 +252,7 @@ module CORE(
 
     assign GPRs_data_in = (GPRsSrc == 3'b001) ? cpu_mem_data_out :
                       (GPRsSrc == 3'b010) ? PC :
-                      (GPRsSrc == 3'b011) ? sign_ext_imm19 :
+                      (GPRsSrc == 3'b011) ? sign_ext_imm18 :
                       (GPRsSrc == 3'b100) ? sign_ext_imm26 :
                       AluResult;
 
@@ -309,7 +309,7 @@ module CORE(
 
     RAM system_ram (
         .clk(clk),
-        .address((IRWrite) ? PC : (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm) : RegY),
+        .address((IRWrite) ? PC : (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm10) : RegY),
         .data_in(ram_data_in_aligned),
         .byte_enable(ram_byte_enable),
         .mem_write(memWrite && !memViolation && RAM_cs),

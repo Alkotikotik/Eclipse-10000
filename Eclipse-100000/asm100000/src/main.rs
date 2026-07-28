@@ -198,7 +198,7 @@ fn main() -> io::Result<()> {
 
                 rx0 = src1_reg;
                 rx1 = src2_reg;
-                immediate = (dest_reg as i64) << 5;
+                immediate = (dest_reg as i64) << 2;
             }
             "CMP" => {
                 if tokens.len() > 1 {
@@ -254,19 +254,19 @@ fn main() -> io::Result<()> {
                 ((opcode & 0x3F) << 26)
                     | ((immediate as u32) & 0x03FF_FFFF)
             }
-            "JMP" | "CALL" => {
+            "JMP" | "CALL" | "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" => {
                 ((opcode & 0x3F) << 26) | (imm_u32 & 0x03FF_FFFF)
             }
             "LOAD" => {
                 ((opcode & 0x3F) << 26)
-                    | ((rx0 & 0x7F) << 19)
-                    | ((immediate as u32) & 0x0007_FFFF)
+                    | ((rx0 & 0xFF) << 18)
+                    | ((immediate as u32) & 0x0003_FFFF)
             }
             _ => {
                 ((opcode & 0x3F) << 26)
-                    | ((rx0 & 0x7F) << 19)
-                    | ((rx1 & 0x7F) << 12)
-                    | (imm_u32 & 0x0FFF)
+                    | ((rx0 & 0xFF) << 18)
+                    | ((rx1 & 0xFF) << 10)
+                    | (imm_u32 & 0x03FF)
             }
         };
 
@@ -304,7 +304,7 @@ fn parse_reg(reg_str: &str) -> u32 {
 
     if rest.contains('_') || rest.contains('.') {
         let parts: Vec<&str> = rest.split(|c| c == '_' || c == '.').collect();
-        let reg_id = parts[0].parse::<u32>().unwrap_or(0) & 0x0F;
+        let reg_id = parts[0].parse::<u32>().unwrap_or(0) & 0x1F;
         let sub_offset = parts.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0) & 0x07;
         return (reg_id << 3) | sub_offset;
     }
@@ -313,21 +313,20 @@ fn parse_reg(reg_str: &str) -> u32 {
 
     match prefix {
         "RZ" => {
-            let reg_id = (num / 10) & 0x0F;
+            let reg_id = (num / 10) & 0x1F;
             let byte_sel = (num % 10) & 0x03;
             let offset = 0b011 + byte_sel;
             (reg_id << 3) | offset
         }
         "RY" => {
-            let reg_id = (num / 10) & 0x0F;
+            let reg_id = (num / 10) & 0x1F;
             let half_sel = (num % 10) & 0x01;
             let offset = 0b001 + half_sel;
             (reg_id << 3) | offset
         }
         _ => {
-            let reg_id = num & 0x0F;
+            let reg_id = num & 0x1F;
             (reg_id << 3) | 0b000
         }
     }
 }
-

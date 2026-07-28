@@ -3,8 +3,9 @@
     LOAD rx1 <- 1
     LOAD rx2 <- -2042
     LMA 33000000
-    MOV rx3 <- rx15
-    SHL [rx3, rx0]
+    MOV rx3 <- rx31
+    XOR rx31, rx31
+    >_SHL [rx3, rx0]
     LOAD rx0 <- 0
 
     LOAD rx4 <- 4088

@@ -2,10 +2,10 @@ module GPRs (
     input logic clk,
     input logic reset,
     input logic reg_write,
-    input logic [6:0] rr0,
-    input logic [6:0] rr1,
+    input logic [7:0] rr0,
+    input logic [7:0] rr1,
 
-    input logic [6:0]  rw0,
+    input logic [7:0]  rw0,
     input logic [31:0] data_in,
 
     output logic [31:0] data_out0,
@@ -13,21 +13,21 @@ module GPRs (
 );
 
 
-    logic [31:0] GPRs [15:0]; //16 32bit registers
+    logic [31:0] GPRs [31:0]; //32 32bit registers
 
-    logic [3:0] base_id0;
+    logic [4:0] base_id0;
     logic [2:0] offset0;
-    assign base_id0 = rr0[6:3];
+    assign base_id0 = rr0[7:3];
     assign offset0  = rr0[2:0];
 
-    logic [3:0] base_id1;
+    logic [4:0] base_id1;
     logic [2:0] offset1;
-    assign base_id1 = rr1[6:3];
+    assign base_id1 = rr1[7:3];
     assign offset1  = rr1[2:0];
 
-    logic [3:0] base_id_w0;
+    logic [4:0] base_id_w0;
     logic [2:0] offset_w0;
-    assign base_id_w0 = rw0[6:3];
+    assign base_id_w0 = rw0[7:3];
     assign offset_w0  = rw0[2:0];
 
     logic [31:0] raw_val_r0;
@@ -110,11 +110,11 @@ module GPRs (
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
-            for (integer i = 0; i < 16; i = i + 1) begin
+            for (integer i = 0; i < 32; i = i + 1) begin
                 GPRs[i] <= 32'b0;
             end
         end
-        else if (reg_write) begin //Bit masking to write only to required registers
+        else if (reg_write) begin
             GPRs[base_id_w0] <= (GPRs[base_id_w0] & ~write_mask) | (shifted_data_in & write_mask);
         end
     end

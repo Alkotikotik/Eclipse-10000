@@ -357,7 +357,7 @@ impl<'a> Codegen<'a> {
         //Looping while live_in/live_out are changing
         while changed {
             changed = false;
-            //Looping in reverse because im don't feel like explaining
+            //Looping in reverse because i don't feel like explaining
             for i in (0..self.cfg.len()).rev() {
 
                 //Computing new live_out

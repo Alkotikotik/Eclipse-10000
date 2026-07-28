@@ -159,6 +159,13 @@ module CU(
                         PCWrite = 1;
                     end
 
+                    6'b110001: aluSrcY = 2'b10; //BEQ
+                    6'b111100: aluSrcY = 2'b10; //BNE
+                    6'b110011: aluSrcY = 2'b10; //BGU
+                    6'b110100: aluSrcY = 2'b10; //BSU
+                    6'b110101: aluSrcY = 2'b10; //BGS
+                    6'b110110: aluSrcY = 2'b10; //BSS
+
                     default: ;
                 endcase
             end

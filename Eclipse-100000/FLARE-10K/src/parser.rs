@@ -1,6 +1,8 @@
 //Parser for FLARE-10K, precende table is in the main directory of language.
 //Refer to it, it might act as a documentation
 //It is LL(1) recusrsive descent parser which I had a lot of fun writing
+//It works like a waterfall jumping down the precedence level each time, while trying to deduce
+//which expression it is
 
 use crate::lexer::Lexer;
 use crate::lexer::Token;
