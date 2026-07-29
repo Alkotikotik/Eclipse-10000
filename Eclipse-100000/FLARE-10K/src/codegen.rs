@@ -44,6 +44,7 @@ pub struct BasicBlock {
     pub varkill: HashSet<IROperand>,
     pub live_in: HashSet<IROperand>, //Alive at the start of the block
     pub live_out: HashSet<IROperand>, //Alive at the end of the block
+    pub loop_depth: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -288,7 +289,7 @@ impl InterferenceGraph {
     }
     //Weighted Degree is sum of neighbor's sizes in bytes
     pub fn get_weighted_degree(&self, node: &IROperand, active_nodes: &HashSet<IROperand>) -> usize {
-        self.adj
+        self.adjacent
             .get(node)
             .map(|neighbors| {
                 neighbors
@@ -366,12 +367,17 @@ impl<'a> Codegen<'a> {
                 _ => None
             };
 
-            blocks.push(BasicBlock{
+            blocks.push(BasicBlock {
                 id,
                 label,
                 body: instructions,
                 predecessors: Vec::new(),
                 successors: Vec::new(),
+                uevar: HashSet::new(),
+                varkill: HashSet::new(),
+                live_in: HashSet::new(),
+                live_out: HashSet::new(),
+                loop_depth: 0,
             });
 
         }
@@ -440,11 +446,15 @@ impl<'a> Codegen<'a> {
     //It is a graph representing the program where nodes are basic blocks and edges are ways of connecting basic
     //blocks usually branching or falling through
     fn build_cfg(&mut self, body: &[IRInst]) -> Vec<BasicBlock> {
-
         self.cfg = Self::build_bbs(body);
         self.build_suc_prec();
-        self.cfg.clone()
 
+        let depths = compute_loop_depths(&self.cfg);
+        for block in &mut self.cfg {
+            block.loop_depth = *depths.get(&block.id).unwrap_or(&0);
+        }
+
+        self.cfg.clone()
     }
 
     fn compute_liveness(&mut self) {
@@ -468,7 +478,7 @@ impl<'a> Codegen<'a> {
 
                 //Computing new live_in 
                 //LiveIn = UEVar[current] union (LiveOut[current] minus VarKill[current])
-                let mut new_live_in = self.cfg[i].uevar.clone();.
+                let mut new_live_in = self.cfg[i].uevar.clone();
                 for var in &new_live_out {
                     if !self.cfg[i].varkill.contains(var) { //Minus VarKill
                         new_live_in.insert(var.clone()); //Union with LiveOut
@@ -545,11 +555,22 @@ impl<'a> Codegen<'a> {
 
             let chosen_node = match candidate {
                 Some(node) => node,
+                //Now if there isn't node with degree < REGS_BYTES we remove the node the node that
+                //minimizes SpillCost/Degree it will be our optimistic candidate, and because we are
+                //using spill cost which is 10^depth chances of optimistic candidate of getting
+                //allocated are pretty high, but not 100%
                 None => {
-                    active_nodes //Remove any(in this case highest degree) node, he will be our
-                        //optimistic candidate
+                    active_nodes
                         .iter()
-                        .max_by_key(|node| graph.get_weighted_degree(node, &active_nodes))
+                        .min_by(|a, b| {
+                            let degree_a = graph.get_weighted_degree(a, &active_nodes) as f64;
+                            let degree_b = graph.get_weighted_degree(b, &active_nodes) as f64;
+
+                            let cost_a = spill_costs.get(a).unwrap_or(&1.0) / degree_a;
+                            let cost_b = spill_costs.get(b).unwrap_or(&1.0) / degree_b;
+
+                            cost_a.partial_cmp(&cost_b).unwrap_or(std::cmp::Ordering::Equal)
+                        })
                         .cloned()
                         .unwrap()
                 }
@@ -600,4 +621,112 @@ impl<'a> Codegen<'a> {
         let alloc_stack = self.color(graph.clone());
         self.allocate(alloc_stack, &graph);
     }
+
+    //Basic block A dominates basic block B if every path to block B must pass through A, it doesn't
+    //have to be predecessors though
+    pub fn compute_dominators(cfg: &[BasicBlock]) -> HashMap<usize, HashSet<usize>> {
+        let all_blocks: HashSet<usize> = cfg.iter().map(|b| b.id).collect();
+        let mut doms: HashMap<usize, HashSet<usize>> = HashMap::new();
+        //Basic block 0 dominates only itself
+        doms.insert(0, HashSet::from([0]));
+
+        for block in cfg.iter().skip(1) {
+            doms.insert(block.id, all_blocks.clone());
+        }
+
+        let mut changed = true;
+        while changed {
+            changed = false;
+
+            for block in cfg.iter().skip(1) {
+                let mut new_dom = all_blocks.clone();
+
+                for &pred in &block.predecessors {
+                    if let Some(pred_dom) = doms.get(&pred) {
+                        new_dom = new_dom.intersection(pred_dom).cloned().collect();
+                    }
+                }
+                new_dom.insert(block.id);
+                if doms.get(&block.id) != Some(&new_dom) {
+                    doms.insert(block.id, new_dom);
+                    changed = true;
+                }
+            }
+        }
+        doms
+    }
+    //Natural loop is a sequence of blocks that all have the same dominating block(header) so
+    //usually loop declaration like while[true]
+    pub fn find_loops( cfg: &[BasicBlock], doms: &HashMap<usize, HashSet<usize>>) -> Vec<HashSet<usize>> {
+        let mut loops = Vec::new();
+
+        //Looking for back edges which is edge between A and B where A dominates B
+        //When such an edge is found, the natural loop consists of all nodes that can reach B
+        //without passing through A
+        for block in cfg {
+            for &succ in &block.successors {
+                if let Some(succ_doms) = doms.get(&block.id) {
+                    if succ_doms.contains(&succ) {
+                        let loop_nodes = populate_loop_body(cfg, succ, block.id);
+                        loops.push(loop_nodes);
+                    }
+                }
+            }
+        }
+
+        loops
+    }
+
+    //Move backwards from the end of the loop to the top and gather all the nodes that are in the loop
+    //Latch is end of the loop
+    fn populate_loop_body(cfg: &[BasicBlock], header: usize, latch: usize) -> HashSet<usize> {
+        let mut loop_nodes = HashSet::from([header, latch]);
+        let mut stack = vec![latch];
+
+        while let Some(node) = stack.pop() {
+            if node == header { continue; }
+
+            if let Some(block) = cfg.iter().find(|b| b.id == node) {
+                for &pred in &block.predecessors {
+                    if loop_nodes.insert(pred) {
+                        stack.push(pred);
+                    }
+                }
+            }
+        }
+
+        loop_nodes
+    }
+
+    //Loop depth is the amount of natural loops that contains this nod
+    //For example depth of simple loop is 1 because only 1 loop contains that node,
+    //however in double nested loop depth is 2 becuause 2 loops contain that node
+    pub fn compute_loop_depths(cfg: &[BasicBlock]) -> HashMap<usize, usize> {
+        let doms = compute_dominators(cfg);
+        let loops = find_loops(cfg, &doms);
+
+        let mut depths: HashMap<usize, usize> = HashMap::new();
+
+        for block in cfg {
+            let depth = loops.iter().filter(|l| l.contains(&block.id)).count();
+            depths.insert(block.id, depth);
+        }
+
+        depths
+    }
+
+    //Final spill cost computation, it is amount of usage * 10^depth
+    pub fn compute_spill_costs(&self) -> HashMap<IROperand, f64> {
+        let mut costs = HashMap::new();
+        for block in &self.cfg {
+            let weight = 10.0_f64.powi(block.loop_depth as i32);
+            for inst in &block.body {
+                for var in inst.uses().into_iter().chain(inst.kills().into_iter()) {
+                    *costs.entry(var).or_insert(0.0) += weight;
+                }
+            }
+        }
+        costs
+    }
+
 }
