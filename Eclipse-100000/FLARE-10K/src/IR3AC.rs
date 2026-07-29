@@ -8,6 +8,7 @@ pub enum IROperand {
     UnsignedConstant(u32),
     Var(String),
     Temp(usize),
+    FrameSlot(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,8 +29,8 @@ pub enum IRInst {
     Cpy { dest: IROperand, src: IROperand },
     Cast { dest: IROperand, src: IROperand, target_type: Type },
 
-    LoadPtr  { dest: IROperand, ptr_addr: IROperand },
-    StorePtr { ptr_addr: IROperand, src: IROperand },
+    IRInst::LoadPtr  { dest: val,  ptr_addr: IROperand::FrameSlot(off) },
+    IRInst::StorePtr { ptr_addr: IROperand::FrameSlot(off), src: tmp },
 
     AntiEqual { left: IROperand, right: IROperand, label: String }, //Branch if false, so they are
     Equal     { left: IROperand, right: IROperand, label: String }, //Inverted AntiEqual becomes

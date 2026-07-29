@@ -83,8 +83,8 @@ pub enum AsmInst {
 
     Load(AsmOperand, AsmOperand),
     Lma (AsmOperand, AsmOperand), //Up to 25bits loads into rx15
-    Ldr (AsmOperand, AsmOperand), //Loads from memory
-    Str (AsmOperand, AsmOperand),
+    Ldr(AsmOperand, AsmOperand, i32), // dest, base, offset
+    Str(AsmOperand, AsmOperand, i32), // src, base, offset
 
     Cmp (AsmOperand, AsmOperand),
     Beq (String),
@@ -614,12 +614,34 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    //Final allocator step
+    //Final allocator step, it loops until all operations with spilled are modified
+    //Since in 0.1% cases there might be not enough registers for spilled values
     pub fn run_allocator(&mut self) {
-        self.compute_liveness();
-        let graph = self.build_iterf_graph();
-        let alloc_stack = self.color(graph.clone());
-        self.allocate(alloc_stack, &graph);
+        let passes = 0; //just a safety
+       loop {
+            self.compute_liveness();
+            let graph = self.build_iterf_graph();
+            let alloc_stack = self.color(graph.clone());
+            self.allocate(alloc_stack, &graph);
+
+            //Search for spilled
+            let spilled: Vec<IROperand> = self.allocations.iter()
+                .filter(|(_, loc)| matches!(loc, Location::StackOffset(_)))
+                .map(|(op, _)| op.clone())
+                .collect();
+
+            //No spilled? Nice - break
+            if spilled.is_empty() {
+                break;
+            }
+
+            self.rewrite_spills(&spilled);
+            self.allocations.clear();
+
+            if passes > 10 {
+                panic!("Codegen Error: More than 10 passes occured, there must be something wrong, can't help though");
+            }
+        }
     }
 
     //Basic block A dominates basic block B if every path to block B must pass through A, it doesn't
@@ -729,4 +751,50 @@ impl<'a> Codegen<'a> {
         costs
     }
 
+    //Basically if there isn't enough registers, variable is spilled to the stack, and that changes
+    //the IR because we need to add LDR, STR between operation
+    //And we recompute coloring for them because its a new set of registers
+    //It only changes individual blocks though, doesn't change successors, predecessors etc
+    fn rewrite_spills(&mut self, spilled: &HashSet<IROperand>) {
+        for block in &mut self.cfg {
+            let mut new_body = Vec::new();
+
+            for inst in &block.body {
+                let mut inst = inst.clone();
+
+                for used in inst.uses() {
+                    if let Some(off) = self.spill_offset(&used, spilled) {
+                        let val = self.new_scratch();
+                        new_body.push(IRInst::LoadPtr { dest: val.clone(), ptr_addr: IROperand::FrameSlot(off) });
+                        inst = substitute_operand(inst, &used, &val);
+                    }
+                }
+
+                let mut store_backs = Vec::new();
+                for def in inst.kills() {
+                    if let Some(off) = self.spill_offset(&def, spilled) {
+                        let tmp = self.new_scratch();
+                        inst = substitute_operand(inst, &def, &tmp);
+                        store_backs.push(IRInst::StorePtr { ptr_addr: IROperand::FrameSlot(off), src: tmp });
+                    }
+                }
+
+                new_body.push(inst);
+                new_body.extend(store_backs);
+            }
+
+            block.body = new_body;
+        }
+    }
 }
+
+
+
+
+
+
+
+
+
+
+
