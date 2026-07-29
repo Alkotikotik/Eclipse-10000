@@ -41,6 +41,8 @@ module CORE(
     logic [2:0] GPRsSrc;
     logic [31:0] sign_ext_imm10;
     assign sign_ext_imm10 = { {22{IR[9]}}, IR[9:0] };
+    logic [31:0] zero_ext_imm10;
+    assign zero_ext_imm10 = {22'h0, IR[9:0]};
 
     logic KernelMode;
     logic EPCWrite;
@@ -103,7 +105,15 @@ module CORE(
     always_comb begin
         unique case (aluSrcY)
             2'b00: AluMuxY = 32'd4;
-            2'b01: AluMuxY = RegY;
+            2'b01: begin
+                unique case (opcode)
+                    6'b000001: AluMuxY = RegY;
+                    6'b000011: AluMuxY = RegY;
+                    6'b000111: AluMuxY = RegY;
+
+                    default: AluMuxY = RegY + zero_ext_imm10;
+                endcase
+            end
             2'b10: AluMuxY = j_imm_signed;
             2'b11: AluMuxY = { {20{immediate[11]}}, immediate };
 

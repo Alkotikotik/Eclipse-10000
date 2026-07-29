@@ -4,7 +4,7 @@
     LOAD rx2 <- -2042
     LMA 33000000
     MOV rx3 <- rx31
-    XOR rx31, rx31
+    XOR [rx31, rx31]
     >_SHL [rx3, rx30]
     LOAD rx30 <- 0
 
@@ -44,7 +44,10 @@
     JMP ~Loop
 
 ~A:
+    LOAD rz23 <- 4
+    XOR [rx3, rz23 + 1000] >_ Unsigned only
     STR [rx3, rx4 + 4]
+    XOR [rx3, rx23 + 1000]
     RET
 
 ~End:
