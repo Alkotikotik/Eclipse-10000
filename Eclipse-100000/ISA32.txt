@@ -12,7 +12,7 @@ B-Type (3 operand ALU, only add, sub, mul)
 [17:10]  rx1        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
 [9:2]    rx3        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
 
-I-Type (Immediate Operations & Direct Local Branches)
+I-Type (Immediate Operations & STR, LDR)
 [31:26]  Opcode     (6 bits)
 [25:18]  rx0        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
 [17:10]  rx1        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
