@@ -2,22 +2,33 @@ Format of 32-bit instructions
 
 R-Type (Standard ALU & System)
 [31:26]  Opcode     (6 bits)
-[25:19]  rx0        (7 bits: 4-bit Reg ID + 3-bit Size/Offset)
-[18:12]  rx1        (7 bits: 4-bit Reg ID + 3-bit Size/Offset)
-[11:0]   Spare      (12 bits)
+[25:18]  rx0        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[17:10]  rx1        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[9:0]   Unsigned immediate      (10 bits)
+
+B-Type (3 operand ALU, only add, sub, mul)
+[31:26]  Opcode     (6 bits)
+[25:18]  rx0        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[17:10]  rx1        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[9:2]    rx3        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
 
 I-Type (Immediate Operations & Direct Local Branches)
 [31:26]  Opcode     (6 bits)
-[25:19]  rx0        (7 bits: 4-bit Reg ID + 3-bit Size/Offset)
-[18:12]  rx1        (7 bits: 4-bit Reg ID + 3-bit Size/Offset)
-[11:0]   Immediate  (12 bits: Signed offset / Constant)
+[25:18]  rx0        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[17:10]  rx1        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[9:0]   Signed Immediate  (10 bits: Signed offset / Constant)
+
+L-Type (LOAD)
+[31:26] Opcode
+[25:18] rx0
+[17:0] signed immediate (18 bits)
 
 J-Type (Massive Load / Direct Jumps)
 [31:26]  Opcode     (6 bits)
 [25:0]   Immediate  (26 bits: Imm26)
 
 //Register
-Registers are fractured, visual representation is in Fragmentation.svg file.
+Registers are fragmented, visual representation is in Fragmentation.svg file.
 
 //Opcodes
 ALU Instructions (R-Type)
@@ -25,34 +36,34 @@ ALU Instructions (R-Type)
 000001 : ADD    rx0, rx1, rx2
 000011 : SUB    rx0, rx1, rx2
 000111 : LOMUL  rx0, rx1, rx2
-001101 : HIMUL  rx0, rx1 +-imm12
-000010 : XOR    rx0, rx1 +-imm12
-000110 : OR     rx0, rx1 +-imm12
-001110 : AND    rx0, rx1 +-imm12
-001111 : NOT    rx0, rx1 +-imm12
-001000 : SHL    rx0, rx1 +-imm12
-001100 : SHR    rx0, rx1 +-imm12
-001010 : SRA    rx0, rx1 +-imm12
+001101 : HIMUL  rx0, rx1 + imm10 //Unsigned 
+000010 : XOR    rx0, rx1 + imm10
+000110 : OR     rx0, rx1 + imm10
+001110 : AND    rx0, rx1 + imm10
+001111 : NOT    rx0      + imm10
+001000 : SHL    rx0, rx1 + imm10
+001100 : SHR    rx0, rx1 + imm10
+001010 : SRA    rx0, rx1 + imm10
 
 
 Memory Instructions
-010001 : LOAD   rx0, imm12 //Loads imm into rx0
-011111 : LMA    imm26 //Loads Massive into rx15
-100011 : LDR    rx0, rx1 +- imm12 // Load from memory [rx1 +- imm12]
-100111 : STR    rx0, rx1 +- imm12
+010001 : LOAD   rx0, imm18 //Loads imm into rx0
+011111 : LMA    imm26 //Loads Massive into rx31(signed imm26)
+100011 : LDR    rx0, rx1 +- imm10 // Load from memory
+100111 : STR    rx0, rx1 +- imm10
 
 CMP:
 110000 : CMP rx0 rx1
 
 Unsigned branching
-111110 : BEQ ~Label
-111100 : BNE
-110001 : BGU
-110011 : BSU
+111110 : BEQ imm26 //Likely ~Label
+111100 : BNE imm26
+110001 : BGU imm26
+110011 : BSU imm26
 
 Signed branching
-110101 : BGS
-111010 : BSS
+110101 : BGS imm26
+111010 : BSS imm26
 
 Jumps & Subroutines
 111111 : JMP   imm26     // Unconditional Jump to imm26 address/label

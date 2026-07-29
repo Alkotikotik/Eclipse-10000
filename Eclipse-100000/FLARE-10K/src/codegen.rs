@@ -62,29 +62,30 @@ pub enum Reg {
 pub enum AsmOperand {
     Reg(Reg),
     SP,
-    Imm22(i32),
-    Imm12(i16),
+    Imm26(i32),
+    Imm18(i32)
+    Imm10(i16),
     Label(String),
 }
 
 #[derive(Debug, Clone)]
 pub enum AsmInst {
-    Mov(AsmOperand, AsmOperand),
-    Add(AsmOperand, AsmOperand, AsmOperand),
+    Mov(AsmOperand, AsmOperand, AsmOperand),
+    Add(AsmOperand, AsmOperand, AsmOperand), // 3 regisers
     Sub(AsmOperand, AsmOperand, AsmOperand),
     Mul(AsmOperand, AsmOperand, AsmOperand),
-    Xor(AsmOperand, AsmOperand),
-    Or (AsmOperand, AsmOperand),
-    And(AsmOperand, AsmOperand),
+    Xor(AsmOperand, AsmOperand, AsmOperand), //2 register plus unsiged 10bit
+    Or (AsmOperand, AsmOperand, AsmOperand),
+    And(AsmOperand, AsmOperand, AsmOperand),
     Not(AsmOperand),
-    Shl(AsmOperand, AsmOperand),
-    Shr(AsmOperand, AsmOperand),
-    Sra(AsmOperand, AsmOperand),
+    Shl(AsmOperand, AsmOperand, AsmOperand),
+    Shr(AsmOperand, AsmOperand, AsmOperand),
+    Sra(AsmOperand, AsmOperand, AsmOperand),
 
     Load(AsmOperand, AsmOperand),
     Lma (AsmOperand, AsmOperand), //Up to 25bits loads into rx15
-    Ldr(AsmOperand, AsmOperand, i32), // dest, base, offset
-    Str(AsmOperand, AsmOperand, i32), // src, base, offset
+    Ldr(AsmOperand, AsmOperand, AsmOperand), // dest, base, offset
+    Str(AsmOperand, AsmOperand, AsmOperand), // src, base, offset
 
     Cmp (AsmOperand, AsmOperand),
     Beq (String),
@@ -97,6 +98,7 @@ pub enum AsmInst {
     Jmp (String),
     Jr  (AsmOperand),
     Call(String),
+    Inline(String),
     Ret,
 
 }
@@ -786,15 +788,78 @@ impl<'a> Codegen<'a> {
             block.body = new_body;
         }
     }
+
+    //Actual codegen time 
+    fn lower_func(&mut self) -> Vec<AsmInst> {
+        let mut compiled = Vec::new();
+
+        if self.frame_size > 0 {
+            compiled.push(AsmInst::Sub(sp(), sp(), imm(self.frame_size as i32)));
+        }
+
+        for block in &self.cfg {
+            for inst in &block.body {
+                self.lower_inst(inst, &mut out);
+            }
+        }
+        out
+    }
+
+    fn operand_to_asm(&self, op: &IROperand) -> AsmOperand {
+        match op {
+            IROperand::SignedConstant(var) => AsmOperand::Imm22(*var),
+            IROperand::UnsignedConstant(var) => AsmOperand::Imm22(*var as i32),
+            IROperand::Var(_) | IROperand::Temp(_) => match self.allocations[op] {
+                Location::Register(reg) => AsmOperand::Reg(Reg::TheRealOne(reg)),
+                Location::StackOffset(_) => unreachable!("Spills already rewritten"),
+            },
+            IROperand::FrameSlot(_) => unreachable!("Only valid as ptr_addr"),
+
+        }
+    }
+
+    //Dumb version for now
+    fn resolve_addr(&self, ptr_addr: &IROperand) -> (AsmOperand, AsmOperand, i32) {
+        match ptr_addr {
+            IROperand::FrameSlot(offset) => (AsmOperand::SP, rx31(), *offset as i32),
+            _ => (self.operand_to_asm(ptr_addr), rx31(), 0),
+        }
+    }
+
+    fn lower_inst(&self, inst: IRInst, result: Vec<IRInst>) {
+        match inst {
+            IRInst::Add{ dest, left, right } => result.push(
+                AsmInst::Add(operand_to_asm(dest), operand_to_asm(left), operand_to_asm(right),)
+            ),
+            IRInst::Sub{ dest, left, right } => result.push(
+                AsmInst::Sub(operand_to_asm(dest), operand_to_asm(left), operand_to_asm(right),)
+            ),
+            IRInst::Mul{ dest, left, right } => result.push(
+                AsmInst::Mul(operand_to_asm(dest), operand_to_asm(left), operand_to_asm(right),)
+            ),
+            IRInst::Xor {dest, src, imm10} => result.push(
+                AsmInst::Xor(operand_to_asm(dest), operand_to_asm(src), operand_to_asm(imm10),)
+            ),
+            IRInst::And {.., dest, src} => result.push(
+                AsmInst::And(operand_to_asm(dest), operand_to_asm(src), operand_to_asm(imm10),)
+            ),
+            IRInst::Or {dest, src, imm10} => result.push(
+                AsmInst::Or(operand_to_asm(dest), operand_to_asm(src), operand_to_asm(imm10),)
+            ),
+            IRInst::Shl {dest, src, imm10} => result.push(
+                AsmInst::Shl(operand_to_asm(dest), operand_to_asm(src), operand_to_asm(imm10),)
+            ),
+            IRInst::Shr {dest, src, imm10} => result.push(
+                AsmInst::Shr(operand_to_asm(dest), operand_to_asm(src), operand_to_asm(imm10),)
+            ),
+            IRInst::Div {} => panic!("Division isn't implemented yet"),
+            IRInst::Mod {} => panic!("Mod isn't implemented yet"),
+            IRInst::Not {op} => result.push(AsmInst::Not(operand_to_asm(op),)),
+            IRInst::Negate {op} => result.push(AsmInst::Negate(operand_to_asm(op),)),
+
+
+
+        }
+    }
 }
-
-
-
-
-
-
-
-
-
-
 

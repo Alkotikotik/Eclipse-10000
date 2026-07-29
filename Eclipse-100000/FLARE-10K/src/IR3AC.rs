@@ -29,8 +29,8 @@ pub enum IRInst {
     Cpy { dest: IROperand, src: IROperand },
     Cast { dest: IROperand, src: IROperand, target_type: Type },
 
-    IRInst::LoadPtr  { dest: val,  ptr_addr: IROperand::FrameSlot(off) },
-    IRInst::StorePtr { ptr_addr: IROperand::FrameSlot(off), src: tmp },
+    LoadPtr  { dest: IROperand, ptr_addr: IROperand },
+    StorePtr { ptr_addr: IROperand, src: IROperand },
 
     AntiEqual { left: IROperand, right: IROperand, label: String }, //Branch if false, so they are
     Equal     { left: IROperand, right: IROperand, label: String }, //Inverted AntiEqual becomes

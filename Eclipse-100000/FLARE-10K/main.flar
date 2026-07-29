@@ -27,6 +27,8 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regu
     w = w | r;
     w = w ^ r;
 
+    w = w % w; >_ mod and division aren't implemented yet
+
     [z].Entry = 18;
 
     PageTableEntry sigma;
