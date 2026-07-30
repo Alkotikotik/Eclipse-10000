@@ -36,21 +36,21 @@ ALU Instructions (R-Type)
 000001 : ADD    rx0, rx1, rx2
 000011 : SUB    rx0, rx1, rx2
 000111 : LOMUL  rx0, rx1, rx2
-001101 : HIMUL  rx0, rx1 + imm10 //Unsigned 
-000010 : XOR    rx0, rx1 + imm10
-000110 : OR     rx0, rx1 + imm10
-001110 : AND    rx0, rx1 + imm10
-001111 : NOT    rx0      + imm10
-001000 : SHL    rx0, rx1 + imm10
-001100 : SHR    rx0, rx1 + imm10
-001010 : SRA    rx0, rx1 + imm10
+001101 : HIMUL  rx0, (rx1 + imm10) //Unsigned, might very well be 0
+000010 : XOR    rx0, (rx1 + imm10)
+000110 : OR     rx0, (rx1 + imm10)
+001110 : AND    rx0, (rx1 + imm10)
+001111 : NOT    rx0  (    + imm10)
+001000 : SHL    rx0, (rx1 + imm10)
+001100 : SHR    rx0, (rx1 + imm10)
+001010 : SRA    rx0, (rx1 + imm10)
 
 
 Memory Instructions
 010001 : LOAD   rx0, imm18 //Loads imm into rx0
 011111 : LMA    imm26 //Loads Massive into rx31(signed imm26)
-100011 : LDR    rx0, rx1 +- imm10 // Load from memory
-100111 : STR    rx0, rx1 +- imm10
+100011 : LDR    rx0, (rx1 +- imm10) // Load from memory
+100111 : STR    rx0, (rx1 +- imm10)
 
 CMP:
 110000 : CMP rx0 rx1

@@ -6,7 +6,7 @@ use crate::IR3AC::{IRInst, IRFunction, IROperand};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-pub const REGS_BYTES: usize = 124; //rx31 is scratchpad/0
+pub const REGS_BYTES: usize = 120; //rx31, rx30 is scratchpad/0
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RegType {
@@ -24,7 +24,7 @@ pub struct Register {
 
 pub struct RegisterTracker {
     //31 registers made up of 4 bytes, bool indicates whether bytes are used or not
-    slots: [[bool; 4]; 31],
+    slots: [[bool; 4]; 30],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -960,5 +960,83 @@ impl<'a> Codegen<'a> {
         out.push(make(self.operand_to_asm(dest), l, r));
 
         if used_rx31 { out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0))); }
+    }
+
+    fn lower_cmp(&mut self, left: &IROperand, right: &IROperand, out: &mut Vec<AsmInst>) {
+        let mut used_rx31 = false;
+
+        let l_op = if Self.is_const(left) {
+            Self::load_const(Self::rx30(), Self::const_val(left), out);
+            Self::reg_op(Self::rx30());
+            used_rx31 = true;
+        } else {
+            self.operand_to_asm(left);
+        };
+
+        let r_op = if Self.is_const(right) {
+            Self::load_const(Self::rx30(), Self::const_val(right), out);
+            Self::reg_op(Self::rx30());
+            used_rx31 = true;
+        } else {
+            self.operand_to_asm(right);
+        };
+
+        out.push(AsmInst::Cmp(l_op, r_op));
+
+        if used_rx31 {
+            out.push(AsmInst::Xor(Self::rx31(), Self::rx31(), AsmOperand::Imm10(0)));
+        }
+    }
+
+    fn lower_unary(&mut self, dest: &IROperand, src: &IROperand, op, out: &mut Vec<AsmInst>) {
+
+    }
+
+    fn lower_inst(&mut self, inst: &IRInst, out: &mut Vec<AsmInst>) {
+        match inst {
+            IRInst::Label(lab) => out.push(AsmInst::Inline(format!("{}", lab))),
+            IRInst::Jmp(target) => out.push(AsmInst::Jmp(target.clone())),
+
+            IRInst::LoadPtr  { dest, ptr_addr } => self.lower_mem(dest, ptr_addr, true, out),
+            IRInst::StorePtr { ptr_addr, src } => self.lower_mem(src, ptr_addr, false, out),
+
+            IRInst::Add { dest, left, right } => self.lower_btype_alu(dest, left, right, AsmInst::Add, out),
+            IRInst::Sub { dest, left, right } => self.lower_btype_alu(dest, left, right, AsmInst::Sub, out),
+            IRInst::Mul { dest, left, right } => self.lower_btype_alu(dest, left, right, AsmInst::Mul, out),
+
+            IRInst::Xor { dest, left, right } => self.lower_rtype_alu(dest, left, right, AsmInst::Xor, out),
+            IRInst::Or  { dest, left, right } => self.lower_rtype_alu(dest, left, right, AsmInst::Or, out),
+            IRInst::And { dest, left, right } => self.lower_rtype_alu(dest, left, right, AsmInst::And, out),
+            IRInst::Shl { dest, left, right } => self.lower_rtype_alu(dest, left, right, AsmInst::Shl, out),
+            IRInst::Shr { dest, left, right } => self.lower_rtype_alu(dest, left, right, AsmInst::Shr, out),
+
+            IRInst::AntiEqual {left, right, target} => {
+                self.lower_cmp(left, right, out);
+                out.push(AsmInst::Beq(target.clone()));
+            }
+
+            IRInst::Equal {left, right, target} => {
+                self.lower_cmp(left, right, out);
+                out.push(AsmInst::Bne(target.clone()));
+            }
+
+            IRInst::AntiMore {left, right, target, signed} => {
+                self.lower_cmp(left, right, out);
+                if signed {
+                    out.push(AsmInst::Bgs(target.clone()));
+                } else{
+                    out.push(AsmInst::Bgu(target.clone()));
+                }
+            }
+
+            IRInst::AntiLess {left, right, target, signed} => {
+                self.lower_cmp(left, right, out);
+                if signed {
+                    out.push(AsmInst::Bss(target.clone()));
+                } else {
+                    out.push(AsmInst::Bsu(target.clone()));
+                }
+            }
+        }
     }
 }
