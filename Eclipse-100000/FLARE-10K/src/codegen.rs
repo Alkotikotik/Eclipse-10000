@@ -311,17 +311,22 @@ pub struct Codegen<'a> {
     allocations: HashMap<IROperand, Location>,
     frame_size: usize,
     slots: RegisterTracker,
+    pins: HashMap<String, Register>,
     wait_for_the_final_result: Vec<AsmInst>,
 }
 
 impl<'a> Codegen<'a> {
 
     pub fn new(ir_func: &'a IRFunction) -> Self {
+        let pins = Self::collect_pins(&ir_func.instructions);
+
         let mut codegen = Self {
             ir_func,
             cfg: Vec::new(),
             allocations: HashMap::new(),
             frame_size: 0,
+            slots: RegisterTracker::new(),
+            pins,
             wait_for_the_final_result: Vec::new(),
         };
 
@@ -329,9 +334,52 @@ impl<'a> Codegen<'a> {
         codegen
     }
 
+    pub fn parse_pin_register(pin_str: &str) -> Register {
+        let upper = pin_str.to_uppercase();
+
+        let prefix = if upper.starts_with("RZ") { "RZ" }
+            else if upper.starts_with("RY") { "RY" }
+            else if upper.starts_with("RX") { "RX" }
+            else if upper.starts_with('R')  { "R"  }
+            else { panic!("Codegen Error: invalid pin register {}", pin_str) };
+
+        let rest = &upper[prefix.len()..];
+        let num: u32 = rest.parse().unwrap_or_else(|_| {
+            panic!("Codegen Error: invalid pin register {}", pin_str)
+        });
+
+        match prefix {
+            "RZ" => {
+                let reg_id = (num / 10) as u8;
+                let byte_sel = (num % 10) as u8;
+                Register { id: reg_id, reg_type: RegType::B8, sub_index: byte_sel }
+            }
+            "RY" => {
+                let reg_id = (num / 10) as u8;
+                let half_sel = (num % 10) as u8;
+                Register { id: reg_id, reg_type: RegType::B16, sub_index: half_sel * 2 }
+            }
+            _ => {
+                let reg_id = num as u8;
+                Register { id: reg_id, reg_type: RegType::B32, sub_index: 0 }
+            }
+        }
+    }
+
 }
 
 impl<'a> Codegen<'a> {
+
+    //Pins before cfg
+    fn collect_pins(body: &[IRInst]) -> HashMap<String, Register> {
+        let mut pins = HashMap::new();
+        for inst in body {
+            if let IRInst::Pin {var, register} = inst {
+                pins.insert(var.clone(), parse_pin_register(register));
+            }
+        }
+        pins
+    }
 
     //Building basics blocks of cfg, basic block is the largest code of block that doesn't contain branching
     //For example statements bodies without branching
@@ -445,7 +493,7 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    //Control Flow Grapth(CFG) don't confuse with Context Free Grammar(CFG too)
+    //Control Flow Graph(CFG) don't confuse with Context Free Grammar(CFG too)
     //It is a graph representing the program where nodes are basic blocks and edges are ways of connecting basic
     //blocks usually branching or falling through
     fn build_cfg(&mut self, body: &[IRInst]) -> Vec<BasicBlock> {
@@ -542,7 +590,10 @@ impl<'a> Codegen<'a> {
     //will be spilled, however if there is we will just put it in the register.
     pub fn color(&mut self, graph: InterferenceGraph) -> Vec<IROperand> {
 
-        let mut active_nodes: HashSet<IROperand> = graph.adjacent.keys().cloned().collect();
+        let mut active_nodes: HashSet<IROperand> = graph.adjacent.keys()
+            .filter(|a| !self.allocations.contains_key(a))
+            .cloned()
+            .collect();
         let mut alloc_stack: Vec<IROperand> = Vec::new();
 
         while !active_nodes.is_empty() {
@@ -620,29 +671,51 @@ impl<'a> Codegen<'a> {
     //Final allocator step, it loops until all operations with spilled are modified
     //Since in 0.1% cases there might be not enough registers for spilled values
     pub fn run_allocator(&mut self) {
-        let passes = 0; //just a safety
-       loop {
+        let mut passes = 0;
+        loop {
             self.compute_liveness();
             let graph = self.build_iterf_graph();
+
+            self.seed_pins(&graph);
+
             let alloc_stack = self.color(graph.clone());
             self.allocate(alloc_stack, &graph);
 
-            //Search for spilled
+            //Check for spilled
             let spilled: Vec<IROperand> = self.allocations.iter()
                 .filter(|(_, loc)| matches!(loc, Location::StackOffset(_)))
                 .map(|(op, _)| op.clone())
                 .collect();
 
-            //No spilled? Nice - break
-            if spilled.is_empty() {
-                break;
-            }
+            if spilled.is_empty() { break; } //No spilled? Nice - break
 
             self.rewrite_spills(&spilled);
             self.allocations.clear();
 
+            passes += 1;
             if passes > 10 {
                 panic!("Codegen Error: More than 10 passes occured, there must be something wrong, can't help though");
+            }
+        }
+    }
+
+    //Check for pin conflicts
+    fn seed_pins(&mut self, graph: &InterferenceGraph) {
+        for (var_name, reg) in &self.pins {
+            self.allocations.insert(IROperand::Var(var_name.clone()), Location::Register(*reg));
+        }
+
+        for (var_name, reg) in &self.pins {
+            let node = IROperand::Var(var_name.clone());
+            if let Some(neighbors) = graph.adjacent.get(&node) {
+                for neighbor in neighbors {
+                    if self.allocations.get(neighbor) == Some(&Location::Register(*reg)) {
+                        panic!(
+                            "Codegen Error: pinned variable {} conflicts with another live pinned variable in register {:?}",
+                            var_name, reg
+                        );
+                    }
+                }
             }
         }
     }

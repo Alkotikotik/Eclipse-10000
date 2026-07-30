@@ -9,7 +9,7 @@ arch PageTableEntry{
 };
 
 >_ Struct that is stored in register, total size must be 4 bytes
-regarch rgba {
+regarch Rgba {
     u8 r;
     u8 g;
     u8 b;
@@ -17,6 +17,7 @@ regarch rgba {
 };
 
 func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regular var in that func
+
 
     >_ bitwises
     u32 w = 256;
@@ -27,7 +28,7 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regu
     w = w | r;
     w = w ^ r;
 
-    >_ w = w % w; >_ mod and division aren't implemented yet
+    >_ w = w % w; mod and division aren't implemented yet
 
     [z].Entry = 18;
 
@@ -46,6 +47,8 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regu
 
 
     #rx0 i32 a = 256; >_ a is stored in rx0 no matter what
+    #rx11 Rgba color;
+    color = get_color(); >_ Same as Rgba
     i16 b;
     b = a * -256;
 
@@ -83,4 +86,11 @@ func main(){
     z.flags = 11;
 
     bootstrap_os(X_BOUND, Y_BOUND, &z);
+}
+
+func get_color() => Rgba color {
+    color.r = 255;
+    color.g = 255;
+    color.b = 0;
+    color.a = 1;
 }

@@ -118,7 +118,7 @@ regarch RGBA {
 This feature provides fast access to important structs. A `regarch` can also be pinned to a specific register:
 
 ```c
-#rx1 RGBA;
+#rx1 RGBA color;
 ```
 
 ## Functions
@@ -209,7 +209,7 @@ inline [
 outline];
 ```
 
-Any assembly code can be inserted, importantely, including labels, which is useful, for example for setting up interrupt tables. For example, starting a file with a vector table:
+Any assembly code can be inserted, importantely, including labels, which is useful, for example for setting up interrupt tables: start a file with a vector table:
 
 ```x86asm
 inline [
@@ -231,5 +231,5 @@ func handle_memfault() {
 }
 ```
 
-## That's it!
-Comments are ">_" btw
+## That's it
+Comments are ">_" btw, of course read the OS code to understand FLARE-10K better(not yet tho)

@@ -837,6 +837,7 @@ impl<'a> Parser<'a> {
         let mut args: Vec<Expr> = Vec::new();
         if let Some(&(Token::RParen, _, _)) = self.tokens.peek() {
             //Zero args
+            self.expect(Token::RParen);
             return args;
         }
 
@@ -885,7 +886,7 @@ impl<'a> Parser<'a> {
                 }
                 Token::Def => {
                     self.advance();
-                    let pin = if let Some(&(Token::Pin(ref reg), _, _)) = self.tokens.peek() {
+                    let _pin = if let Some(&(Token::Pin(ref reg), _, _)) = self.tokens.peek() {
                         let r = reg.clone();
                         self.advance();
                         Some(r)
