@@ -28,7 +28,7 @@ fn main() {
     let ast = parser.parse_everything();
 
     println!("Parser Success! Generated AST:");
-    //println!("{:#?}", ast);
+    println!("{:#?}", ast);
 
     println!("Semantic");
     let mut semantic_analyzer = Semantic::new(&ast);

@@ -52,7 +52,7 @@ u32 arr[4] = {0, 1, 2, 3};
 An array can also be left zero-initialized:
 
 ```c
-u32 arr[4] = {};
+u32 arr[4];
 ```
 
 ### Global Definitions

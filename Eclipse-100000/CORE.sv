@@ -81,6 +81,18 @@ module CORE(
     logic [31:0] sign_ext_imm26;
     assign sign_ext_imm26 = { {6{IR[25]}}, IR[25:0] };
 
+    //Is it useless? Absolutely not, imagine it for "for" loops
+    logic [31:0] sign_ext_imm2;
+
+    always_comb begin
+        unique case (IR[1:0])
+            2'b00: sign_ext_imm2 = 32'd0;
+            2'b01: sign_ext_imm2 = 32'd1;
+            2'b10: sign_ext_imm2 = 32'd2; //Here is a crazy idea for ya 0b10 signed is 2
+            2'b11: sign_ext_imm2 = -32'sd1;
+        endcase
+    end
+
     //Breaking instruction down
     assign opcode = IR[31:26];
     assign rx0 = IR[25:18];
@@ -105,15 +117,17 @@ module CORE(
     always_comb begin
         unique case (aluSrcY)
             2'b00: AluMuxY = 32'd4;
+
             2'b01: begin
                 unique case (opcode)
-                    6'b000001: AluMuxY = RegY;
-                    6'b000011: AluMuxY = RegY;
-                    6'b000111: AluMuxY = RegY;
+                    6'b000001,
+                    6'b000011,
+                    6'b000111: AluMuxY = RegY + sign_ext_imm2;
 
-                    default: AluMuxY = RegY + zero_ext_imm10;
+                    default:   AluMuxY = RegY + zero_ext_imm10; // 2-operand logic
                 endcase
             end
+
             2'b10: AluMuxY = j_imm_signed;
             2'b11: AluMuxY = { {20{immediate[11]}}, immediate };
 

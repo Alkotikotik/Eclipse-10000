@@ -99,6 +99,7 @@ pub enum AsmInst {
     Jr  (AsmOperand),
     Call(String),
     Inline(String),
+    Label(String),
     Ret,
 
 }
@@ -541,7 +542,7 @@ impl<'a> Codegen<'a> {
     //will be spilled, however if there is we will just put it in the register.
     pub fn color(&mut self, graph: InterferenceGraph) -> Vec<IROperand> {
 
-        let mut active_nodes: HashSet<IROperand> = graph.adj.keys().cloned().collect();
+        let mut active_nodes: HashSet<IROperand> = graph.adjacent.keys().cloned().collect();
         let mut alloc_stack: Vec<IROperand> = Vec::new();
 
         while !active_nodes.is_empty() {
@@ -794,7 +795,7 @@ impl<'a> Codegen<'a> {
         let mut compiled = Vec::new();
 
         if self.frame_size > 0 {
-            compiled.push(AsmInst::Sub(sp(), sp(), imm(self.frame_size as i32)));
+            compiled.push(AsmInst::Sub(AsmOperand::SP, AsmOperand::SP, imm(self.frame_size as i32)));
         }
 
         for block in &self.cfg {
@@ -876,7 +877,7 @@ impl<'a> Codegen<'a> {
     //So we can load into stack, pointer, or raw address that function resolves that
     fn resolve_addr(&self, ptr_addr: &IROperand, out: &mut Vec<AsmInst>) -> (AsmOperand, i32, bool) {
         match ptr_addr {
-            IROperand::FrameSlot(off) => (sp(), *off as i32, false),
+            IROperand::FrameSlot(off) => (AsmOperand::SP, *off as i32, false),
             _ if is_const(ptr_addr) => {
                 load_const(rx30(), const_val(ptr_addr), out);
                 (rx31(), 0, true) //If its true, it means that rx31 got corrupted or sum, and we
@@ -932,7 +933,9 @@ impl<'a> Codegen<'a> {
 
         out.push(make(dest_asm, rx1, imm10));
 
-        if used_rx31 { out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0))); }
+        if used_rx31 { 
+            out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
+        }
     }
 
     //B-type 3 operand: mul, add, sub
@@ -988,27 +991,74 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn lower_unary(&mut self, dest: &IROperand, src: &IROperand, op, out: &mut Vec<AsmInst>) {
-
-    }
-
     fn lower_inst(&mut self, inst: &IRInst, out: &mut Vec<AsmInst>) {
         match inst {
-            IRInst::Label(lab) => out.push(AsmInst::Inline(format!("{}", lab))),
+            IRInst::Label(lab) => out.push(AsmInst::Label(format!("{}", lab))),
             IRInst::Jmp(target) => out.push(AsmInst::Jmp(target.clone())),
 
             IRInst::LoadPtr  { dest, ptr_addr } => self.lower_mem(dest, ptr_addr, true, out),
             IRInst::StorePtr { ptr_addr, src } => self.lower_mem(src, ptr_addr, false, out),
 
-            IRInst::Add { dest, left, right } => self.lower_btype_alu(dest, left, right, AsmInst::Add, out),
-            IRInst::Sub { dest, left, right } => self.lower_btype_alu(dest, left, right, AsmInst::Sub, out),
-            IRInst::Mul { dest, left, right } => self.lower_btype_alu(dest, left, right, AsmInst::Mul, out),
+            IRInst::Add {dest, left, right} => self.lower_btype_alu(dest, left, right, AsmInst::Add, out),
+            IRInst::Sub {dest, left, right} => self.lower_btype_alu(dest, left, right, AsmInst::Sub, out),
+            IRInst::Mul {dest, left, right} => self.lower_btype_alu(dest, left, right, AsmInst::Mul, out),
 
-            IRInst::Xor { dest, left, right } => self.lower_rtype_alu(dest, left, right, AsmInst::Xor, out),
-            IRInst::Or  { dest, left, right } => self.lower_rtype_alu(dest, left, right, AsmInst::Or, out),
-            IRInst::And { dest, left, right } => self.lower_rtype_alu(dest, left, right, AsmInst::And, out),
-            IRInst::Shl { dest, left, right } => self.lower_rtype_alu(dest, left, right, AsmInst::Shl, out),
-            IRInst::Shr { dest, left, right } => self.lower_rtype_alu(dest, left, right, AsmInst::Shr, out),
+            IRInst::Xor {dest, left, right} => self.lower_rtype_alu(dest, left, right, AsmInst::Xor, out),
+            IRInst::Or  {dest, left, right} => self.lower_rtype_alu(dest, left, right, AsmInst::Or,  out),
+            IRInst::And {dest, left, right} => self.lower_rtype_alu(dest, left, right, AsmInst::And, out),
+            IRInst::Shl {dest, left, right} => self.lower_rtype_alu(dest, left, right, AsmInst::Shl, out),
+            IRInst::Shr {dest, left, right} => self.lower_rtype_alu(dest, left, right, AsmInst::Shr, out),
+
+            //Just code those 3 without functions its gonna be easier
+            IRInst::Not {dest, src} => {
+                let dest_asm = self.operand_to_asm(dest);
+
+                //They are pretty much the same, so we first handle constants
+                if is_const(src) {
+                    let val = const_val(src);
+                    if let AsmOperand::Reg(Reg::TheRealOne(reg)) = dest_asm {
+                        load_const(reg, !val, out);
+                    }
+                } else { //that variables
+                    let src_asm = self.operand_to_asm(src);
+                    if dest != src { //And then dest, src
+                        out.push(AsmInst::Mov(dest_asm.clone(), src_asm, AsmOperand::Imm10(0)));
+                        out.push(AsmInst::Not(dest_asm));
+                    } else {
+                        out.push(AsmInst::Not(src_asm));
+                    }
+                }
+            }
+
+            IRInst::Negate {dest, src} => {
+                let dest_asm = self.operand_to_asm(dest);
+
+                if is_const(src) {
+                    let val = const_val(src);
+                    if let AsmOperand::Reg(Reg::TheRealOne(reg)) = dest_asm {
+                        load_const(reg, -val, out);
+                    }
+                } else {
+                    let src_asm = self.operand_to_asm(src);
+                    out.push(AsmInst::Sub(dest_asm, rx31(), src_asm));
+                }
+            }
+
+            IRInst::Cpy {dest, src} => {
+                let dest_asm = self.operand_to_asm(dest);
+
+                if is_const(src) {
+                    if let AsmOperand::Reg(Reg::TheRealOne(reg)) = dest_asm {
+                        load_const(reg, const_val(src), out);
+                    }
+                } else {
+                    let src_asm = self.operand_to_asm(src);
+
+                    if dest_asm != src_asm {
+                        out.push(AsmInst::Mov(dest_asm, src_asm, AsmOperand::Imm10(0)));
+                    }
+                }
+            }
 
             IRInst::AntiEqual {left, right, target} => {
                 self.lower_cmp(left, right, out);
@@ -1035,6 +1085,12 @@ impl<'a> Codegen<'a> {
                     out.push(AsmInst::Bss(target.clone()));
                 } else {
                     out.push(AsmInst::Bsu(target.clone()));
+                }
+            }
+
+            IRInst::InlineAsm {asm} => {
+                for line in asm {
+                    out.push(AsmInst::Inline(line));
                 }
             }
         }

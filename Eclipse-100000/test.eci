@@ -14,7 +14,7 @@
 
     STR [rx2, rx4 - 172]
     LOAD rx10 <- 2043
-    ADD [rx2, rx10]
+    ADD [rx2, rx2, rx10]
 
     MOV ry61 <- rz50
     STR [ry61, rx4 - 152]
@@ -46,6 +46,7 @@
 ~A:
     LOAD rz23 <- 4
     XOR [rx3, rz23 + 1000] >_ Unsigned only
+    ADD [rx3, rx3, rx31 - 1] >_ +1, +2 -1 only
     STR [rx3, rx4 + 4]
     XOR [rx3, rx23 + 1000]
     RET

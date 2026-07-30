@@ -118,7 +118,8 @@ fn main() -> io::Result<()> {
             .replace("<-", " ")
             .replace("[", " ")
             .replace("]", " ")
-            .replace(",", " ");
+            .replace(",", " ")
+            .replace("+", " ");
 
         let tokens: Vec<&str> = cleared.split_whitespace().collect();
 
@@ -166,7 +167,7 @@ fn main() -> io::Result<()> {
                         let val = parse_imm64(tokens[4]);
                         immediate = -val;
                     } else if tokens[3] == "+" && tokens.len() > 4 {
-                        immediate = parse_imm64(tokens[4]);
+                        immediate = parse_imm64(tokens[3]);
                     } else {
                         let target = tokens[3].trim_start_matches('~');
                         if let Some(&label_addr) = labels.get(target) {
@@ -182,23 +183,37 @@ fn main() -> io::Result<()> {
                 let mut dest_reg: u32 = 0;
                 let mut src1_reg: u32 = 0;
                 let src2_reg: u32;
+                let mut stride_bits: u32 = 0b00;
 
-                if tokens.len() > 1 {
-                    dest_reg = parse_reg(tokens[1]);
-                }
-                if tokens.len() > 2 {
-                    src1_reg = parse_reg(tokens[2]);
-                }
-                if tokens.len() > 3 {
-                    src2_reg = parse_reg(tokens[3]);
-                } else {
+                if tokens.len() > 1 { dest_reg = parse_reg(tokens[1]); }
+                if tokens.len() > 2 { src1_reg = parse_reg(tokens[2]); }
+                if tokens.len() > 3 { src2_reg = parse_reg(tokens[3]); } else {
                     src2_reg = src1_reg;
                     src1_reg = dest_reg;
                 }
 
+                // Handle both "- 1" (tokens[4] == "-", tokens[5] == "1") 
+                // and "-1" / "+1" (tokens[4] == "-1")
+                if tokens.len() > 4 {
+                    let stride_val = if tokens[4] == "-" && tokens.len() > 5 {
+                        -parse_imm64(tokens[5])
+                    } else if tokens[4] == "+" && tokens.len() > 5 {
+                        parse_imm64(tokens[5])
+                    } else {
+                        parse_imm64(tokens[4])
+                    };
+
+                    stride_bits = match stride_val {
+                        1 => 0b01,  // +1
+                        2 => 0b10,  // +2
+                        -1 => 0b11, // -1 (Encodes to 0b11 for custom_imm2)
+                        _ => 0b00,
+                    };
+                }
+
                 rx0 = src1_reg;
                 rx1 = src2_reg;
-                immediate = (dest_reg as i64) << 2;
+                immediate = (((dest_reg & 0xFF) as i64) << 2) | (stride_bits as i64);
             }
             "CMP" => {
                 if tokens.len() > 1 {
@@ -235,8 +250,7 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-            "RET" | "SYS" | "RETU" | "PAD" => {
-            }
+            "RET" | "SYS" | "RETU" | "PAD" => {}
             _ => {
                 if tokens.len() > 1 {
                     rx0 = parse_reg(tokens[1]);
@@ -249,7 +263,7 @@ fn main() -> io::Result<()> {
                         let val = parse_imm64(tokens[4]);
                         immediate = -val;
                     } else if tokens[3] == "+" && tokens.len() > 4 {
-                        immediate = parse_imm64(tokens[4]);
+                        immediate = parse_imm64(tokens[3]);
                     } else {
                         let target = tokens[3].trim_start_matches('~');
                         if let Some(&label_addr) = labels.get(target) {
@@ -266,10 +280,7 @@ fn main() -> io::Result<()> {
         let imm_u32 = immediate as u32;
 
         let machine_code: u32 = match instr.as_str() {
-            "LMA" => {
-                ((opcode & 0x3F) << 26)
-                    | ((immediate as u32) & 0x03FF_FFFF)
-            }
+            "LMA" => ((opcode & 0x3F) << 26) | ((immediate as u32) & 0x03FF_FFFF),
             "JMP" | "CALL" | "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" => {
                 ((opcode & 0x3F) << 26) | (imm_u32 & 0x03FF_FFFF)
             }

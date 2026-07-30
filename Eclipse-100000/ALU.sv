@@ -13,7 +13,7 @@ module ALU (
 
     logic [63:0] mul_product;
     assign mul_product = x * y;
-    
+
     /* verilator lint_off UNUSEDSIGNAL */
     logic [32:0] ext_result;
     logic is_sub_op;

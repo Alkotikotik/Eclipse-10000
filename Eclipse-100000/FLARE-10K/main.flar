@@ -35,7 +35,7 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regu
     sigma.Entry = 20;
     sigma.flags = 1;
 
-    u32 arr[4] = {0, 1, 2, 4};
+    u32 arr[4];
 
     [0xFFFFFF08] = 4096; >_ standalone value in square brackets always means contents of the address specified
     [0xFFFFFF0C] = 16384;
@@ -48,11 +48,10 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regu
     #rx0 i32 a = 256; >_ a is stored in rx0 no matter what
     i16 b;
     b = a * -256;
-    c = arr[0]; >_ c = 0
 
-
-    for [u32 i = 0; i < 128; i = i + 1] {
-        c = c + 1;
+    for [u32 i = 0; i < 5; i = i + 1] {
+        arr[i] = i;
+        c = arr[i];
     }
     while [true] {
         >_ It works just fine(ignoring subtle fact that it will just be stuck forever)
