@@ -40,7 +40,7 @@ Variables can be explicitly pinned to a particular register using **#r(x/y/z)NS*
 #rx1 i32 variable = -1024;
 ```
 
-Regardless of what the allocator does, that variable will be stored in `rx1`. This is designed for easier inline hardware interactions and for pinning critical variables directly to registers.
+Regardless of what the allocator does, that variable will be stored in `rx1`. This is designed for easier inline hardware interactions and for pinning important variables, requiring high speed access, directly to registers.
 
 ### Arrays
 FLARE-10K features standard arrays, declared as follows:
@@ -115,7 +115,7 @@ regarch RGBA {
 }
 ```
 
-This feature provides fast access to critical structs. A `regarch` can also be pinned to a specific register:
+This feature provides fast access to important structs. A `regarch` can also be pinned to a specific register:
 
 ```c
 #rx1 RGBA;
@@ -143,20 +143,20 @@ func log_event(u32: code) {}
 ### Return Variable
 You might have noticed the return variable in the signature. This is an optional function variable declared directly in the function signature.
 
-It is initialized to `NULL` and can be pinned. If omitted, the function behaves like a standard function. It is used just like a regular variable within the body. If a function does not contain an explicit `return` statement but has a return variable, the last value stored in the return variable is automatically returned. While a function does not strictly need to return the declared return variable, any explicit `return` statement must still match the declared return type.
+It is initialized to `NULL` and can be pinned. If omitted, the function behaves like a standard function. It is used just like a regular variable within the body. If a function does not contain an explicit `return` statement but has a return variable, the last value stored in the return variable is automatically returned at the end of the function. Although a function does not strictly need to return the declared return variable, any explicit `return` statement works just fine, as long as its of a return type of a function.
 
 ### Arguments and Returns
 Arguments and return types can be structs, pointers, references, etc.
 
 ## Memory Operations
-Since FLARE-10K is a low-level language, direct memory access is critical.
+Since FLARE-10K is a low-level language, direct memory access is very important, hence I tried making it easy to use.
 
 ### Dereferencing
-Dereferencing is straightforward in FLARE-10K: place any `u32` value or variable inside square brackets to access that memory address. For example:
+Dereferencing is straightforward in FLARE-10K: place any `u32` value/variable inside square brackets to access that memory address. For example:
 
 ```c
 [0xFFFFFFFF] = 512;
-// The value at memory address 0xFFFFFFFF will be rewritten to 512
+>_ The value at memory address 0xFFFFFFFF will be rewritten to 512
 ```
 
 It can also take a variable:
@@ -186,14 +186,14 @@ if [true == true] {}
 Supported relational operators are `<`, `>`, and `==`.
 
 ### For
-The `for` statement is fully implemented (not just syntactic sugar) and uses syntax similar to C:
+The `for` statement is fully implemented (not just sugar) and uses syntax similar to C:
 
 ```c
 for [int i = 0; i < limit; i = i + 1] {}
 ```
 
 ### While
-Similar to C:
+Similar to C again:
 
 ```c
 while [a < b] {}
@@ -209,7 +209,7 @@ inline [
 outline];
 ```
 
-Any assembly code can be inserted, including labels, which is useful for setting up interrupt tables. For example, starting a file with a vector table:
+Any assembly code can be inserted, importantely, including labels, which is useful, for example for setting up interrupt tables. For example, starting a file with a vector table:
 
 ```x86asm
 inline [
@@ -227,8 +227,9 @@ inline [
 outline];
 
 func handle_memfault() {
-    // Handle memfault
+    >_ Handle memfault
 }
 ```
 
 ## That's it!
+Comments are ">_" btw

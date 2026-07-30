@@ -818,48 +818,147 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    //Dumb version for now
-    fn resolve_addr(&self, ptr_addr: &IROperand) -> (AsmOperand, AsmOperand, i32) {
-        match ptr_addr {
-            IROperand::FrameSlot(offset) => (AsmOperand::SP, rx31(), *offset as i32),
-            _ => (self.operand_to_asm(ptr_addr), rx31(), 0),
+    //Minimal version of codegen for now
+
+    fn rx31() -> AsmOperand { reg(31, RegType::B32, 0)} //Here is a cool trick
+    fn rx30() -> AsmOperand { reg(30, RegType::B32, 0)} //Unfortunately we do in fact need second scratch
+
+    fn reg_op(reg: Register) -> AsmOperand { AsmOperand::Reg(Reg::TheRealOne(reg)) }
+    fn half_op(reg: Register, sub_index: u8) -> AsmOperand { reg_op(Register { id: reg.id, reg_type: RegType::B16, sub_index }) }
+
+    fn is_const(op: &IROperand) -> bool {
+        matches!(op, IROperand::SignedConstant(_) | IROperand::UnsignedConstant(_))
+    }
+    fn const_val(op: &IROperand) -> i32 {
+        match op {
+            IROperand::SignedConstant(value) => *value,
+            IROperand::UnsignedConstant(value) => *value as i32,
+            _ => panic!("not a constant"),
         }
     }
 
-    fn lower_inst(&self, inst: IRInst, result: Vec<IRInst>) {
-        match inst {
-            IRInst::Add{ dest, left, right } => result.push(
-                AsmInst::Add(operand_to_asm(dest), operand_to_asm(left), operand_to_asm(right),)
-            ),
-            IRInst::Sub{ dest, left, right } => result.push(
-                AsmInst::Sub(operand_to_asm(dest), operand_to_asm(left), operand_to_asm(right),)
-            ),
-            IRInst::Mul{ dest, left, right } => result.push(
-                AsmInst::Mul(operand_to_asm(dest), operand_to_asm(left), operand_to_asm(right),)
-            ),
-            IRInst::Xor {dest, src, imm10} => result.push(
-                AsmInst::Xor(operand_to_asm(dest), operand_to_asm(src), operand_to_asm(imm10),)
-            ),
-            IRInst::And {.., dest, src} => result.push(
-                AsmInst::And(operand_to_asm(dest), operand_to_asm(src), operand_to_asm(imm10),)
-            ),
-            IRInst::Or {dest, src, imm10} => result.push(
-                AsmInst::Or(operand_to_asm(dest), operand_to_asm(src), operand_to_asm(imm10),)
-            ),
-            IRInst::Shl {dest, src, imm10} => result.push(
-                AsmInst::Shl(operand_to_asm(dest), operand_to_asm(src), operand_to_asm(imm10),)
-            ),
-            IRInst::Shr {dest, src, imm10} => result.push(
-                AsmInst::Shr(operand_to_asm(dest), operand_to_asm(src), operand_to_asm(imm10),)
-            ),
-            IRInst::Div {} => panic!("Division isn't implemented yet"),
-            IRInst::Mod {} => panic!("Mod isn't implemented yet"),
-            IRInst::Not {op} => result.push(AsmInst::Not(operand_to_asm(op),)),
-            IRInst::Negate {op} => result.push(AsmInst::Negate(operand_to_asm(op),)),
 
-
-
+    fn fits(value: i64, bits: u32, signed: bool) -> bool { //Literally what it means
+        if signed {
+            let lo = -(1i64 << (bits - 1));
+            let hi = (1i64 << (bits - 1)) - 1;
+            value >= lo && value <= hi
+        } else {
+            value >= 0 && value < (1i64 << bits)
         }
+    }
+
+    fn load_const(dest: Register, value: i32, out: &mut Vec<AsmInst>) {
+        match dest.reg_type {
+            RegType::B32 if fits(value as i64, 18, true) => { //Fits into imm18
+                out.push(AsmInst::Load(reg_op(dest), AsmOperand::Imm18(value)));
+            }
+            RegType::B32 if fits(value as i64, 26, true) => { //Fits into imm26, 
+                out.push(AsmInst::Lma(AsmOperand::Imm26(value)));
+                if dest.id != 31 { //If we actually wanted it in rx31, jic tbh tho
+                    out.push(AsmInst::Mov(reg_op(dest), rx31()));
+                    out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
+                }
+            }
+            RegType::B32 => {
+                // If it doesn't fit even in 26 bits, we utilize register
+                // fragmentation by loading lower 16 bits into ry310 higher into ry311 and result
+                // will just be in rx31, genuis, love register fragmentation
+                let lo = (value as u32 & 0xFFFF) as i32;
+                let hi = ((value as u32 >> 16) & 0xFFFF) as i32;
+                out.push(AsmInst::Load(half_op(dest, 0), AsmOperand::Imm18(lo)));
+                out.push(AsmInst::Load(half_op(dest, 2), AsmOperand::Imm18(hi)));
+            }
+            _ => out.push(AsmInst::Load(reg_op(dest), Imm18(value))), // 16/8-bit value always fit in imm18
+        }
+    }
+
+    //So we can load into stack, pointer, or raw address that function resolves that
+    fn resolve_addr(&self, ptr_addr: &IROperand, out: &mut Vec<AsmInst>) -> (AsmOperand, i32, bool) {
+        match ptr_addr {
+            IROperand::FrameSlot(off) => (sp(), *off as i32, false),
+            _ if is_const(ptr_addr) => {
+                load_const(rx30(), const_val(ptr_addr), out);
+                (rx31(), 0, true) //If its true, it means that rx31 got corrupted or sum, and we
+                //gotta clean it up
+            }
+            _ => (self.operand_to_asm(ptr_addr), 0, false),
+        }
+    }
+
+
+    //Lowest further, low load and store ptr 
+    fn lower_mem(&self, dest_or_src: &IROperand, ptr_addr: &IROperand, is_load: bool, out: &mut Vec<AsmInst>) {
+        let (base, off, used_rx31) = self.resolve_addr(ptr_addr, out);
+
+        let value_operand = if is_load {
+            self.operand_to_asm(dest_or_src)
+        } else if is_const(dest_or_src) { //We have to actually load value into second scratch if it
+            //isn't a variable
+            let target = if used_rx31 { rx30() } else { rx30() };
+            load_const(target, const_val(dest_or_src), out);
+            reg_op(target)
+        } else {
+            self.operand_to_asm(dest_or_src)
+        };
+
+        out.push(if is_load { AsmInst::Ldr(value_operand, base, AsmOperand::Imm10(off as i16)) }
+                else        { AsmInst::Str(value_operand, base, AsmOperand::Imm10(off as i16)) });
+
+        if used_rx31 { out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0))); }
+    }
+
+    //R-type, so 2 operand like xor, or etc, its rx0 = rx0 OP (rx1 + imm10)
+    fn lower_rtype_alu(&mut self, dest: &IROperand, left: &IROperand, right: &IROperand,
+                        make: fn(AsmOperand, AsmOperand, AsmOperand) -> AsmInst, out: &mut Vec<AsmInst>) {
+        let dest_asm = self.operand_to_asm(dest);
+        let left_asm = self.operand_to_asm(left);
+
+        if dest_asm != left_asm {
+            out.push(AsmInst::Mov(dest_asm.clone(), left_asm));
+        }
+
+        let mut used_rx31 = false;
+        let (rx1, imm10) = if is_const(right) && fits(const_val(right) as i64, 10, false) {
+            (rx31(), AsmOperand::Imm10(const_val(right) as i16)) //As long as fits into imm10, we
+            //are good
+        } else if is_const(right) {
+            load_const(rx30(), const_val(right), out); //But if it doesn't use rx30
+            used_rx31 = true;
+            (rx31(), AsmOperand::Imm10(0))
+        } else {
+            (self.operand_to_asm(right), AsmOperand::Imm10(0))
+        };
+
+        out.push(make(dest_asm, rx1, imm10));
+
+        if used_rx31 { out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0))); }
+    }
+
+    //B-type 3 operand: mul, add, sub
+    fn lower_btype_alu(&mut self, dest: &IROperand, left: &IROperand, right: &IROperand,
+                        make: fn(AsmOperand, AsmOperand, AsmOperand) -> AsmInst, out: &mut Vec<AsmInst>) {
+        let mut used_rx31 = false;
+
+        let l = if is_const(left) {
+            load_const(rx30(), const_val(left), out);
+            used_rx31 = true;
+            rx31()
+        } else {
+            self.operand_to_asm(left)
+        };
+
+        let r = if is_const(right) {
+            let target = if used_rx31 { rx30_reg() } else { rx30() };
+            used_rx31 = true;
+            load_const(target, const_val(right), out);
+            reg_op(target)
+        } else {
+            self.operand_to_asm(right)
+        };
+
+        out.push(make(self.operand_to_asm(dest), l, r));
+
+        if used_rx31 { out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0))); }
     }
 }
-
