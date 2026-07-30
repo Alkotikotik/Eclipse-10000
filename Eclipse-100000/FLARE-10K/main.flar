@@ -9,6 +9,7 @@ arch PageTableEntry{
 };
 
 >_ Struct that is stored in register, total size must be 4 bytes
+
 regarch Rgba {
     u8 r;
     u8 g;
@@ -76,7 +77,7 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regu
         LOAD rx12 <- 0x10
     outline];
 
-    >_return c; last value of c is automatically returned, tho it can be returned exlicetely
+    >_return c; last value of c is automatically returned, tho it can be returned explicetely
 }
 
 func main(){

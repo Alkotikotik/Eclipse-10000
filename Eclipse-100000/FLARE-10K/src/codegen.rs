@@ -3,6 +3,7 @@
 //But I don't like how plain "live" sound so ill use "alive"
 
 use crate::IR3AC::{IRInst, IRFunction, IROperand};
+use crate::parser::{Type}
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -1061,6 +1062,14 @@ impl<'a> Codegen<'a> {
 
         if used_rx31 {
             out.push(AsmInst::Xor(Self::rx31(), Self::rx31(), AsmOperand::Imm10(0)));
+        }
+    }
+
+    fn lower_cast(&mut self, dest: &IROperand, src: &IROperand, target_type: &Type, out: &mut Vec<AsmInst>) {
+        let dest_asm = self.operand_to_asm(dest);
+        match target_type {
+            Type::I8 | Type:U8 => {}
+            Type::
         }
     }
 

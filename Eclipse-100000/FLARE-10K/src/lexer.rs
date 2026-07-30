@@ -288,10 +288,10 @@ impl<'a> Iterator for Lexer<'a> {
                     self.advance();
                     self.skip_comment();
                     return self.next();
-                }  else if self.peek() == Some(&'>'){
+                } else if self.peek() == Some(&'>') {
                     self.advance();
                     Token::Shr
-                }  else {
+                } else {
                     Token::More
                 }
             }
