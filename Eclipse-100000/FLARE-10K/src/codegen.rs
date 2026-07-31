@@ -1065,11 +1065,58 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn lower_cast(&mut self, dest: &IROperand, src: &IROperand, target_type: &Type, out: &mut Vec<AsmInst>) {
+    fn type_bits(ty: &Type) -> u32 {
+        match ty {
+            Type::I8 | Type::U8 | Type::Bool => 8,
+            Type::I16 | Type::U16 => 16,
+            Type::I32 | Type::U32 => 32,
+            _ => panic!("Casting only supports scalars"),
+        }
+    }
+
+    fn is_signed(ty: &Type) -> bool {
+        matches!(ty, Type::I8 | Type::I16 | Type::I32)
+    }
+
+    fn cast_const(val: i32, target_type: &Type) -> i32 {
+        let bits = type_bits(target_type);
+        if bits == 32 { return val; }
+        let mask = (1u32 << bits) - 1;
+        let truncated = (val as u32) & mask;
+        if is_signed(target_type) && (truncated & (1 << (bits - 1))) != 0 {
+            (truncated | !mask) as i32
+        } else {
+            truncated as i32
+        }
+    }
+
+    fn lower_cast(&mut self, dest: &IROperand, src: &IROperand, target_type: &Type, src_type: &Type, out: &mut Vec<AsmInst>) {
         let dest_asm = self.operand_to_asm(dest);
-        match target_type {
-            Type::I8 | Type:U8 => {}
-            Type::
+
+        if is_const(src) {
+            let casted = cast_const(const_val(src), target_type);
+            if let AsmOperand::Reg(Reg::TheRealOne(reg)) = dest_asm {
+                load_const(reg, casted, out);
+            }
+            return;
+        }
+
+        let src_asm = self.operand_to_asm(src);
+        let src_bits = type_bits(src_type);
+        let target_bits = type_bits(target_type);
+
+        if is_signed(src_type) && target_bits > src_bits {
+            //widening the signed is the only case where we need actual work
+            if dest_asm != src_asm {
+                out.push(AsmInst::Mov(dest_asm.clone(), src_asm));
+            }
+            let shift = (32 - src_bits) as i16;
+            out.push(AsmInst::Shl(dest_asm.clone(), rx31(), AsmOperand::Imm10(shift)));
+            out.push(AsmInst::Sra(dest_asm, rx31(), AsmOperand::Imm10(shift)));
+        } else {
+            //Any other operation is just move, because mov automatically zero extends,
+            //automatically uses lower bits, and automatically just works, I love fragmented registers
+            out.push(AsmInst::Mov(dest_asm, src_asm));
         }
     }
 
@@ -1141,6 +1188,8 @@ impl<'a> Codegen<'a> {
                     }
                 }
             }
+
+            IRInst::Cast { dest, src, target_type, src_type } => self.lower_cast(dest, src, target_type, src_type, out),
 
             IRInst::AntiEqual {left, right, target} => {
                 self.lower_cmp(left, right, out);

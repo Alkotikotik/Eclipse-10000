@@ -85,6 +85,7 @@ pub enum IRInst {
         dest: IROperand,
         src: IROperand,
         target_type: Type,
+        src_type: Type,
     },
 
     LoadPtr {
@@ -327,6 +328,9 @@ impl IR {
                     //unreachable but who knows
                 }
             }
+            Expr::Binary { left, .. } => self.infer_type(left),
+            Expr::Unary { expr, .. } => self.infer_type(expr),
+            Expr::Cast { target_type, .. } => target_type.clone(),
             _ => panic!("Error expression in infer_type: {:?}", expr),
         }
     }
@@ -379,12 +383,14 @@ impl IR {
             }
 
             Expr::Cast { expr, target_type } => {
+                let src_type = self.infer_type(expr);
                 let dest = self.new_temp();
                 let src = self.reduce_expr(expr);
                 self.emit(IRInst::Cast {
                     dest: dest.clone(),
                     src,
                     target_type: target_type.clone(),
+                    src_type
                 });
                 dest
             }
