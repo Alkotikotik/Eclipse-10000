@@ -165,7 +165,16 @@ module CORE(
             3'b001:  SPNext = ActiveSP + zero_ext_imm26; // SPADD
             3'b010:  SPNext = ActiveSP - zero_ext_imm26; // SPSUB
             3'b011:  SPNext = GPRs_data_out0;                     // SPSET
-            3'b100:  SPNext = ActiveSP - 32'h4;          // PUSH
+            3'b100:  begin //PUSH
+                unique case (rx0[5:7]) //TOOD fix this: make it aligned
+                    3'b000: SPNext = ActiveSP - 32'h4; //4 byte addressible
+
+                    3'b001: SPNext = ActiveSP - 32'h2; //2 byte addressible
+                    3'b010: SPNext = ActiveSP - 32'h2;
+
+                    default: SPNext = ActiveSP - 32'h1; //1 byte addressible rz
+                endcase
+            end
             3'b101:  SPNext = ActiveSP + 32'h4;          // POP
             default: SPNext = ActiveSP;
         endcase
