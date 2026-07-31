@@ -180,7 +180,7 @@ module CORE(
             RegY <= 32'd0;
             EA <= 32'd0;
             KernelMode <= 1;
-            SP  <= 32'h03FFFFFC;
+            SP <= 32'h03FFFFFC;
             KSP <= 32'h00000FFC;
             LR  <= 32'd0;
             KScratch <= 32'd0;
@@ -205,18 +205,22 @@ module CORE(
             end
 
             if (SPWrite) begin
-                SP  <= SPNext;
+                if (KernelMode) begin
+                    KSP <= SPNext;
+                end else begin
+                    SP  <= SPNext;
+                end
             end
 
             if (memWrite && IO_cs && KernelMode) begin
                 unique case (memTarget)
                     32'hFFFFFF04: mmio_timer_reg <= RegX[15:0];
-                    32'hFFFFFF08: memBase <= RegX;
-                    32'hFFFFFF0C: memLimit <= RegX;
-                    32'hFFFFFF10: EPC <= RegX;
-                    32'hFFFFFF14: SP <= RegX;
-                    32'hFFFFFF18: KSP <= RegX;
-                    32'hFFFFFF1C: KScratch <= RegX;
+                    32'hFFFFFF08: memBase        <= RegX;
+                    32'hFFFFFF0C: memLimit       <= RegX;
+                    32'hFFFFFF10: EPC            <= RegX;
+                    32'hFFFFFF14: SP             <= RegX;
+                    32'hFFFFFF18: KSP            <= RegX;
+                    32'hFFFFFF1C: KScratch       <= RegX;
                     default: ;
                 endcase
             end

@@ -2,9 +2,16 @@
     LOAD rx31 <- 4096
     SPSET -> rx31
     PUSH <- rx31
-    PUSH <- rx31
-    PUSH <- rx31
+    XOR [rx31, rx31]
+    POP -> rx30
+    ADD [rx30, rx30, rx31 + 2]
+    SPSUB 32
+    SPADD 24
+    SPSTR rx30 -32
+    SPLDR rx29 -32
+    PUSH rx30
 
-
-
-
+    PUSH rx29
+    PUSH rx29
+    PUSH rx29
+    PUSH rx29
