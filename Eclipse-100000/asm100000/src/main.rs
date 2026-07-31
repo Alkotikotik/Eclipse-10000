@@ -108,6 +108,16 @@ fn main() -> io::Result<()> {
     opcodes.insert("SYS",   0b111110);
     opcodes.insert("RETU",  0b111101);
 
+    // Stack
+    opcodes.insert("SPADD", 0b000101);
+    opcodes.insert("SPSUB", 0b001001);
+    opcodes.insert("SPSTR", 0b100000);
+    opcodes.insert("SPLDR", 0b100001);
+    opcodes.insert("SPLEA", 0b100010);
+    opcodes.insert("PUSH",  0b100100);
+    opcodes.insert("POP",   0b100101);
+    opcodes.insert("SPSET", 0b100110);
+
     let mut output_file = File::create(output_path)?;
 
     // Second pass: Instruction construction
@@ -119,6 +129,7 @@ fn main() -> io::Result<()> {
             .replace("[", " ")
             .replace("]", " ")
             .replace(",", " ")
+            .replace("->", " ")
             .replace("+", " ");
 
         let tokens: Vec<&str> = cleared.split_whitespace().collect();
@@ -250,6 +261,30 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
+            "SPADD" | "SPSUB" => {
+                if tokens.len() > 1 {
+                    immediate = parse_imm64(tokens[1]);
+                }
+            }
+            "SPSTR" | "SPLDR" | "SPLEA" => {
+                if tokens.len() > 1 {
+                    rx0 = parse_reg(tokens[1]);
+                }
+                if tokens.len() > 2 {
+                    if tokens[2] == "-" && tokens.len() > 3 {
+                        immediate = -parse_imm64(tokens[3]);
+                    } else if tokens[2] == "+" && tokens.len() > 3 {
+                        immediate = parse_imm64(tokens[3]);
+                    } else {
+                        immediate = parse_imm64(tokens[2]);
+                    }
+                }
+            }
+            "PUSH" | "POP" | "SPSET" => {
+                if tokens.len() > 1 {
+                    rx0 = parse_reg(tokens[1]);
+                }
+            }
             "RET" | "SYS" | "RETU" | "PAD" => {}
             _ => {
                 if tokens.len() > 1 {
@@ -281,10 +316,10 @@ fn main() -> io::Result<()> {
 
         let machine_code: u32 = match instr.as_str() {
             "LMA" => ((opcode & 0x3F) << 26) | ((immediate as u32) & 0x03FF_FFFF),
-            "JMP" | "CALL" | "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" => {
+            "JMP" | "CALL" | "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" | "SPADD" | "SPSUB" => {
                 ((opcode & 0x3F) << 26) | (imm_u32 & 0x03FF_FFFF)
             }
-            "LOAD" => {
+            "LOAD" | "SPSTR" | "SPLDR" | "SPLEA" => {
                 ((opcode & 0x3F) << 26)
                     | ((rx0 & 0xFF) << 18)
                     | ((immediate as u32) & 0x0003_FFFF)
@@ -309,12 +344,6 @@ fn main() -> io::Result<()> {
 fn parse_reg(reg_str: &str) -> u32 {
     let upper = reg_str.to_uppercase();
 
-    if upper == "SP" || upper == "TSP" {
-        return (15 << 3) | 0b000;
-    } else if upper == "LR" || upper == "RA" {
-        return (14 << 3) | 0b000;
-    }
-
     let prefix = if upper.starts_with("RZ") {
         "RZ"
     } else if upper.starts_with("RY") {
@@ -324,7 +353,7 @@ fn parse_reg(reg_str: &str) -> u32 {
     } else if upper.starts_with('R') {
         "R"
     } else {
-        ""
+        panic!("Assembler Error: invalid register '{}'", reg_str);
     };
 
     let rest = upper.trim_start_matches(prefix);

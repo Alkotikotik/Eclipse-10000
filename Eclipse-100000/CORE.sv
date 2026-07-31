@@ -19,6 +19,7 @@ module CORE(
     assign ActiveSP = KernelMode ? KSP : SP;
 
     logic [31:0] PCNext;
+    logic [31:0] SPNext;
 
     logic [5:0] opcode;
     logic [7:0] rx0;
@@ -29,6 +30,7 @@ module CORE(
 
     logic XWrite, YWrite, IRWrite, PCWrite, GPRsWrite, EAWrite;
     logic memRead, memWrite;
+    logic SPWrite;
     logic memViolation;
     logic isCallState;
     logic [31:0] memBase;
@@ -39,6 +41,7 @@ module CORE(
     logic [1:0] aluSrcY;
     logic [2:0] PCSrc;
     logic [2:0] GPRsSrc;
+    logic [2:0] SPSrc;
     logic [31:0] sign_ext_imm10;
     assign sign_ext_imm10 = { {22{IR[9]}}, IR[9:0] };
     logic [31:0] zero_ext_imm10;
@@ -81,6 +84,9 @@ module CORE(
     logic [31:0] sign_ext_imm26;
     assign sign_ext_imm26 = { {6{IR[25]}}, IR[25:0] };
 
+    logic [31:0] zero_ext_imm26;
+    assign zero_ext_imm26 = {{6'h0, IR[25:0]}};
+
     //Is it useless? Absolutely not, imagine it for "for" loops
     logic [31:0] sign_ext_imm2;
 
@@ -106,7 +112,11 @@ module CORE(
 
     assign active_address = (IRWrite) ? PC : memTarget;
 
-    assign memTarget = (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm10) : RegY;
+    assign memTarget = (opcode == 6'b100100) ? (ActiveSP - 32'h4) :        // PUSH: addr = new SP
+                       (opcode == 6'b100101) ? ActiveSP :                  // POP: addr = old SP
+                       (opcode == 6'b100000 || opcode == 6'b100001 || opcode == 6'b100010)
+                        ? (ActiveSP + sign_ext_imm18) : // SPSTR/SPLDR/SPLEA
+                       (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm10) : RegY;
     assign memViolation = (!KernelMode && (memRead || memWrite) &&
                           ((active_address < memBase) ||
                           (33'(active_address) >= (33'(memBase) + 33'(memLimit)))));
@@ -149,6 +159,18 @@ module CORE(
         endcase
     end
 
+    always_comb begin
+        unique case (SPSrc)
+            3'b000:  SPNext = ActiveSP;
+            3'b001:  SPNext = ActiveSP + zero_ext_imm26; // SPADD
+            3'b010:  SPNext = ActiveSP - zero_ext_imm26; // SPSUB
+            3'b011:  SPNext = GPRs_data_out0;                     // SPSET
+            3'b100:  SPNext = ActiveSP - 32'h4;          // PUSH
+            3'b101:  SPNext = ActiveSP + 32'h4;          // POP
+            default: SPNext = ActiveSP;
+        endcase
+    end
+
     //SPRs
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -180,6 +202,10 @@ module CORE(
 
             if (isCallState && opcode == 6'b111000) begin
                 LR <= PC + 32'd4; //Save pc + 4 on call
+            end
+
+            if (SPWrite) begin
+                SP  <= SPNext;
             end
 
             if (memWrite && IO_cs && KernelMode) begin
@@ -222,10 +248,10 @@ module CORE(
         else begin
             if (memTarget <= 32'h03FFFFFF) begin
                 RAM_cs = 1;
-            end 
+            end
             else if (memTarget >= 32'h80000000 && memTarget <= 32'h800FFFFF) begin
                 VRAM_cs = 1;
-            end 
+            end
             else if (memTarget >= 32'hFFFFFF00) begin
                 IO_cs = 1;
             end
@@ -275,10 +301,11 @@ module CORE(
     end
 
     assign GPRs_data_in = (GPRsSrc == 3'b001) ? cpu_mem_data_out :
-                      (GPRsSrc == 3'b010) ? PC :
-                      (GPRsSrc == 3'b011) ? sign_ext_imm18 :
-                      (GPRsSrc == 3'b100) ? sign_ext_imm26 :
-                      AluResult;
+                  (GPRsSrc == 3'b010) ? PC :
+                  (GPRsSrc == 3'b011) ? sign_ext_imm18 :
+                  (GPRsSrc == 3'b100) ? sign_ext_imm26 :
+                  (GPRsSrc == 3'b101) ? memTarget : // SPLEA
+                  AluResult;
 
     CU control_unit (
         .clk(clk),
@@ -304,7 +331,9 @@ module CORE(
         .GPRsSrc(GPRsSrc),
         .aluOpSel(aluOpSel),
         .isCallState(isCallState),
-        .flagsWrite(flagsWrite)
+        .flagsWrite(flagsWrite),
+        .SPWrite(SPWrite),
+        .SPSrc(SPSrc)
     );
 
     ALU cpu_alu (
@@ -333,7 +362,7 @@ module CORE(
 
     RAM system_ram (
         .clk(clk),
-        .address((IRWrite) ? PC : (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm10) : RegY),
+        .address(active_address),
         .data_in(ram_data_in_aligned),
         .byte_enable(ram_byte_enable),
         .mem_write(memWrite && !memViolation && RAM_cs),

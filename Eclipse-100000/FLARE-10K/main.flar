@@ -1,5 +1,5 @@
 >_ FLARE-10K Language example
-#def #rx30 u32 X_BOUND = 360;
+#def u32 X_BOUND = 360;
 #def u32 Y_BOUND = 240;
 
 >_ regular struct
@@ -9,7 +9,6 @@ arch PageTableEntry{
 };
 
 >_ Struct that is stored in register, total size must be 4 bytes
-
 regarch Rgba {
     u8 r;
     u8 g;

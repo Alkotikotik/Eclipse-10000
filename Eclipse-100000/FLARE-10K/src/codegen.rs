@@ -66,15 +66,16 @@ pub enum AsmOperand {
     Imm26(i32),
     Imm18(i32)
     Imm10(i16),
+    Imm2(i8), //Don't laugh
     Label(String),
 }
 
 #[derive(Debug, Clone)]
 pub enum AsmInst {
     Mov(AsmOperand, AsmOperand, AsmOperand),
-    Add(AsmOperand, AsmOperand, AsmOperand), // 3 regisers
-    Sub(AsmOperand, AsmOperand, AsmOperand),
-    Mul(AsmOperand, AsmOperand, AsmOperand),
+    Add(AsmOperand, AsmOperand, AsmOperand, AsmOperand), // 3 regisers
+    Sub(AsmOperand, AsmOperand, AsmOperand, AsmOperand),
+    Mul(AsmOperand, AsmOperand, AsmOperand, AsmOperand),
     Xor(AsmOperand, AsmOperand, AsmOperand), //2 register plus unsiged 10bit
     Or (AsmOperand, AsmOperand, AsmOperand),
     And(AsmOperand, AsmOperand, AsmOperand),
@@ -308,6 +309,8 @@ impl InterferenceGraph {
 
 pub struct Codegen<'a> {
     ir_func: &'a IRFunction,
+    globals: &'a HashMap<String, Type>,
+    structs: &'a HashMap<String, StructDef>,
     cfg: Vec<BasicBlock>,
     allocations: HashMap<IROperand, Location>,
     frame_size: usize,
@@ -869,7 +872,7 @@ impl<'a> Codegen<'a> {
         let mut compiled = Vec::new();
 
         if self.frame_size > 0 {
-            compiled.push(AsmInst::Sub(AsmOperand::SP, AsmOperand::SP, imm(self.frame_size as i32)));
+            compiled.push(AsmInst::Sub(AsmOperand::SP, AsmOperand::SP, imm(self.frame_size as i32), AsmOperand::Imm2(0)));
         }
 
         for block in &self.cfg {
@@ -897,6 +900,9 @@ impl<'a> Codegen<'a> {
 
     fn rx31() -> AsmOperand { reg(31, RegType::B32, 0)} //Here is a cool trick
     fn rx30() -> AsmOperand { reg(30, RegType::B32, 0)} //Unfortunately we do in fact need second scratch
+
+    fn rx30_reg() -> Register { Register { id: 30, reg_type: RegType::B32, sub_index: 0 } }
+    fn rx31_reg() -> Register { Register { id: 31, reg_type: RegType::B32, sub_index: 0 } }
 
     fn reg_op(reg: Register) -> AsmOperand { AsmOperand::Reg(Reg::TheRealOne(reg)) }
     fn half_op(reg: Register, sub_index: u8) -> AsmOperand { reg_op(Register { id: reg.id, reg_type: RegType::B16, sub_index }) }
@@ -1012,31 +1018,50 @@ impl<'a> Codegen<'a> {
         }
     }
 
+    fn fits_imm2(val: i64) -> Option<i8> {
+        match val {
+            -1 => Some(0b11),
+            0  => Some(0b00),
+            1  => Some(0b01),
+            2  => Some(0b10),
+            _  => None,
+        }
+    }
+
     //B-type 3 operand: mul, add, sub
     fn lower_btype_alu(&mut self, dest: &IROperand, left: &IROperand, right: &IROperand,
-                        make: fn(AsmOperand, AsmOperand, AsmOperand) -> AsmInst, out: &mut Vec<AsmInst>) {
-        let mut used_rx31 = false;
+                        make: fn(AsmOperand, AsmOperand, AsmOperand, AsmOperand) -> AsmInst, out: &mut Vec<AsmInst>) {
 
-        let l = if is_const(left) {
+        let (l, left_used_rx30) = if is_const(left) && const_val(left) == 0 {
+            (rx31(), false)
+        } else if is_const(left) {
             load_const(rx30(), const_val(left), out);
-            used_rx31 = true;
-            rx31()
+            (reg_op(rx30()), true)
         } else {
-            self.operand_to_asm(left)
+            (self.operand_to_asm(left), false)
         };
 
-        let r = if is_const(right) {
-            let target = if used_rx31 { rx30_reg() } else { rx30() };
-            used_rx31 = true;
+        //Again imm2 is purely for "for" loops
+        if is_const(right) {
+            if let Some(imm2) = fits_imm2(const_val(right) as i64) {
+                out.push(make(self.operand_to_asm(dest), l, rx31(), AsmOperand::Imm2(imm2)));
+                return;
+            }
+        }
+
+        let (r, used_rx31) = if is_const(right) {
+            let target = if left_used_rx30 { rx31() } else { rx30() };
             load_const(target, const_val(right), out);
-            reg_op(target)
+            (reg_op(target), left_used_rx30)
         } else {
-            self.operand_to_asm(right)
+            (self.operand_to_asm(right), false)
         };
 
-        out.push(make(self.operand_to_asm(dest), l, r));
+        out.push(make(self.operand_to_asm(dest), l, r, AsmOperand::Imm2(0)));
 
-        if used_rx31 { out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0))); }
+        if used_rx31 {
+            out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
+        }
     }
 
     fn lower_cmp(&mut self, left: &IROperand, right: &IROperand, out: &mut Vec<AsmInst>) {
@@ -1169,7 +1194,7 @@ impl<'a> Codegen<'a> {
                     }
                 } else {
                     let src_asm = self.operand_to_asm(src);
-                    out.push(AsmInst::Sub(dest_asm, rx31(), src_asm));
+                    out.push(AsmInst::Sub(dest_asm, rx31(), src_asm, AsmOperand::Imm2(0)));
                 }
             }
 

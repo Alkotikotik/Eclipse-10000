@@ -1,0 +1,10 @@
+~Init:
+    LOAD rx31 <- 4096
+    SPSET -> rx31
+    PUSH <- rx31
+    PUSH <- rx31
+    PUSH <- rx31
+
+
+
+
