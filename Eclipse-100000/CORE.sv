@@ -14,12 +14,14 @@ module CORE(
     logic [31:0] RegX, RegY;
     logic [31:0] EPC;
 
-    logic [31:0] SP, KSP, LR, KScratch;
+    logic [31:0] SP, GP, KGP, KSP, LR, KScratch;
     logic [31:0] ActiveSP;
+    logic [31:0] ActiveGP;
     assign ActiveSP = KernelMode ? KSP : SP;
+    assign ActiveGP = KernelMode ? KGP : GP;
 
     logic [31:0] PCNext;
-    logic [31:0] SPNext;
+    logic [31:0] SPRNext;
 
     logic [5:0] opcode;
     logic [7:0] rx0;
@@ -30,18 +32,19 @@ module CORE(
 
     logic XWrite, YWrite, IRWrite, PCWrite, GPRsWrite, EAWrite;
     logic memRead, memWrite;
-    logic SPWrite;
+    logic SPRWrite;
     logic memViolation;
     logic isCallState;
     logic [31:0] memBase;
     logic [31:0] memLimit;
     logic [31:0] memTarget;
+    logic [1:0] spr_target_sel;
 
     logic aluSrcX;
     logic [1:0] aluSrcY;
     logic [2:0] PCSrc;
     logic [2:0] GPRsSrc;
-    logic [2:0] SPSrc;
+    logic [2:0] SPRSrc;
     logic [31:0] sign_ext_imm10;
     assign sign_ext_imm10 = { {22{IR[9]}}, IR[9:0] };
     logic [31:0] zero_ext_imm10;
@@ -84,8 +87,8 @@ module CORE(
     logic [31:0] sign_ext_imm26;
     assign sign_ext_imm26 = { {6{IR[25]}}, IR[25:0] };
 
-    logic [31:0] zero_ext_imm26;
-    assign zero_ext_imm26 = {{6'h0, IR[25:0]}};
+    logic [31:0] sign_ext_imm16;
+    assign sign_ext_imm16 = { {16{IR[15]}}, IR[15:0] };
 
     //Is it useless? Absolutely not, imagine it for "for" loops
     logic [31:0] sign_ext_imm2;
@@ -110,16 +113,51 @@ module CORE(
                  (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111) ? rx2 :
                  rx0;
 
+    logic [2:0] push_pop_bytes;
+        always_comb begin
+            unique case (rx0[2:0])
+                3'b011, 3'b100, 3'b101, 3'b110: push_pop_bytes = 3'd1; // rz — 8-bit
+                3'b001, 3'b010:                 push_pop_bytes = 3'd2; // ry — 16-bit
+                default:                        push_pop_bytes = 3'd4; // rx — 32-bit
+            endcase
+        end
+
     assign active_address = (IRWrite) ? PC : memTarget;
 
-    assign memTarget = (opcode == 6'b100100) ? (ActiveSP - 32'h4) :        // PUSH: addr = new SP
-                       (opcode == 6'b100101) ? ActiveSP :                  // POP: addr = old SP
-                       (opcode == 6'b100000 || opcode == 6'b100001 || opcode == 6'b100010)
-                        ? (ActiveSP + sign_ext_imm18) : // SPSTR/SPLDR/SPLEA
-                       (opcode[5:4] == 2'b10) ? (RegY + sign_ext_imm10) : RegY;
+    always_comb begin
+        unique case (opcode)
+            6'b100100: memTarget = (ActiveSP - {29'd0, push_pop_bytes}); // PUSH
+            6'b100101: memTarget = ActiveSP;                            // POP
+            6'b101000,
+            6'b101001,
+            6'b101101: memTarget = SelectedSPR + sign_ext_imm16;      // SPRLDR/SPRSTR/SPRLEA
+
+            default: begin
+                if (opcode[5:4] == 2'b10)
+                    memTarget = RegY + sign_ext_imm10;
+                else
+                    memTarget = RegY;
+            end
+        endcase
+    end
+
     assign memViolation = (!KernelMode && (memRead || memWrite) &&
                           ((active_address < memBase) ||
                           (33'(active_address) >= (33'(memBase) + 33'(memLimit)))));
+
+    assign spr_target_sel =
+        (opcode == 6'b101000 || opcode == 6'b101001 || opcode == 6'b101010 ||
+        opcode == 6'b101011 || opcode == 6'b101100 || opcode == 6'b101101) ? IR[17:16] : 2'b00;
+
+    logic [31:0] SelectedSPR;
+    always_comb begin
+        unique case (spr_target_sel)
+            2'b00:   SelectedSPR = ActiveSP;
+            2'b01:   SelectedSPR = LR;
+            2'b10:   SelectedSPR = ActiveGP;
+            default: SelectedSPR = 32'd0; // reserved
+        endcase
+    end
 
     //Muxes
     assign AluMuxX = (aluSrcX == 1'b1) ? PC : RegX;
@@ -160,23 +198,14 @@ module CORE(
     end
 
     always_comb begin
-        unique case (SPSrc)
-            3'b000:  SPNext = ActiveSP;
-            3'b001:  SPNext = ActiveSP + zero_ext_imm26; // SPADD
-            3'b010:  SPNext = ActiveSP - zero_ext_imm26; // SPSUB
-            3'b011:  SPNext = GPRs_data_out0;                     // SPSET
-            3'b100:  begin //PUSH
-                unique case (rx0[5:7]) //TOOD fix this: make it aligned
-                    3'b000: SPNext = ActiveSP - 32'h4; //4 byte addressible
-
-                    3'b001: SPNext = ActiveSP - 32'h2; //2 byte addressible
-                    3'b010: SPNext = ActiveSP - 32'h2;
-
-                    default: SPNext = ActiveSP - 32'h1; //1 byte addressible rz
-                endcase
-            end
-            3'b101:  SPNext = ActiveSP + 32'h4;          // POP
-            default: SPNext = ActiveSP;
+        unique case (SPRSrc)
+            3'b000:  SPRNext = SelectedSPR;                        // hold
+            3'b011:  SPRNext = GPRs_data_out0;                     // SPRSET
+            3'b100:  SPRNext = ActiveSP - {29'd0, push_pop_bytes}; // PUSH
+            3'b101:  SPRNext = ActiveSP + {29'd0, push_pop_bytes}; // POP
+            3'b110:  SPRNext = SelectedSPR + (GPRs_data_out0 + sign_ext_imm16); // SPRADD
+            3'b111:  SPRNext = SelectedSPR - (GPRs_data_out0 + sign_ext_imm16); // SPRSUB
+            default: SPRNext = SelectedSPR;
         endcase
     end
 
@@ -193,6 +222,8 @@ module CORE(
             KSP <= 32'h00000FFC;
             LR  <= 32'd0;
             KScratch <= 32'd0;
+            GP  <= 32'd0;
+            KGP <= 32'd0;
 
             memBase    <= 32'h0;
             memLimit   <= 32'hFFFFFFFF;
@@ -213,12 +244,19 @@ module CORE(
                 LR <= PC + 32'd4; //Save pc + 4 on call
             end
 
-            if (SPWrite) begin
-                if (KernelMode) begin
-                    KSP <= SPNext;
-                end else begin
-                    SP  <= SPNext;
-                end
+            if (SPRWrite) begin
+                unique case (spr_target_sel)
+                    2'b00: begin
+                        if (KernelMode) KSP <= SPRNext;
+                        else SP <= SPRNext;
+                    end
+                    2'b01: LR <= SPRNext;
+                    2'b10: begin
+                        if (KernelMode) KGP <= SPRNext;
+                        else GP <= SPRNext;
+                    end
+                    default: ; // reserved for later
+                endcase
             end
 
             if (memWrite && IO_cs && KernelMode) begin
@@ -279,12 +317,12 @@ module CORE(
         end else begin
             unique case (rx0[2:0])
                 3'b011, 3'b100, 3'b101, 3'b110: begin // 8-bit
-                    ram_byte_enable = 4'b0001 << memTarget[1:0];
-                    ram_data_in_aligned = {4{RegX[7:0]}};
+                    ram_byte_enable = 4'b0001;
+                    ram_data_in_aligned = {24'h0, RegX[7:0]};
                 end
                 3'b001, 3'b010: begin // 16-bit
-                    ram_byte_enable = 4'b0011 << memTarget[1:0];
-                    ram_data_in_aligned = {2{RegX[15:0]}};
+                    ram_byte_enable = 4'b0011;
+                    ram_data_in_aligned = {16'h0, RegX[15:0]};
                 end
                 default: begin // 32-bit
                     ram_byte_enable = 4'b1111;
@@ -294,8 +332,8 @@ module CORE(
         end
     end
 
-    always_comb begin 
-        if (RAM_cs) begin 
+    always_comb begin
+        if (RAM_cs) begin
             cpu_mem_data_out = ram_data_out;
         end else if (IO_cs) begin
             unique case (memTarget)
@@ -345,8 +383,8 @@ module CORE(
         .aluOpSel(aluOpSel),
         .isCallState(isCallState),
         .flagsWrite(flagsWrite),
-        .SPWrite(SPWrite),
-        .SPSrc(SPSrc)
+        .SPRWrite(SPRWrite),
+        .SPRSrc(SPRSrc)
     );
 
     ALU cpu_alu (

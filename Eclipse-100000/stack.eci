@@ -1,17 +1,24 @@
 ~Init:
     LOAD rx31 <- 4096
-    SPSET -> rx31
-    PUSH <- rx31
+    SPSET rx31
     XOR [rx31, rx31]
-    POP -> rx30
-    ADD [rx30, rx30, rx31 + 2]
-    SPSUB 32
-    SPADD 24
-    SPSTR rx30 -32
-    SPLDR rx29 -32
+    LOAD rx30 <- 1
     PUSH rx30
+    CALL ~A
+    ADD [rx30, rx30, rx31 + 2]
 
+~A:
+    LOAD rx29 <- 10
     PUSH rx29
-    PUSH rx29
-    PUSH rx29
-    PUSH rx29
+    LRLEA rx0
+    PUSH rx0
+    CALL ~B
+    POP rx0
+    LRSET rx0
+    RET
+
+~B:
+    LOAD rx28 <- 100
+    SPSTR rx28 +4
+    RET
+

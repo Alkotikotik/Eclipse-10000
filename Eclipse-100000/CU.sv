@@ -33,8 +33,8 @@ module CU(
     output logic isCallState,
     output logic flagsWrite,
 
-    output logic SPWrite,
-    output logic [2:0] SPSrc
+    output logic SPRWrite,
+    output logic [2:0] SPRSrc
 
 );
 
@@ -92,7 +92,7 @@ module CU(
         aluOpSel = 2'b00;
         flagsWrite = 0;
         isCallState = 0;
-        SPWrite = 0; SPSrc = 3'b000;
+        SPRWrite = 0; SPRSrc = 3'b000;
 
         unique case (current_state) //allows for parralellization
             FETCH: begin
@@ -123,11 +123,11 @@ module CU(
                         unique case(opcode)
                             6'b100111: next_state = STORE;      // STR
                             6'b100011: next_state = READ_DATA;  // LDR
-                            6'b100000: next_state = STORE;      // SPSTR
-                            6'b100001: next_state = READ_DATA;  // SPLDR
-                            6'b100010: next_state = LOAD;       // SPLEA — computed value, not a memory access
                             6'b100100: next_state = STORE;      // PUSH
                             6'b100101: next_state = READ_DATA;  // POP
+                            6'b101000: next_state = READ_DATA;  // SPRLDR
+                            6'b101001: next_state = STORE;      // SPRSTR
+                            6'b101101: next_state = LOAD;       // SPRLEA — computed value, no memory access
                             default:   next_state = STORE;
                         endcase
                     end
@@ -166,20 +166,20 @@ module CU(
                         PCSrc   = 3'b001;
                         PCWrite = 1;
                     end
-                    6'b000101: begin //SPADD
+                    6'b101010: begin // SPRSET
                         next_state = FETCH;
-                        SPSrc = 3'b001;
-                        SPWrite = 1;
+                        SPRSrc = 3'b011;
+                        SPRWrite = 1;
                     end
-                    6'b001001: begin //SPSUB
+                    6'b101011: begin // SPRADD
                         next_state = FETCH;
-                        SPSrc = 3'b010;
-                        SPWrite = 1;
+                        SPRSrc = 3'b110;
+                        SPRWrite = 1;
                     end
-                    6'b100110: begin // SPSET
+                    6'b101100: begin // SPRSUB
                         next_state = FETCH;
-                        SPSrc = 3'b011;
-                        SPWrite = 1;
+                        SPRSrc = 3'b111;
+                        SPRWrite = 1;
                     end
 
                     6'b110001: aluSrcY = 2'b10; //BEQ
@@ -248,7 +248,7 @@ module CU(
             LOAD: begin
                 next_state = FETCH;
                 GPRsWrite  = 1;
-                GPRsSrc    = (opcode == 6'b011111) ? 3'b100 : (opcode == 6'b100010) ? 3'b101 : 3'b011;
+                GPRsSrc    = (opcode == 6'b011111) ? 3'b100 : (opcode == 6'b101101) ? 3'b101 : 3'b011;
             end
             READ_DATA: begin
                 next_state = FETCH;
@@ -256,16 +256,16 @@ module CU(
                 GPRsSrc = 3'b001;
                 GPRsWrite = 1;
                 if (opcode == 6'b100101) begin // POP
-                    SPSrc = 3'b101;
-                    SPWrite = 1;
+                    SPRSrc = 3'b101;
+                    SPRWrite = 1;
                 end
             end
             STORE: begin
                 next_state = FETCH;
                 memWrite = 1;
                 if (opcode == 6'b100100) begin // PUSH
-                    SPSrc = 3'b100;
-                    SPWrite = 1;
+                    SPRSrc = 3'b100;
+                    SPRWrite = 1;
                 end
             end
             default: next_state = FETCH;

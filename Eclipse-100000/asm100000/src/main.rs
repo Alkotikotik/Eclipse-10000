@@ -108,15 +108,15 @@ fn main() -> io::Result<()> {
     opcodes.insert("SYS",   0b111110);
     opcodes.insert("RETU",  0b111101);
 
-    // Stack
-    opcodes.insert("SPADD", 0b000101);
-    opcodes.insert("SPSUB", 0b001001);
-    opcodes.insert("SPSTR", 0b100000);
-    opcodes.insert("SPLDR", 0b100001);
-    opcodes.insert("SPLEA", 0b100010);
+    //SPRs
+    opcodes.insert("SPRLDR", 0b101000);
+    opcodes.insert("SPRSTR", 0b101001);
+    opcodes.insert("SPRSET", 0b101010);
+    opcodes.insert("SPRADD", 0b101011);
+    opcodes.insert("SPRSUB", 0b101100);
+    opcodes.insert("SPRLEA", 0b101101);
     opcodes.insert("PUSH",  0b100100);
     opcodes.insert("POP",   0b100101);
-    opcodes.insert("SPSET", 0b100110);
 
     let mut output_file = File::create(output_path)?;
 
@@ -138,7 +138,13 @@ fn main() -> io::Result<()> {
             continue;
         }
 
-        let instr = tokens[0].to_uppercase();
+        let mut instr = tokens[0].to_uppercase();
+        let mut tokens = tokens;
+
+        if let Some((canonical, sel_name)) = expand_spr_sugar(&instr) {
+            instr = canonical.to_string();
+            tokens.insert(2, sel_name); // splice in the implied SPR name right after the register operand
+        }
         let opcode = *opcodes.get(instr.as_str()).unwrap_or_else(|| {
             panic!("Unknown instruction token: {}", instr);
         });
@@ -261,29 +267,21 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-            "SPADD" | "SPSUB" => {
-                if tokens.len() > 1 {
-                    immediate = parse_imm64(tokens[1]);
-                }
-            }
-            "SPSTR" | "SPLDR" | "SPLEA" => {
-                if tokens.len() > 1 {
-                    rx0 = parse_reg(tokens[1]);
-                }
-                if tokens.len() > 2 {
-                    if tokens[2] == "-" && tokens.len() > 3 {
-                        immediate = -parse_imm64(tokens[3]);
-                    } else if tokens[2] == "+" && tokens.len() > 3 {
-                        immediate = parse_imm64(tokens[3]);
+            "SPRLDR" | "SPRSTR" | "SPRSET" | "SPRADD" | "SPRSUB" | "SPRLEA" => {
+                if tokens.len() > 1 { rx0 = parse_reg(tokens[1]); }
+                if tokens.len() > 2 { rx1 = parse_spr(tokens[2]); }
+                if tokens.len() > 3 {
+                    if tokens[3] == "-" && tokens.len() > 4 {
+                        immediate = -parse_imm64(tokens[4]);
+                    } else if tokens[3] == "+" && tokens.len() > 4 {
+                        immediate = parse_imm64(tokens[4]);
                     } else {
-                        immediate = parse_imm64(tokens[2]);
+                        immediate = parse_imm64(tokens[3]);
                     }
                 }
             }
-            "PUSH" | "POP" | "SPSET" => {
-                if tokens.len() > 1 {
-                    rx0 = parse_reg(tokens[1]);
-                }
+            "PUSH" | "POP" => {
+                if tokens.len() > 1 { rx0 = parse_reg(tokens[1]); }
             }
             "RET" | "SYS" | "RETU" | "PAD" => {}
             _ => {
@@ -316,10 +314,16 @@ fn main() -> io::Result<()> {
 
         let machine_code: u32 = match instr.as_str() {
             "LMA" => ((opcode & 0x3F) << 26) | ((immediate as u32) & 0x03FF_FFFF),
-            "JMP" | "CALL" | "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" | "SPADD" | "SPSUB" => {
+            "JMP" | "CALL" | "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" => {
                 ((opcode & 0x3F) << 26) | (imm_u32 & 0x03FF_FFFF)
             }
-            "LOAD" | "SPSTR" | "SPLDR" | "SPLEA" => {
+            "SPRLDR" | "SPRSTR" | "SPRSET" | "SPRADD" | "SPRSUB" | "SPRLEA" => {
+                ((opcode & 0x3F) << 26)
+                    | ((rx0 & 0xFF) << 18)
+                    | ((rx1 & 0b11) << 16)
+                    | ((immediate as u32) & 0xFFFF)
+            }
+            "LOAD" => {
                 ((opcode & 0x3F) << 26)
                     | ((rx0 & 0xFF) << 18)
                     | ((immediate as u32) & 0x0003_FFFF)
@@ -385,4 +389,37 @@ fn parse_reg(reg_str: &str) -> u32 {
             (reg_id << 3) | 0b000
         }
     }
+}
+
+fn parse_spr(name: &str) -> u32 {
+    match name.to_uppercase().as_str() {
+        "SP" => 0b00,
+        "LR" => 0b01,
+        "GP" => 0b10,
+        other => panic!("Assembler Error: unknown SPR '{}'", other),
+    }
+}
+
+fn expand_spr_sugar(instr: &str) -> Option<(&'static str, &'static str)> {
+    let (suffix, sel_name) = if let Some(rest) = instr.strip_prefix("SP") {
+        (rest, "SP")
+    } else if let Some(rest) = instr.strip_prefix("LR") {
+        (rest, "LR")
+    } else if let Some(rest) = instr.strip_prefix("GP") {
+        (rest, "GP")
+    } else {
+        return None;
+    };
+
+    let canonical = match suffix {
+        "SET" => "SPRSET",
+        "ADD" => "SPRADD",
+        "SUB" => "SPRSUB",
+        "LDR" => "SPRLDR",
+        "STR" => "SPRSTR",
+        "LEA" => "SPRLEA",
+        _ => return None,
+    };
+
+    Some((canonical, sel_name))
 }

@@ -19,6 +19,12 @@ I-Type (Immediate Operations & STR, LDR)
 [17:10]  rx1        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
 [9:0]   Signed Immediate  (10 bits: Signed offset / Constant)
 
+S-Type (SPR operations)
+[31:26] Opcode (6)
+[25:18] rx0    (8)
+[17:16] SPR_Sel(2)   00=SP  01=LR  10=GP  11=reserved
+[15:0]  Immediate(16, signed)
+
 L-Type (LOAD)
 [31:26] Opcode
 [25:18] rx0
@@ -54,23 +60,23 @@ ALU Instructions (B-Type)
 000011 : SUB    rx0, rx1, rx2 +- imm2
 000111 : LOMUL  rx0, rx1, rx2 +- imm2
 
-ALU Stack (J-Type)
-000101 : SPADD imm26 (SP+=imm26)
-001001 : SPSUB imm26 (SP-=imm26)
-
 Memory Instructions
-010001 : LOAD   rx0, imm18 //Loads imm into rx0
-011111 : LMA    imm26 //Loads Massive into rx31(signed imm26)
-100011 : LDR    rx0, (rx1 +- imm10) // Load from memory
+010001 : LOAD   rx0, imm18             //Loads imm into rx0
+011111 : LMA    imm26                 //Loads Massive into rx31(signed imm26)
+100011 : LDR    rx0, (rx1 +- imm10)  // Load from memory
 100111 : STR    rx0, (rx1 +- imm10) // Store rx0 at location specified by (rx1 +-imm10)
 
 Stack manipulations (L-Type)
-100000 : SPSTR rx0, imm18 (STR rx0 in SP +- imm18)
-100001 : SPLDR rx0, imm18 (LDR to rx0 SP +- imm18)
-100010 : SPLEA rx0, imm18 (rx0 = SP +- imm18)
 100100 : PUSH rx0
 100101 : POP rx0
-100110 : SPSET rx0 (SP = rx0)
+
+Special type operations (S-Type)
+101000 : SPRLDR rx0, (SPR +- imm16)     // Load rx0 to SPR +- imm16
+101001 : SPRSTR rx0, (SPR +- imm16)    // Store at rx0 from SPR+-imm16
+101010 : SPRSET rx0, SPR              // SPR = rx0
+101011 : SPRADD rx0, SPR, imm16      // SPR = rx0 + imm16
+101100 : SPRSUB rx0, SPR, imm16     // SPR = rx0 - imm16
+101101 : SPRLEA rx0, SPR, imm16    // rx0 = location of selected SPR
 
 CMP:
 110000 : CMP rx0 rx1
@@ -86,11 +92,11 @@ Signed branching
 111010 : BSS imm26
 
 Jumps & Subroutines
-111111 : JMP   imm26     // Unconditional Jump to imm26 address/label
+111111 : JMP imm26        // Unconditional Jump to imm26 address/label
 110111 : JR rx0          // Unconditional Jump to rx0
-111000 : CALL   imm26    // Save PC+4 to LR and Jump to imm26 address
-110010 : RET             // Return from subroutine (PC = LR)
+111000 : CALL imm26     // Save PC+4 to LR and Jump to imm26 address
+110010 : RET           // Return from subroutine (PC = LR)
 
 Privilege and Syscalls
 110110 : SYS             // System Call Exception
-111101 : RETU            // Return to User Mode from Exception
+111101 : RETU           // Return to User Mode from Exception
