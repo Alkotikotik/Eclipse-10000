@@ -1,11 +1,19 @@
 ~Init:
     LOAD rx31 <- 4096
     SPSET rx31
-    XOR [rx31, rx31]
+
+    LOAD rx27 <- 512
+    GPSET rx27
+
+    LOAD rx26 <- 77
+    GPSTR rx26
+
     LOAD rx30 <- 1
     PUSH rx30
     CALL ~A
     ADD [rx30, rx30, rx31 + 2]
+
+    JMP ~End
 
 ~A:
     LOAD rx29 <- 10
@@ -18,7 +26,19 @@
     RET
 
 ~B:
+    LOAD rz280 <- 200
+    SPSTR rz280 -4
+    SPLDR rz200 -4
+
+    LOAD ry281 <- 5000
+    SPSTR ry281 -8
+    SPLDR ry201 -8
+
     LOAD rx28 <- 100
-    SPSTR rx28 +4
+    SPSTR rx28 -12
+    SPLDR rx28 -12
+
+    GPLDR rx26
     RET
+~End:
 

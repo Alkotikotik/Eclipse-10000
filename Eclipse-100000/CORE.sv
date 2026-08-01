@@ -241,7 +241,7 @@ module CORE(
             KernelMode <= isKernelMode;
 
             if (isCallState && opcode == 6'b111000) begin
-                LR <= PC + 32'd4; //Save pc + 4 on call
+                LR <= PC;
             end
 
             if (SPRWrite) begin
