@@ -7,11 +7,9 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IROperand {
-    SignedConstant(i32),
-    UnsignedConstant(u32),
-    Var(String),
-    Temp(usize),
-    FrameSlot(usize),
+    SignedConstant(i32), UnsignedConstant(u32),
+    Var(String), Temp(usize),
+    FrameSlot(usize), GlobalSlot(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]

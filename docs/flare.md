@@ -115,7 +115,7 @@ regarch RGBA {
 }
 ```
 
-This feature provides fast access to important structs. A `regarch` can also be pinned to a specific register:
+This feature provides fast access to important structs. A `regarch` must be pinned to a specific register to work:
 
 ```c
 #rx1 RGBA color;
@@ -212,23 +212,31 @@ outline];
 Any assembly code can be inserted, importantely, including labels, which is useful, for example for setting up interrupt tables: start a file with a vector table:
 
 ```x86asm
-inline [
-    #ORG 64
-    ~MemFaultJmp
-        JMP !MemFaultHandle
-outline];
-```
+func main(){
+    inline [
+        #ORG 60
+        ~BootloaderJmp
+            JMP ~bootloader >_ 4 bytes
+
+        ~MemFaultJmp
+            JMP ~MemFaultHandle >_ 4 bytes
+    outline];
+}
 
 Then, elsewhere in the file, define the handler label:
 
-```x86asm
-inline [
-    ~MemFaultHandle
-outline];
+func MemFaultHandle() { >_ the label has the same name as the function name
+    >_ code to handle memfault
 
-func handle_memfault() {
-    >_ Handle memfault
+    inline [
+        RETU >_ Return to the PC before exception happened
+    outline];
 }
+
+func bootloader() {
+    >_ bootload
+}
+
 ```
 
 ## That's it

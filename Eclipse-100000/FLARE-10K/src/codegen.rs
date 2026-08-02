@@ -2,8 +2,8 @@
 //Technically when I use "alive" its incorrect because the right term for it is just "live"
 //But I don't like how plain "live" sound so ill use "alive"
 
-use crate::IR3AC::{IRInst, IRFunction, IROperand};
-use crate::parser::{Type}
+use crate::IR3AC::{IRInst, IRFunction, IROperand, get_type_align, get_type_size, align_to};
+use crate::parser::{Type, StructDef, Program, GlobalDef, Expr, BinaryOpKind, UnaryOpKind};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -27,6 +27,21 @@ pub struct RegisterTracker {
     //31 registers made up of 4 bytes, bool indicates whether bytes are used or not
     slots: [[bool; 4]; 30],
 }
+
+pub struct GlobalLayout {
+    pub offsets: HashMap<String, usize>,   // unpinned globals
+    pub total_size: usize,                 // bytes to reserve on the stack
+    pub pins: HashMap<String, Register>,   // pinned globals
+    pub init_values: HashMap<String, GlobalInit>,
+}
+
+enum AddrBase { Spr(Spr), Reg(AsmOperand) }
+
+pub enum GlobalInit {
+    Scalar(i32),
+    None,
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Location {
@@ -59,14 +74,17 @@ pub enum Reg {
     TheRealOne(Register),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Spr { SP, LR, GP }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AsmOperand {
     Reg(Reg),
-    SP,
     Imm26(i32),
-    Imm18(i32)
+    Imm18(i32),
+    Imm16(i16),
     Imm10(i16),
-    Imm2(i8), //Don't laugh
+    Imm2(i8),
     Label(String),
 }
 
@@ -89,6 +107,15 @@ pub enum AsmInst {
     Ldr(AsmOperand, AsmOperand, AsmOperand), // dest, base, offset
     Str(AsmOperand, AsmOperand, AsmOperand), // src, base, offset
 
+    SprLdr(AsmOperand, Spr, AsmOperand),
+    SprStr(AsmOperand, Spr, AsmOperand),
+    SprAdd(AsmOperand, Spr, AsmOperand),
+    SprSub(AsmOperand, Spr, AsmOperand),
+    SprLea(AsmOperand, Spr, AsmOperand),
+    SprSet(AsmOperand, Spr),
+    Push(AsmOperand),
+    Pop(AsmOperand),
+
     Cmp (AsmOperand, AsmOperand),
     Beq (String),
     Bne (String),
@@ -107,6 +134,16 @@ pub enum AsmInst {
 }
 
 impl RegisterTracker {
+    //Account for pinned globals
+    pub fn new(reserved: &HashMap<String, Register>) -> Self {
+        let mut t = Self { slots: [[false; 4]; 30] };
+        for reg in reserved.values() {
+            t.mark(reg.id, reg.reg_type, reg.sub_index);
+        }
+        t
+    }
+
+    //Mark as used by another variable
     pub fn mark(&mut self, reg_id: u8, reg_type: RegType, sub_idx: u8) {
         let num_bytes = reg_type.get_size();
         let start = sub_idx as usize;
@@ -117,10 +154,11 @@ impl RegisterTracker {
         }
     }
 
-    pub fn find_free(&mut self, operand_type: Regtype) -> Opton<(u8, u8)> {
-        for reg_id in 0..31 {
+    //First fit find free algorithm
+    pub fn find_free(&mut self, reg_type: RegType) -> Option<(u8, u8)> {
+        for reg_id in 0..30 {
             match reg_type {
-                Regtype::B8 => {
+                RegType::B8 => {
                     for sub_idx in 0..4 {
                         if !self.slots[reg_id][sub_idx] {
                             return Some((reg_id as u8, sub_idx as u8));
@@ -156,10 +194,13 @@ impl RegType {
     }
 }
 
-impl IRInst {
+impl IROperand {
     pub fn is_var(&self) -> bool {
         matches!(self, IROperand::Var(_) | IROperand::Temp(_))
     }
+}
+
+impl IRInst {
     //If the value is being read
     pub fn uses(&self) -> Vec<IROperand> {
         let mut ls = Vec::new();
@@ -244,6 +285,60 @@ impl IRInst {
     }
 }
 
+//Globals are stored at positive GP offset, so right above the stack, unless they are pinned, in
+//which case they are always stored in a register
+impl GlobalLayout {
+    pub fn build(globals: &[Expr], structs: &HashMap<String, StructDef>) -> Self {
+        let mut offsets = HashMap::new();
+        let mut pins = HashMap::new();
+        let mut init_values = HashMap::new();
+        let mut total_size = 0usize;
+
+        for decl in globals {
+            let (ty, name, initial, pin) = match decl {
+                Expr::VarDecl { ty, name, initial, pin } => (ty, name, initial, pin),
+                _ => panic!("Codegen Error: bad global declaration"),
+            };
+
+            if matches!(ty, Type::Array(_, _)) {
+                panic!("Codegen Error: global arrays are not allowed ('{}')", name);
+            }
+
+            let size = get_type_size(ty, structs);
+            let align = get_type_align(ty, structs);
+
+            let init = match initial {
+                Some(Expr::IntLiteral(v)) => GlobalInit::Scalar(*v),
+                Some(Expr::HexLiteral(v)) => GlobalInit::Scalar(*v as i32),
+                Some(_) => panic!(
+                    "Codegen Error: global {} needs a literal initializer, no compile-time evaluation",
+                    name
+                ),
+                None => GlobalInit::None,
+            };
+
+            if let Some(reg_str) = pin {
+                let reg = Codegen::parse_pin_register(reg_str);
+                if reg.reg_type.get_size() != size {
+                    panic!(
+                        "Codegen Error: pinned global {} is {} bytes but register is {} bytes",
+                        name, size, reg.reg_type.get_size()
+                    );
+                }
+                pins.insert(name.clone(), reg);
+            } else {
+                total_size = align_to(total_size, align);
+                offsets.insert(name.clone(), total_size);
+                total_size += size;
+            }
+
+            init_values.insert(name.clone(), init);
+        }
+
+        GlobalLayout { offsets, total_size, pins, init_values }
+    }
+}
+
 //Calculating variable's liveless variable is alive if it is read from in any of the successors
 //If it isn't being read though, it is dead. If value is overwritten before its being read from its
 //dead too
@@ -307,34 +402,100 @@ impl InterferenceGraph {
     }
 }
 
+fn rx31() -> AsmOperand { reg_op(rx31_reg()) } //Here is a cool trick
+fn rx30() -> AsmOperand { reg_op(rx30_reg()) } //Unfortunately we do in fact need second scratch
+
+fn rx30_reg() -> Register { Register { id: 30, reg_type: RegType::B32, sub_index: 0 } }
+fn rx31_reg() -> Register { Register { id: 31, reg_type: RegType::B32, sub_index: 0 } }
+
+fn reg_op(reg: Register) -> AsmOperand { AsmOperand::Reg(Reg::TheRealOne(reg)) }
+fn half_op(reg: Register, sub_index: u8) -> AsmOperand { reg_op(Register { id: reg.id, reg_type: RegType::B16, sub_index }) }
+
+fn is_const(op: &IROperand) -> bool {
+    matches!(op, IROperand::SignedConstant(_) | IROperand::UnsignedConstant(_))
+}
+fn const_val(op: &IROperand) -> i32 {
+    match op {
+        IROperand::SignedConstant(value) => *value,
+        IROperand::UnsignedConstant(value) => *value as i32,
+        _ => panic!("not a constant"),
+    }
+}
+
+
+fn fits(value: i64, bits: u32, signed: bool) -> bool { //Literally what it means
+    if signed {
+        let lo = -(1i64 << (bits - 1));
+        let hi = (1i64 << (bits - 1)) - 1;
+        value >= lo && value <= hi
+    } else {
+        value >= 0 && value < (1i64 << bits)
+    }
+}
+
+fn load_const(dest: Register, value: i32, out: &mut Vec<AsmInst>) {
+    match dest.reg_type {
+        RegType::B32 if fits(value as i64, 18, true) => { //Fits into imm18
+            out.push(AsmInst::Load(reg_op(dest), AsmOperand::Imm18(value)));
+        }
+        RegType::B32 if fits(value as i64, 26, true) => { //Fits into imm26, 
+            out.push(AsmInst::Lma(AsmOperand::Imm26(value)));
+            if dest.id != 31 { //If we actually wanted it in rx31, jic tbh tho
+                out.push(AsmInst::Mov(reg_op(dest), rx31(), AsmOperand::Imm10(0)));
+                out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
+            }
+        }
+        RegType::B32 => {
+            // If it doesn't fit even in 26 bits, we utilize register
+            // fragmentation by loading lower 16 bits into ry310 higher into ry311 and result
+            // will just be in rx31, genuis, love register fragmentation
+            let lo = (value as u32 & 0xFFFF) as i32;
+            let hi = ((value as u32 >> 16) & 0xFFFF) as i32;
+            out.push(AsmInst::Load(half_op(dest, 0), AsmOperand::Imm18(lo)));
+            out.push(AsmInst::Load(half_op(dest, 2), AsmOperand::Imm18(hi)));
+        }
+        _ => out.push(AsmInst::Load(reg_op(dest), AsmOperand::Imm18(value))), // 16/8-bit value always fit in imm18
+    }
+}
+
 pub struct Codegen<'a> {
     ir_func: &'a IRFunction,
-    globals: &'a HashMap<String, Type>,
     structs: &'a HashMap<String, StructDef>,
     cfg: Vec<BasicBlock>,
     allocations: HashMap<IROperand, Location>,
     frame_size: usize,
     slots: RegisterTracker,
     pins: HashMap<String, Register>,
+    global_layout: &'a GlobalLayout,
+    next_temp: usize,
     wait_for_the_final_result: Vec<AsmInst>,
 }
 
 impl<'a> Codegen<'a> {
 
-    pub fn new(ir_func: &'a IRFunction) -> Self {
-        let pins = Self::collect_pins(&ir_func.instructions);
+    pub fn new(ir_func: &'a IRFunction, structs: &'a HashMap<String, StructDef>, global_layout: &'a GlobalLayout) -> Self {
+        let legalized_body = Self::legalize_globals(&ir_func.body, global_layout);
+        let mut pins = Self::collect_pins(&legalized_body);
+        pins.extend(global_layout.pins.clone());
+
+        let next_temp = legalized_body.iter()
+            .flat_map(|i| i.uses().into_iter().chain(i.kills()))
+            .filter_map(|op| match op { IROperand::Temp(n) => Some(n + 1), _ => None })
+            .max()
+            .unwrap_or(0);
 
         let mut codegen = Self {
-            ir_func,
+            ir_func, structs, global_layout,
             cfg: Vec::new(),
             allocations: HashMap::new(),
             frame_size: 0,
-            slots: RegisterTracker::new(),
+            slots: RegisterTracker::new(&global_layout.pins),
             pins,
+            next_temp,
             wait_for_the_final_result: Vec::new(),
         };
 
-        codegen.build_cfg(&ir_func.instructions);
+        codegen.build_cfg(&legalized_body);
         codegen
     }
 
@@ -372,6 +533,35 @@ impl<'a> Codegen<'a> {
 
 }
 
+fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst {
+    let sub = |op: IROperand| if &op == old { new.clone() } else { op };
+    match inst {
+        IRInst::Add { dest, left, right } => IRInst::Add { dest: sub(dest), left: sub(left), right: sub(right) },
+        IRInst::Sub { dest, left, right } => IRInst::Sub { dest: sub(dest), left: sub(left), right: sub(right) },
+        IRInst::Mul { dest, left, right } => IRInst::Mul { dest: sub(dest), left: sub(left), right: sub(right) },
+        IRInst::Div { dest, left, right, signed } => IRInst::Div { dest: sub(dest), left: sub(left), right: sub(right), signed },
+        IRInst::Mod { dest, left, right, signed } => IRInst::Mod { dest: sub(dest), left: sub(left), right: sub(right), signed },
+        IRInst::Shl { dest, left, right } => IRInst::Shl { dest: sub(dest), left: sub(left), right: sub(right) },
+        IRInst::Shr { dest, left, right } => IRInst::Shr { dest: sub(dest), left: sub(left), right: sub(right) },
+        IRInst::Xor { dest, left, right } => IRInst::Xor { dest: sub(dest), left: sub(left), right: sub(right) },
+        IRInst::Or  { dest, left, right } => IRInst::Or  { dest: sub(dest), left: sub(left), right: sub(right) },
+        IRInst::And { dest, left, right } => IRInst::And { dest: sub(dest), left: sub(left), right: sub(right) },
+        IRInst::Not { dest, src } => IRInst::Not { dest: sub(dest), src: sub(src) },
+        IRInst::Negate { dest, src } => IRInst::Negate { dest: sub(dest), src: sub(src) },
+        IRInst::Cpy { dest, src } => IRInst::Cpy { dest: sub(dest), src: sub(src) },
+        IRInst::Cast { dest, src, target_type, src_type } => IRInst::Cast { dest: sub(dest), src: sub(src), target_type, src_type },
+        IRInst::LoadPtr { dest, ptr_addr } => IRInst::LoadPtr { dest: sub(dest), ptr_addr: sub(ptr_addr) },
+        IRInst::StorePtr { ptr_addr, src } => IRInst::StorePtr { ptr_addr: sub(ptr_addr), src: sub(src) },
+        IRInst::AntiEqual { left, right, target } => IRInst::AntiEqual { left: sub(left), right: sub(right), target },
+        IRInst::Equal { left, right, target } => IRInst::Equal { left: sub(left), right: sub(right), target },
+        IRInst::AntiMore { left, right, target, signed } => IRInst::AntiMore { left: sub(left), right: sub(right), target, signed },
+        IRInst::AntiLess { left, right, target, signed } => IRInst::AntiLess { left: sub(left), right: sub(right), target, signed },
+        IRInst::Call { dest, name, args } => IRInst::Call { dest: dest.map(sub), name, args: args.into_iter().map(sub).collect() },
+        IRInst::Return(val) => IRInst::Return(val.map(sub)),
+        other => other,
+    }
+}
+
 impl<'a> Codegen<'a> {
 
     //Pins before cfg
@@ -379,7 +569,7 @@ impl<'a> Codegen<'a> {
         let mut pins = HashMap::new();
         for inst in body {
             if let IRInst::Pin {var, register} = inst {
-                pins.insert(var.clone(), parse_pin_register(register));
+                pins.insert(var.clone(), Self::parse_pin_register(register));
             }
         }
         pins
@@ -504,7 +694,7 @@ impl<'a> Codegen<'a> {
         self.cfg = Self::build_bbs(body);
         self.build_suc_prec();
 
-        let depths = compute_loop_depths(&self.cfg);
+        let depths = Self::compute_loop_depths(&self.cfg);
         for block in &mut self.cfg {
             block.loop_depth = *depths.get(&block.id).unwrap_or(&0);
         }
@@ -593,6 +783,7 @@ impl<'a> Codegen<'a> {
     //on the stack. And later if there are no avaliable register in the time of that variable it
     //will be spilled, however if there is we will just put it in the register.
     pub fn color(&mut self, graph: InterferenceGraph) -> Vec<IROperand> {
+        let spill_costs = self.compute_spill_costs();
 
         let mut active_nodes: HashSet<IROperand> = graph.adjacent.keys()
             .filter(|a| !self.allocations.contains_key(a))
@@ -646,7 +837,7 @@ impl<'a> Codegen<'a> {
     //optimistic cadidate failed(RIP), spill it
     pub fn allocate(&mut self, mut alloc_stack: Vec<IROperand>, graph: &InterferenceGraph) {
         while let Some(operand) = alloc_stack.pop() {
-            let mut tracker = RegisterTracker::new();
+            let mut tracker = RegisterTracker::new(&self.global_layout.pins);
 
             if let Some(neighbors) = graph.adjacent.get(&operand) {
                 for neighbor in neighbors {
@@ -686,7 +877,7 @@ impl<'a> Codegen<'a> {
             self.allocate(alloc_stack, &graph);
 
             //Check for spilled
-            let spilled: Vec<IROperand> = self.allocations.iter()
+            let spilled: HashSet<IROperand> = self.allocations.iter()
                 .filter(|(_, loc)| matches!(loc, Location::StackOffset(_)))
                 .map(|(op, _)| op.clone())
                 .collect();
@@ -769,7 +960,7 @@ impl<'a> Codegen<'a> {
             for &succ in &block.successors {
                 if let Some(succ_doms) = doms.get(&block.id) {
                     if succ_doms.contains(&succ) {
-                        let loop_nodes = populate_loop_body(cfg, succ, block.id);
+                        let loop_nodes = Self::populate_loop_body(cfg, succ, block.id);
                         loops.push(loop_nodes);
                     }
                 }
@@ -804,8 +995,8 @@ impl<'a> Codegen<'a> {
     //For example depth of simple loop is 1 because only 1 loop contains that node,
     //however in double nested loop depth is 2 becuause 2 loops contain that node
     pub fn compute_loop_depths(cfg: &[BasicBlock]) -> HashMap<usize, usize> {
-        let doms = compute_dominators(cfg);
-        let loops = find_loops(cfg, &doms);
+        let doms = Self::compute_dominators(cfg);
+        let loops = Self::find_loops(cfg, &doms);
 
         let mut depths: HashMap<usize, usize> = HashMap::new();
 
@@ -835,6 +1026,20 @@ impl<'a> Codegen<'a> {
     //the IR because we need to add LDR, STR between operation
     //And we recompute coloring for them because its a new set of registers
     //It only changes individual blocks though, doesn't change successors, predecessors etc
+    fn spill_offset(&self, operand: &IROperand, spilled: &HashSet<IROperand>) -> Option<usize> {
+        if !spilled.contains(operand) { return None; }
+        match self.allocations.get(operand) {
+            Some(Location::StackOffset(off)) => Some(*off),
+            _ => None,
+        }
+    }
+
+    fn new_scratch(&mut self) -> IROperand {
+        let t = IROperand::Temp(self.next_temp);
+        self.next_temp += 1;
+        t
+    }
+
     fn rewrite_spills(&mut self, spilled: &HashSet<IROperand>) {
         for block in &mut self.cfg {
             let mut new_body = Vec::new();
@@ -883,6 +1088,49 @@ impl<'a> Codegen<'a> {
         out
     }
 
+    //Place the globals before the stack
+    fn legalize_globals(body: &[IRInst], layout: &GlobalLayout) -> Vec<IRInst> {
+        let mut next_temp = body.iter()
+            .flat_map(|i| i.uses().into_iter().chain(i.kills()))
+            .filter_map(|op| match op { IROperand::Temp(n) => Some(n + 1), _ => None })
+            .max()
+            .unwrap_or(0);
+
+        let mut new_body = Vec::new();
+
+        for inst in body {
+            let mut inst = inst.clone();
+
+            for used in inst.uses() {
+                if let IROperand::Var(name) = &used {
+                    if let Some(&off) = layout.offsets.get(name) {
+                        let tmp = IROperand::Temp(next_temp);
+                        next_temp += 1;
+                        new_body.push(IRInst::LoadPtr { dest: tmp.clone(), ptr_addr: IROperand::GlobalSlot(off) });
+                        inst = substitute_operand(inst, &used, &tmp);
+                    }
+                }
+            }
+
+            let mut store_backs = Vec::new();
+            for def in inst.kills() {
+                if let IROperand::Var(name) = &def {
+                    if let Some(&off) = layout.offsets.get(name) {
+                        let tmp = IROperand::Temp(next_temp);
+                        next_temp += 1;
+                        inst = substitute_operand(inst, &def, &tmp);
+                        store_backs.push(IRInst::StorePtr { ptr_addr: IROperand::GlobalSlot(off), src: tmp });
+                    }
+                }
+            }
+
+            new_body.push(inst);
+            new_body.extend(store_backs);
+        }
+
+        new_body
+    }
+
     fn operand_to_asm(&self, op: &IROperand) -> AsmOperand {
         match op {
             IROperand::SignedConstant(var) => AsmOperand::Imm22(*var),
@@ -896,97 +1144,78 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    //Minimal version of codegen for now
-
-    fn rx31() -> AsmOperand { reg(31, RegType::B32, 0)} //Here is a cool trick
-    fn rx30() -> AsmOperand { reg(30, RegType::B32, 0)} //Unfortunately we do in fact need second scratch
-
-    fn rx30_reg() -> Register { Register { id: 30, reg_type: RegType::B32, sub_index: 0 } }
-    fn rx31_reg() -> Register { Register { id: 31, reg_type: RegType::B32, sub_index: 0 } }
-
-    fn reg_op(reg: Register) -> AsmOperand { AsmOperand::Reg(Reg::TheRealOne(reg)) }
-    fn half_op(reg: Register, sub_index: u8) -> AsmOperand { reg_op(Register { id: reg.id, reg_type: RegType::B16, sub_index }) }
-
-    fn is_const(op: &IROperand) -> bool {
-        matches!(op, IROperand::SignedConstant(_) | IROperand::UnsignedConstant(_))
-    }
-    fn const_val(op: &IROperand) -> i32 {
-        match op {
-            IROperand::SignedConstant(value) => *value,
-            IROperand::UnsignedConstant(value) => *value as i32,
-            _ => panic!("not a constant"),
-        }
-    }
-
-
-    fn fits(value: i64, bits: u32, signed: bool) -> bool { //Literally what it means
-        if signed {
-            let lo = -(1i64 << (bits - 1));
-            let hi = (1i64 << (bits - 1)) - 1;
-            value >= lo && value <= hi
-        } else {
-            value >= 0 && value < (1i64 << bits)
-        }
-    }
-
-    fn load_const(dest: Register, value: i32, out: &mut Vec<AsmInst>) {
-        match dest.reg_type {
-            RegType::B32 if fits(value as i64, 18, true) => { //Fits into imm18
-                out.push(AsmInst::Load(reg_op(dest), AsmOperand::Imm18(value)));
-            }
-            RegType::B32 if fits(value as i64, 26, true) => { //Fits into imm26, 
-                out.push(AsmInst::Lma(AsmOperand::Imm26(value)));
-                if dest.id != 31 { //If we actually wanted it in rx31, jic tbh tho
-                    out.push(AsmInst::Mov(reg_op(dest), rx31()));
-                    out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
-                }
-            }
-            RegType::B32 => {
-                // If it doesn't fit even in 26 bits, we utilize register
-                // fragmentation by loading lower 16 bits into ry310 higher into ry311 and result
-                // will just be in rx31, genuis, love register fragmentation
-                let lo = (value as u32 & 0xFFFF) as i32;
-                let hi = ((value as u32 >> 16) & 0xFFFF) as i32;
-                out.push(AsmInst::Load(half_op(dest, 0), AsmOperand::Imm18(lo)));
-                out.push(AsmInst::Load(half_op(dest, 2), AsmOperand::Imm18(hi)));
-            }
-            _ => out.push(AsmInst::Load(reg_op(dest), Imm18(value))), // 16/8-bit value always fit in imm18
-        }
-    }
 
     //So we can load into stack, pointer, or raw address that function resolves that
-    fn resolve_addr(&self, ptr_addr: &IROperand, out: &mut Vec<AsmInst>) -> (AsmOperand, i32, bool) {
+    fn resolve_addr(&self, ptr_addr: &IROperand, out: &mut Vec<AsmInst>) -> (AddrBase, i32, bool) {
         match ptr_addr {
-            IROperand::FrameSlot(off) => (AsmOperand::SP, *off as i32, false),
-            _ if is_const(ptr_addr) => {
+            IROperand::FrameSlot(off)  => (AddrBase::Spr(Spr::SP), *off as i32, false),
+            IROperand::GlobalSlot(off) => (AddrBase::Spr(Spr::GP), *off as i32, false),
+            _ if is_const(ptr_addr) => {  //If its true, it means that rx31 got corrupted or sum, and we gotta clean in up
                 load_const(rx30(), const_val(ptr_addr), out);
-                (rx31(), 0, true) //If its true, it means that rx31 got corrupted or sum, and we
-                //gotta clean it up
+                (AddrBase::Reg(rx31()), 0, true)
             }
-            _ => (self.operand_to_asm(ptr_addr), 0, false),
+            _ => (AddrBase::Reg(self.operand_to_asm(ptr_addr)), 0, false),
         }
     }
 
+    pub fn emit_global_prologue(layout: &GlobalLayout) -> Vec<AsmInst> {
+        let mut out = Vec::new();
 
-    //Lowest further, low load and store ptr 
+        if layout.total_size > 0 {
+            out.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(0)));
+            out.push(AsmInst::SprSub(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(layout.total_size as i16)));
+            out.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(0)));
+            out.push(AsmInst::SprSet(reg_op(rx30_reg()), Spr::GP));
+        }
+
+        for (name, init) in &layout.init_values {
+            if let GlobalInit::Scalar(v) = init {
+                if let Some(reg) = layout.pins.get(name) {
+                    load_const(*reg, *v, &mut out);
+                } else if let Some(&off) = layout.offsets.get(name) {
+                    load_const(rx30_reg(), *v, &mut out);
+                    out.push(AsmInst::SprStr(reg_op(rx30_reg()), Spr::GP, AsmOperand::Imm16(off as i16)));
+                }
+            }
+        }
+
+        out
+    }
+
+
+    //Lowers further, low load and store ptr 
     fn lower_mem(&self, dest_or_src: &IROperand, ptr_addr: &IROperand, is_load: bool, out: &mut Vec<AsmInst>) {
-        let (base, off, used_rx31) = self.resolve_addr(ptr_addr, out);
+        let (base, off, used_rx30) = self.resolve_addr(ptr_addr, out);
 
         let value_operand = if is_load {
             self.operand_to_asm(dest_or_src)
-        } else if is_const(dest_or_src) { //We have to actually load value into second scratch if it
-            //isn't a variable
-            let target = if used_rx31 { rx30() } else { rx30() };
-            load_const(target, const_val(dest_or_src), out);
-            reg_op(target)
+        } else if is_const(dest_or_src) {
+            load_const(rx30(), const_val(dest_or_src), out);
+            reg_op(rx30_reg())
         } else {
             self.operand_to_asm(dest_or_src)
         };
 
-        out.push(if is_load { AsmInst::Ldr(value_operand, base, AsmOperand::Imm10(off as i16)) }
-                else        { AsmInst::Str(value_operand, base, AsmOperand::Imm10(off as i16)) });
+        out.push(if is_load {
+                    AsmInst::SprLdr(value_operand, spr, AsmOperand::Imm16(off as i16))
+                } else {
+                    AsmInst::SprStr(value_operand, spr, AsmOperand::Imm16(off as i16))
+                });
 
-        if used_rx31 { out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0))); }
+        match base {
+            AddrBase::Spr(spr) => out.push(if is_load {
+                AsmInst::SprLdr(value_operand, spr, AsmOperand::Imm16(off as i16))
+            } else {
+                AsmInst::SprStr(value_operand, spr, AsmOperand::Imm16(off as i16))
+            }),
+            AddrBase::Reg(base_reg) => out.push(if is_load {
+                AsmInst::Ldr(value_operand, base_reg, AsmOperand::Imm10(off as i16))
+            } else {
+                AsmInst::Str(value_operand, base_reg, AsmOperand::Imm10(off as i16))
+            }),
+        }
+
+        if used_rx30 { out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0))); }
     }
 
     //R-type, so 2 operand like xor, or etc, its rx0 = rx0 OP (rx1 + imm10)

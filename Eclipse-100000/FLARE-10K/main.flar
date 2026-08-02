@@ -16,6 +16,9 @@ regarch Rgba {
     u8 a;
 };
 
+>_ Global structs are avaliable, they can kinda be used as OOP
+#def #rx11 Rgba color;
+
 func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regular var in that func
 
 
@@ -47,7 +50,6 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regu
 
 
     #rx0 i32 a = 256; >_ a is stored in rx0 no matter what
-    #rx11 Rgba color;
     color = get_color(); >_ Same as Rgba
     i16 b;
     b = a * -256;

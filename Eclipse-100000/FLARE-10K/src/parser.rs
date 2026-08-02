@@ -904,14 +904,14 @@ impl<'a> Parser<'a> {
                 }
                 Token::Def => {
                     self.advance();
-                    let _pin = if let Some(&(Token::Pin(ref reg), _, _)) = self.tokens.peek() {
+                    let pin = if let Some(&(Token::Pin(ref reg), _, _)) = self.tokens.peek() {
                         let r = reg.clone();
                         self.advance();
                         Some(r)
                     } else {
                         None
                     };
-                    let var_expr = self.parse_var_decl(None);
+                    let var_expr = self.parse_var_decl(pin);
                     self.expect(Token::Semicolon);
                     program.globals.push(GlobalDef { decl: var_expr });
                 }
