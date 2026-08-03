@@ -402,8 +402,6 @@ impl InterferenceGraph {
     }
 }
 
-
-
 fn rx31() -> AsmOperand { reg_op(rx31_reg()) } //Here is a cool trick
 fn rx30() -> AsmOperand { reg_op(rx30_reg()) } //Unfortunately we do in fact need second scratch
 
@@ -535,7 +533,6 @@ impl<'a> Codegen<'a> {
 
 }
 
-//Wtf is cargo fmt doing
 fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst {
     let sub = |op: IROperand| if &op == old { new.clone() } else { op };
     match inst {
@@ -561,10 +558,7 @@ fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst 
         IRInst::AntiLess { left, right, target, signed } => IRInst::AntiLess { left: sub(left), right: sub(right), target, signed },
         IRInst::Call { dest, name, args } => IRInst::Call { dest: dest.map(sub), name, args: args.into_iter().map(sub).collect() },
         IRInst::Return(val) => IRInst::Return(val.map(sub)),
-        IRInst::RegFieldRead { dest, struct_var, byte_offset, byte_size } => IRInst::RegFieldRead { dest: sub(dest), struct_var: sub(struct_var), byte_offset, byte_size },
-        IRInst::RegFieldWrite { struct_var, byte_offset, byte_size, src } => IRInst::RegFieldWrite { struct_var: sub(struct_var), byte_offset, byte_size, src: sub(src) },
-        other => panic!("Unknown instruction: {:?}", other), //Again theoretically unreachable bc it
-        //should have been handled earlier but who knows
+        other => other,
     }
 }
 
@@ -745,6 +739,30 @@ impl<'a> Codegen<'a> {
             }
         }
     }
+    //Any var live across a Call is never safe in a register (no callee-saved registers, and
+    //callees don't know about a caller's local pins either), so force it to the stack up front
+    //instead of letting the allocator try and then spilling it after the fact
+    fn find_call_crossing_vars(&self) -> HashSet<IROperand> {
+        let mut crossing = HashSet::new();
+        for block in &self.cfg {
+            let mut live = block.live_out.clone();
+            for inst in block.body.iter().rev() {
+                if matches!(inst, IRInst::Call { .. }) {
+                    for var in &live {
+                        crossing.insert(var.clone());
+                    }
+                }
+                for definition in inst.kills() {
+                    live.remove(&definition);
+                }
+                for use_var in inst.uses() {
+                    live.insert(use_var);
+                }
+            }
+        }
+        crossing
+    }
+
     //InterferenceGraph where nodes are Var or Temp representing data that needs to be somewhere
     //during execution, so in registers or memory. And edges represent Interference meaning they
     //live at the same time and physically cannot share the same register and technically memory
@@ -761,11 +779,11 @@ impl<'a> Codegen<'a> {
 
             for inst in block.body.iter().rev() {
                 for definition in inst.kills() {
-                    graph.add_node(definition.clone())
+                    graph.add_node(definition.clone());
                     for live_var in &live {
                         graph.add_edge(definition.clone(), live_var.clone());
                     }
-                    live.remove(&definition)
+                    live.remove(&definition);
                 }
 
                 for use_var in inst.uses() {
@@ -875,6 +893,19 @@ impl<'a> Codegen<'a> {
         let mut passes = 0;
         loop {
             self.compute_liveness();
+
+            let crossing = self.find_call_crossing_vars();
+            for var in &crossing {
+                if let IROperand::Var(name) = var {
+                    if self.global_layout.pins.contains_key(name) { continue; }
+                }
+                if !self.allocations.contains_key(var) {
+                    let offset = self.frame_size;
+                    self.frame_size += var.get_type().get_size();
+                    self.allocations.insert(var.clone(), Location::StackOffset(offset));
+                }
+            }
+
             let graph = self.build_iterf_graph();
 
             self.seed_pins(&graph);
@@ -903,7 +934,7 @@ impl<'a> Codegen<'a> {
     //Check for pin conflicts
     fn seed_pins(&mut self, graph: &InterferenceGraph) {
         for (var_name, reg) in &self.pins {
-            self.allocations.insert(IROperand::Var(var_name.clone()), Location::Register(*reg));
+            self.allocations.entry(IROperand::Var(var_name.clone())).or_insert(Location::Register(*reg));
         }
 
         for (var_name, reg) in &self.pins {
@@ -1078,20 +1109,33 @@ impl<'a> Codegen<'a> {
         }
     }
 
+    //Only non-leaf functions ever clobber LR (by calling something else), so only they
+    //need to save/restore it - leaf functions can RET straight off the caller's LR
+    fn is_leaf(&self) -> bool {
+        !self.cfg.iter().any(|b| b.body.iter().any(|i| matches!(i, IRInst::Call { .. })))
+    }
+
     //Actual codegen time 
     fn lower_func(&mut self) -> Vec<AsmInst> {
         let mut compiled = Vec::new();
+        let leaf = self.is_leaf();
 
         if self.frame_size > 0 {
-            compiled.push(AsmInst::Sub(AsmOperand::SP, AsmOperand::SP, imm(self.frame_size as i32), AsmOperand::Imm2(0)));
+            compiled.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(0)));
+            compiled.push(AsmInst::SprSub(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(self.frame_size as i16)));
+        }
+
+        if !leaf {
+            compiled.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::LR, AsmOperand::Imm16(0)));
+            compiled.push(AsmInst::Push(reg_op(rx30_reg())));
         }
 
         for block in &self.cfg {
             for inst in &block.body {
-                self.lower_inst(inst, &mut out);
+                self.lower_inst(inst, &mut compiled);
             }
         }
-        out
+        compiled
     }
 
     //Place the globals before the stack
@@ -1139,26 +1183,30 @@ impl<'a> Codegen<'a> {
 
     fn operand_to_asm(&self, op: &IROperand) -> AsmOperand {
         match op {
-            IROperand::SignedConstant(var) => AsmOperand::Imm22(*var),
-            IROperand::UnsignedConstant(var) => AsmOperand::Imm22(*var as i32),
+            IROperand::SignedConstant(var) => AsmOperand::Imm18(*var),
+            IROperand::UnsignedConstant(var) => AsmOperand::Imm18(*var as i32),
             IROperand::Var(_) | IROperand::Temp(_) => match self.allocations[op] {
                 Location::Register(reg) => AsmOperand::Reg(Reg::TheRealOne(reg)),
                 Location::StackOffset(_) => unreachable!("Spills already rewritten"),
             },
             IROperand::FrameSlot(_) => unreachable!("Only valid as ptr_addr"),
+            IROperand::GlobalSlot(_) => unreachable!("Only valid as ptr_addr"),
+            IROperand::IncomingArgSlot(_) => unreachable!("Only valid as ptr_addr"),
 
         }
     }
 
+    //Minimal version of codegen for now
 
     //So we can load into stack, pointer, or raw address that function resolves that
     fn resolve_addr(&self, ptr_addr: &IROperand, out: &mut Vec<AsmInst>) -> (AddrBase, i32, bool) {
         match ptr_addr {
             IROperand::FrameSlot(off)  => (AddrBase::Spr(Spr::SP), *off as i32, false),
             IROperand::GlobalSlot(off) => (AddrBase::Spr(Spr::GP), *off as i32, false),
+            IROperand::IncomingArgSlot(idx) => (AddrBase::Spr(Spr::SP), (self.frame_size + idx * 4) as i32, false),
             _ if is_const(ptr_addr) => {  //If its true, it means that rx31 got corrupted or sum, and we gotta clean in up
-                load_const(rx30(), const_val(ptr_addr), out);
-                (AddrBase::Reg(rx31()), 0, true)
+                load_const(rx30_reg(), const_val(ptr_addr), out);
+                (AddrBase::Reg(rx30()), 0, true)
             }
             _ => (AddrBase::Reg(self.operand_to_asm(ptr_addr)), 0, false),
         }
@@ -1188,16 +1236,6 @@ impl<'a> Codegen<'a> {
         out
     }
 
-    fn regarch_sub_register(&self, struct_var: &IROperand, byte_offset: usize, byte_size: usize) -> Register {
-        let base = match self.allocations.get(struct_var) {
-            Some(Location::Register(reg)) => *reg,
-            _ => panic!("Codegen Error: regarch variable must be pinned to a register"), //Should ba
-            //handled in semantic but again, idc
-        };
-        let reg_type = match byte_size { 1 => RegType::B8, 2 => RegType::B16, 4 => RegType::B32, n => panic!("Codegen Error: bad regarch field size(must be 4 bytes) {}", n) };
-        Register { id: base.id, reg_type, sub_index: byte_offset as u8 }
-    }
-
 
     //Lowers further, low load and store ptr 
     fn lower_mem(&self, dest_or_src: &IROperand, ptr_addr: &IROperand, is_load: bool, out: &mut Vec<AsmInst>) {
@@ -1206,17 +1244,11 @@ impl<'a> Codegen<'a> {
         let value_operand = if is_load {
             self.operand_to_asm(dest_or_src)
         } else if is_const(dest_or_src) {
-            load_const(rx30(), const_val(dest_or_src), out);
+            load_const(rx30_reg(), const_val(dest_or_src), out);
             reg_op(rx30_reg())
         } else {
             self.operand_to_asm(dest_or_src)
         };
-
-        out.push(if is_load {
-                    AsmInst::SprLdr(value_operand, spr, AsmOperand::Imm16(off as i16))
-                } else {
-                    AsmInst::SprStr(value_operand, spr, AsmOperand::Imm16(off as i16))
-                });
 
         match base {
             AddrBase::Spr(spr) => out.push(if is_load {
@@ -1241,7 +1273,7 @@ impl<'a> Codegen<'a> {
         let left_asm = self.operand_to_asm(left);
 
         if dest_asm != left_asm {
-            out.push(AsmInst::Mov(dest_asm.clone(), left_asm));
+            out.push(AsmInst::Mov(dest_asm.clone(), left_asm, AsmOperand::Imm10(0)));
         }
 
         let mut used_rx31 = false;
@@ -1249,7 +1281,7 @@ impl<'a> Codegen<'a> {
             (rx31(), AsmOperand::Imm10(const_val(right) as i16)) //As long as fits into imm10, we
             //are good
         } else if is_const(right) {
-            load_const(rx30(), const_val(right), out); //But if it doesn't use rx30
+            load_const(rx30_reg(), const_val(right), out); //But if it doesn't use rx30
             used_rx31 = true;
             (rx31(), AsmOperand::Imm10(0))
         } else {
@@ -1280,8 +1312,8 @@ impl<'a> Codegen<'a> {
         let (l, left_used_rx30) = if is_const(left) && const_val(left) == 0 {
             (rx31(), false)
         } else if is_const(left) {
-            load_const(rx30(), const_val(left), out);
-            (reg_op(rx30()), true)
+            load_const(rx30_reg(), const_val(left), out);
+            (reg_op(rx30_reg()), true)
         } else {
             (self.operand_to_asm(left), false)
         };
@@ -1295,7 +1327,7 @@ impl<'a> Codegen<'a> {
         }
 
         let (r, used_rx31) = if is_const(right) {
-            let target = if left_used_rx30 { rx31() } else { rx30() };
+            let target = if left_used_rx30 { rx31_reg() } else { rx30_reg() };
             load_const(target, const_val(right), out);
             (reg_op(target), left_used_rx30)
         } else {
@@ -1310,28 +1342,28 @@ impl<'a> Codegen<'a> {
     }
 
     fn lower_cmp(&mut self, left: &IROperand, right: &IROperand, out: &mut Vec<AsmInst>) {
-        let mut used_rx31 = false;
+        let mut used_rx30 = false;
 
-        let l_op = if Self.is_const(left) {
-            Self::load_const(Self::rx30(), Self::const_val(left), out);
-            Self::reg_op(Self::rx30());
-            used_rx31 = true;
+        let l_op = if is_const(left) {
+            load_const(rx30_reg(), const_val(left), out);
+            used_rx30 = true;
+            reg_op(rx30_reg())
         } else {
-            self.operand_to_asm(left);
+            self.operand_to_asm(left)
         };
 
-        let r_op = if Self.is_const(right) {
-            Self::load_const(Self::rx30(), Self::const_val(right), out);
-            Self::reg_op(Self::rx30());
-            used_rx31 = true;
+        let r_op = if is_const(right) {
+            load_const(rx30_reg(), const_val(right), out);
+            used_rx30 = true;
+            reg_op(rx30_reg())
         } else {
-            self.operand_to_asm(right);
+            self.operand_to_asm(right)
         };
 
         out.push(AsmInst::Cmp(l_op, r_op));
 
-        if used_rx31 {
-            out.push(AsmInst::Xor(Self::rx31(), Self::rx31(), AsmOperand::Imm10(0)));
+        if used_rx30 {
+            out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));
         }
     }
 
@@ -1378,7 +1410,7 @@ impl<'a> Codegen<'a> {
         if is_signed(src_type) && target_bits > src_bits {
             //widening the signed is the only case where we need actual work
             if dest_asm != src_asm {
-                out.push(AsmInst::Mov(dest_asm.clone(), src_asm));
+                out.push(AsmInst::Mov(dest_asm.clone(), src_asm, AsmOperand::Imm10(0)));
             }
             let shift = (32 - src_bits) as i16;
             out.push(AsmInst::Shl(dest_asm.clone(), rx31(), AsmOperand::Imm10(shift)));
@@ -1386,14 +1418,14 @@ impl<'a> Codegen<'a> {
         } else {
             //Any other operation is just move, because mov automatically zero extends,
             //automatically uses lower bits, and automatically just works, I love fragmented registers
-            out.push(AsmInst::Mov(dest_asm, src_asm));
+            out.push(AsmInst::Mov(dest_asm, src_asm, AsmOperand::Imm10(0)));
         }
     }
 
     fn lower_inst(&mut self, inst: &IRInst, out: &mut Vec<AsmInst>) {
         match inst {
             IRInst::Label(lab) => out.push(AsmInst::Label(format!("{}", lab))),
-            IRInst::Jmp(target) => out.push(AsmInst::Jmp(target.clone())),
+            IRInst::JMP(target) => out.push(AsmInst::Jmp(target.clone())),
 
             IRInst::LoadPtr  { dest, ptr_addr } => self.lower_mem(dest, ptr_addr, true, out),
             IRInst::StorePtr { ptr_addr, src } => self.lower_mem(src, ptr_addr, false, out),
@@ -1489,26 +1521,82 @@ impl<'a> Codegen<'a> {
                 }
             }
 
-            IRInst::InlineAsm {asm} => {
+            IRInst::InlineAsm(asm) => {
                 for line in asm {
                     out.push(AsmInst::Inline(line));
                 }
             }
 
-            //If you haven't read the other comment about that, field of regarch are accessed using
-            //sub-registers(regiser fragmentation)
-            IRInst::RegFieldRead { dest, struct_var, byte_offset, byte_size } => {
-                let sub_reg = self.regarch_sub_register(struct_var, *byte_offset, *byte_size);
-                let dest_asm = self.operand_to_asm(dest);
-                out.push(AsmInst::Mov(dest_asm, reg_op(sub_reg), AsmOperand::Imm10(0)));
-            }
-            IRInst::RegFieldWrite { struct_var, byte_offset, byte_size, src } => {
-                let sub_reg = self.regarch_sub_register(struct_var, *byte_offset, *byte_size);
-                if is_const(src) {
-                    load_const(sub_reg, const_val(src), out);
-                } else {
-                    out.push(AsmInst::Mov(reg_op(sub_reg), self.operand_to_asm(src), AsmOperand::Imm10(0)));
+            IRInst::Div { .. } | IRInst::Mod { .. } => panic!("Codegen Error: division and modulo aren't implemented yet"),
+
+            IRInst::Pin { .. } => {}
+
+
+            //So first 4 arguments go into 4 first registers depending on their size, rest are
+            //spilled on the stack
+            IRInst::Call { dest, name, args } => {
+                for (i, arg) in args.iter().enumerate().take(4) {
+                    let arg_reg_asm = reg_op(Register { id: i as u8, reg_type: RegType::B32, sub_index: 0 });
+                    if is_const(arg) {
+                        load_const(Register { id: i as u8, reg_type: RegType::B32, sub_index: 0 }, const_val(arg), out);
+                    } else {
+                        let arg_asm = self.operand_to_asm(arg);
+                        if arg_asm != arg_reg_asm {
+                            out.push(AsmInst::Mov(arg_reg_asm, arg_asm, AsmOperand::Imm10(0)));
+                        }
+                    }
                 }
+
+                let overflow = if args.len() > 4 { &args[4..] } else { &[] };
+                for arg in overflow.iter().rev() {
+                    if is_const(arg) {
+                        load_const(rx30_reg(), const_val(arg), out);
+                        out.push(AsmInst::Push(rx30()));
+                    } else {
+                        out.push(AsmInst::Push(self.operand_to_asm(arg)));
+                    }
+                }
+
+                out.push(AsmInst::Call(name.clone()));
+
+                if !overflow.is_empty() {
+                    out.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(0)));
+                    out.push(AsmInst::SprAdd(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16((overflow.len() * 4) as i16)));
+                }
+
+                if let Some(dest) = dest {
+                    let dest_asm = self.operand_to_asm(dest);
+                    if dest_asm != rx30() {
+                        out.push(AsmInst::Mov(dest_asm, rx30(), AsmOperand::Imm10(0)));
+                    }
+                }
+            }
+
+            //return returns to rx30 to matter what, though I do make sure next instruction moved
+            //value out of rx30 bc its a scratch afterall
+            IRInst::Return(val) => {
+                if let Some(val) = val {
+                    if is_const(val) {
+                        load_const(rx30_reg(), const_val(val), out);
+                    } else {
+                        let val_asm = self.operand_to_asm(val);
+                        if val_asm != rx30() {
+                            out.push(AsmInst::Mov(rx30(), val_asm, AsmOperand::Imm10(0)));
+                        }
+                    }
+                }
+
+                if !self.is_leaf() {
+                    out.push(AsmInst::Pop(reg_op(rx31_reg())));
+                    out.push(AsmInst::SprSet(reg_op(rx31_reg()), Spr::LR));
+                }
+
+                if self.frame_size > 0 {
+                    out.push(AsmInst::SprLea(reg_op(rx31_reg()), Spr::SP, AsmOperand::Imm16(0)));
+                    out.push(AsmInst::SprAdd(reg_op(rx31_reg()), Spr::SP, AsmOperand::Imm16(self.frame_size as i16)));
+                }
+
+                out.push(AsmInst::Ret);
             }
         }
     }
