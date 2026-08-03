@@ -402,6 +402,8 @@ impl InterferenceGraph {
     }
 }
 
+
+
 fn rx31() -> AsmOperand { reg_op(rx31_reg()) } //Here is a cool trick
 fn rx30() -> AsmOperand { reg_op(rx30_reg()) } //Unfortunately we do in fact need second scratch
 
@@ -533,6 +535,7 @@ impl<'a> Codegen<'a> {
 
 }
 
+//Wtf is cargo fmt doing
 fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst {
     let sub = |op: IROperand| if &op == old { new.clone() } else { op };
     match inst {
@@ -558,7 +561,10 @@ fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst 
         IRInst::AntiLess { left, right, target, signed } => IRInst::AntiLess { left: sub(left), right: sub(right), target, signed },
         IRInst::Call { dest, name, args } => IRInst::Call { dest: dest.map(sub), name, args: args.into_iter().map(sub).collect() },
         IRInst::Return(val) => IRInst::Return(val.map(sub)),
-        other => other,
+        IRInst::RegFieldRead { dest, struct_var, byte_offset, byte_size } => IRInst::RegFieldRead { dest: sub(dest), struct_var: sub(struct_var), byte_offset, byte_size },
+        IRInst::RegFieldWrite { struct_var, byte_offset, byte_size, src } => IRInst::RegFieldWrite { struct_var: sub(struct_var), byte_offset, byte_size, src: sub(src) },
+        other => panic!("Unknown instruction: {:?}", other), //Again theoretically unreachable bc it
+        //should have been handled earlier but who knows
     }
 }
 
@@ -1182,6 +1188,16 @@ impl<'a> Codegen<'a> {
         out
     }
 
+    fn regarch_sub_register(&self, struct_var: &IROperand, byte_offset: usize, byte_size: usize) -> Register {
+        let base = match self.allocations.get(struct_var) {
+            Some(Location::Register(reg)) => *reg,
+            _ => panic!("Codegen Error: regarch variable must be pinned to a register"), //Should ba
+            //handled in semantic but again, idc
+        };
+        let reg_type = match byte_size { 1 => RegType::B8, 2 => RegType::B16, 4 => RegType::B32, n => panic!("Codegen Error: bad regarch field size(must be 4 bytes) {}", n) };
+        Register { id: base.id, reg_type, sub_index: byte_offset as u8 }
+    }
+
 
     //Lowers further, low load and store ptr 
     fn lower_mem(&self, dest_or_src: &IROperand, ptr_addr: &IROperand, is_load: bool, out: &mut Vec<AsmInst>) {
@@ -1476,6 +1492,22 @@ impl<'a> Codegen<'a> {
             IRInst::InlineAsm {asm} => {
                 for line in asm {
                     out.push(AsmInst::Inline(line));
+                }
+            }
+
+            //If you haven't read the other comment about that, field of regarch are accessed using
+            //sub-registers(regiser fragmentation)
+            IRInst::RegFieldRead { dest, struct_var, byte_offset, byte_size } => {
+                let sub_reg = self.regarch_sub_register(struct_var, *byte_offset, *byte_size);
+                let dest_asm = self.operand_to_asm(dest);
+                out.push(AsmInst::Mov(dest_asm, reg_op(sub_reg), AsmOperand::Imm10(0)));
+            }
+            IRInst::RegFieldWrite { struct_var, byte_offset, byte_size, src } => {
+                let sub_reg = self.regarch_sub_register(struct_var, *byte_offset, *byte_size);
+                if is_const(src) {
+                    load_const(sub_reg, const_val(src), out);
+                } else {
+                    out.push(AsmInst::Mov(reg_op(sub_reg), self.operand_to_asm(src), AsmOperand::Imm10(0)));
                 }
             }
         }

@@ -7,9 +7,12 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum IROperand {
-    SignedConstant(i32), UnsignedConstant(u32),
-    Var(String), Temp(usize),
-    FrameSlot(usize), GlobalSlot(usize),
+    SignedConstant(i32),
+    UnsignedConstant(u32),
+    Var(String),
+    Temp(usize),
+    FrameSlot(usize),
+    GlobalSlot(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,6 +96,21 @@ pub enum IRInst {
     StorePtr {
         ptr_addr: IROperand,
         src: IROperand,
+    },
+
+    RegFieldRead { //Fields of regarches are accessed using sub-registers, even though IR doesn't
+        //know about it
+        //Register fragmentation comes into play again
+        dest: IROperand,
+        struct_var: IROperand,
+        byte_offset: usize,
+        byte_size: usize,
+    },
+    RegFieldWrite {
+        src: IROperand,
+        struct_var: IROperand,
+        byte_offset: usize,
+        byte_size: usize,
     },
 
     AntiEqual {
@@ -388,7 +406,7 @@ impl IR {
                     dest: dest.clone(),
                     src,
                     target_type: target_type.clone(),
-                    src_type
+                    src_type,
                 });
                 dest
             }
@@ -502,6 +520,21 @@ impl IR {
                         });
                         r_op
                     }
+                    Expr::FieldAccess { expr: base, field } => {
+                        if let Type::Struct(struct_name) = self.infer_type(base) {
+                            if self.structs[&struct_name].is_reg {
+                                let offset = self.get_field_offset(&struct_name, field);
+                                let field_ty = self.structs[&struct_name].fields.iter().find(|f| &f.name == field).unwrap().ty.clone();
+                                let size = self.get_type_size(&field_ty);
+                                let struct_var = self.lower_lvalue(base);
+                                self.emit(IRInst::RegFieldWrite { struct_var, byte_offset: offset, byte_size: size, src: r_op.clone() });
+                                return r_op;
+                            }
+                        }
+                        let ptr_op = self.lower_lvalue(lhs);
+                        self.emit(IRInst::StorePtr { ptr_addr: ptr_op, src: r_op.clone() });
+                        r_op
+                    }
                     _ => {
                         // Memory location, deref etc
                         let ptr_op = self.lower_lvalue(lhs);
@@ -572,13 +605,21 @@ impl IR {
                 IROperand::Var(name.clone())
             }
 
-            Expr::FieldAccess { expr, .. } => {
+            Expr::FieldAccess { expr: base, field } => {
+                if let Type::Struct(struct_name) = self.infer_type(base) {
+                    if self.structs[&struct_name].is_reg {
+                        let offset = self.get_field_offset(&struct_name, field);
+                        let field_ty = self.structs[&struct_name].fields.iter().find(|f| &f.name == field).unwrap().ty.clone();
+                        let size = self.get_type_size(&field_ty);
+                        let struct_var = self.lower_lvalue(base);
+                        let dest = self.new_temp();
+                        self.emit(IRInst::RegFieldRead { dest: dest.clone(), struct_var, byte_offset: offset, byte_size: size });
+                        return dest;
+                    }
+                }
                 let addr = self.lower_lvalue(expr);
                 let dest = self.new_temp();
-                self.emit(IRInst::LoadPtr {
-                    dest: dest.clone(),
-                    ptr_addr: addr,
-                });
+                self.emit(IRInst::LoadPtr { dest: dest.clone(), ptr_addr: addr });
                 dest
             }
             _ => panic!("Unsupported expression format"),
