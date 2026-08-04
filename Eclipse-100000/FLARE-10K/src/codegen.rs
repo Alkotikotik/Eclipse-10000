@@ -2,8 +2,8 @@
 //Technically when I use "alive" its incorrect because the right term for it is just "live"
 //But I don't like how plain "live" sound so ill use "alive"
 
-use crate::IR3AC::{IRInst, IRFunction, IROperand, get_type_align, get_type_size, align_to};
-use crate::parser::{Type, StructDef, Program, GlobalDef, Expr, BinaryOpKind, UnaryOpKind};
+use crate::IR3AC::{IRFunction, IRInst, IROperand, align_to, get_type_align, get_type_size};
+use crate::parser::{Expr, StructDef, Type};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -29,19 +29,21 @@ pub struct RegisterTracker {
 }
 
 pub struct GlobalLayout {
-    pub offsets: HashMap<String, usize>,   // unpinned globals
-    pub total_size: usize,                 // bytes to reserve on the stack
-    pub pins: HashMap<String, Register>,   // pinned globals
+    pub offsets: HashMap<String, usize>, // unpinned globals
+    pub total_size: usize,               // bytes to reserve on the stack
+    pub pins: HashMap<String, Register>, // pinned globals
     pub init_values: HashMap<String, GlobalInit>,
 }
 
-enum AddrBase { Spr(Spr), Reg(AsmOperand) }
+enum AddrBase {
+    Spr(Spr),
+    Reg(AsmOperand),
+}
 
 pub enum GlobalInit {
     Scalar(i32),
     None,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Location {
@@ -75,9 +77,13 @@ pub enum Reg {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Spr { SP, LR, GP }
+pub enum Spr {
+    SP,
+    LR,
+    GP,
+}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AsmOperand {
     Reg(Reg),
     Imm26(i32),
@@ -95,7 +101,7 @@ pub enum AsmInst {
     Sub(AsmOperand, AsmOperand, AsmOperand, AsmOperand),
     Mul(AsmOperand, AsmOperand, AsmOperand, AsmOperand),
     Xor(AsmOperand, AsmOperand, AsmOperand), //2 register plus unsiged 10bit
-    Or (AsmOperand, AsmOperand, AsmOperand),
+    Or(AsmOperand, AsmOperand, AsmOperand),
     And(AsmOperand, AsmOperand, AsmOperand),
     Not(AsmOperand),
     Shl(AsmOperand, AsmOperand, AsmOperand),
@@ -103,7 +109,7 @@ pub enum AsmInst {
     Sra(AsmOperand, AsmOperand, AsmOperand),
 
     Load(AsmOperand, AsmOperand),
-    Lma (AsmOperand, AsmOperand), //Up to 25bits loads into rx15
+    Lma(AsmOperand),                         //Up to 25bits loads into rx31
     Ldr(AsmOperand, AsmOperand, AsmOperand), // dest, base, offset
     Str(AsmOperand, AsmOperand, AsmOperand), // src, base, offset
 
@@ -116,27 +122,28 @@ pub enum AsmInst {
     Push(AsmOperand),
     Pop(AsmOperand),
 
-    Cmp (AsmOperand, AsmOperand),
-    Beq (String),
-    Bne (String),
-    Bgu (String), //unsigned
-    Bsu (String),
-    Bgs (String), //signed
-    Bss (String),
+    Cmp(AsmOperand, AsmOperand),
+    Beq(String),
+    Bne(String),
+    Bgu(String), //unsigned
+    Bsu(String),
+    Bgs(String), //signed
+    Bss(String),
 
-    Jmp (String),
-    Jr  (AsmOperand),
+    Jmp(String),
+    Jr(AsmOperand),
     Call(String),
     Inline(String),
     Label(String),
     Ret,
-
 }
 
 impl RegisterTracker {
     //Account for pinned globals
     pub fn new(reserved: &HashMap<String, Register>) -> Self {
-        let mut t = Self { slots: [[false; 4]; 30] };
+        let mut t = Self {
+            slots: [[false; 4]; 30],
+        };
         for reg in reserved.values() {
             t.mark(reg.id, reg.reg_type, reg.sub_index);
         }
@@ -206,7 +213,7 @@ impl IRInst {
         let mut ls = Vec::new();
 
         match self {
-            IRInst::Add { left, right, .. } 
+            IRInst::Add { left, right, .. }
             | IRInst::Sub { left, right, .. }
             | IRInst::Mul { left, right, .. }
             | IRInst::Div { left, right, .. }
@@ -214,14 +221,18 @@ impl IRInst {
             | IRInst::Shl { left, right, .. }
             | IRInst::Shr { left, right, .. }
             | IRInst::Xor { left, right, .. }
-            | IRInst::Or  { left, right, .. }
+            | IRInst::Or { left, right, .. }
             | IRInst::And { left, right, .. }
             | IRInst::AntiEqual { left, right, .. }
             | IRInst::Equal { left, right, .. }
             | IRInst::AntiMore { left, right, .. }
             | IRInst::AntiLess { left, right, .. } => {
-                if left.is_var() { ls.push(left.clone()); }
-                if right.is_var() { ls.push(right.clone()); }
+                if left.is_var() {
+                    ls.push(left.clone());
+                }
+                if right.is_var() {
+                    ls.push(right.clone());
+                }
             }
 
             IRInst::Not { src, .. }
@@ -229,41 +240,62 @@ impl IRInst {
             | IRInst::Cpy { src, .. }
             | IRInst::Cast { src, .. }
             | IRInst::LoadPtr { ptr_addr: src, .. } => {
-                if src.is_var() { ls.push(src.clone()); }
+                if src.is_var() {
+                    ls.push(src.clone());
+                }
             }
 
             IRInst::StorePtr { ptr_addr, src } => {
-                if ptr_addr.is_var() { ls.push(ptr_addr.clone()); }
-                if src.is_var() { ls.push(src.clone()); }
+                if ptr_addr.is_var() {
+                    ls.push(ptr_addr.clone());
+                }
+                if src.is_var() {
+                    ls.push(src.clone());
+                }
             }
 
             IRInst::RegFieldRead { struct_var, .. } => {
-                if struct_var.is_var() { ls.push(struct_var.clone()); }
+                if struct_var.is_var() {
+                    ls.push(struct_var.clone());
+                }
             }
 
-            IRInst::RegFieldWrite { struct_var, src, .. } => {
-                if struct_var.is_var() { ls.push(struct_var.clone()); }
-                if src.is_var() { ls.push(src.clone()); }
+            IRInst::RegFieldWrite {
+                struct_var, src, ..
+            } => {
+                if struct_var.is_var() {
+                    ls.push(struct_var.clone());
+                }
+                if src.is_var() {
+                    ls.push(src.clone());
+                }
             }
 
-            IRInst::Call { args, stack_args, .. } => {
+            IRInst::Call {
+                args, stack_args, ..
+            } => {
                 for (arg, _) in args {
-                    if arg.is_var() { ls.push(arg.clone()); }
+                    if arg.is_var() {
+                        ls.push(arg.clone());
+                    }
                 }
                 for arg in stack_args {
-                    if arg.is_var() { ls.push(arg.clone()); }
+                    if arg.is_var() {
+                        ls.push(arg.clone());
+                    }
                 }
             }
 
             IRInst::Return(Some(val)) => {
-                if val.is_var() { ls.push(val.clone()); }
+                if val.is_var() {
+                    ls.push(val.clone());
+                }
             }
 
             _ => {}
         }
         ls
     }
-
 
     //If a value is being rewritten(killed)
     pub fn kills(&self) -> Vec<IROperand> {
@@ -277,22 +309,30 @@ impl IRInst {
             | IRInst::Shl { dest, .. }
             | IRInst::Shr { dest, .. }
             | IRInst::Xor { dest, .. }
-            | IRInst::Or  { dest, .. }
+            | IRInst::Or { dest, .. }
             | IRInst::And { dest, .. }
             | IRInst::Not { dest, .. }
             | IRInst::Negate { dest, .. }
             | IRInst::Cpy { dest, .. }
             | IRInst::Cast { dest, .. }
             | IRInst::LoadPtr { dest, .. } => {
-                if dest.is_var() { ls.push(dest.clone()); }
+                if dest.is_var() {
+                    ls.push(dest.clone());
+                }
             }
 
             IRInst::RegFieldRead { dest, .. } => {
-                if dest.is_var() { ls.push(dest.clone()); }
+                if dest.is_var() {
+                    ls.push(dest.clone());
+                }
             }
 
-            IRInst::Call { dest: Some(dest), .. } => {
-                if dest.is_var() { ls.push(dest.clone()); }
+            IRInst::Call {
+                dest: Some(dest), ..
+            } => {
+                if dest.is_var() {
+                    ls.push(dest.clone());
+                }
             }
 
             _ => {}
@@ -312,7 +352,12 @@ impl GlobalLayout {
 
         for decl in globals {
             let (ty, name, initial, pin) = match decl {
-                Expr::VarDecl { ty, name, initial, pin } => (ty, name, initial, pin),
+                Expr::VarDecl {
+                    ty,
+                    name,
+                    initial,
+                    pin,
+                } => (ty, name, initial, pin),
                 _ => panic!("Codegen Error: bad global declaration"),
             };
 
@@ -324,12 +369,14 @@ impl GlobalLayout {
             let align = get_type_align(ty, structs);
 
             let init = match initial {
-                Some(Expr::IntLiteral(v)) => GlobalInit::Scalar(*v),
-                Some(Expr::HexLiteral(v)) => GlobalInit::Scalar(*v as i32),
-                Some(_) => panic!(
-                    "Codegen Error: global {} needs a literal initializer, no compile-time evaluation",
-                    name
-                ),
+                Some(expr) => match **expr {
+                    Expr::IntLiteral(v) => GlobalInit::Scalar(v),
+                    Expr::HexLiteral(v) => GlobalInit::Scalar(v as i32),
+                    _ => panic!(
+                        "Codegen Error: global {} needs a literal initializer, no compile time evaluation",
+                        name
+                    ),
+                },
                 None => GlobalInit::None,
             };
 
@@ -338,7 +385,9 @@ impl GlobalLayout {
                 if reg.reg_type.get_size() != size {
                     panic!(
                         "Codegen Error: pinned global {} is {} bytes but register is {} bytes",
-                        name, size, reg.reg_type.get_size()
+                        name,
+                        size,
+                        reg.reg_type.get_size()
                     );
                 }
                 pins.insert(name.clone(), reg);
@@ -351,7 +400,12 @@ impl GlobalLayout {
             init_values.insert(name.clone(), init);
         }
 
-        GlobalLayout { offsets, total_size, pins, init_values }
+        GlobalLayout {
+            offsets,
+            total_size,
+            pins,
+            init_values,
+        }
     }
 }
 
@@ -359,7 +413,7 @@ impl GlobalLayout {
 //If it isn't being read though, it is dead. If value is overwritten before its being read from its
 //dead too
 impl BasicBlock {
-    pub fn compute_uevar_varkill(&mut self){
+    pub fn compute_uevar_varkill(&mut self) {
         //Upward Exposed Variable meaning it is read in current
         //block but not declared so it relies on predecessors to declare it
         let mut uevar = HashSet::new();
@@ -386,7 +440,9 @@ impl BasicBlock {
 
 impl InterferenceGraph {
     pub fn new() -> Self {
-        Self {adjacent: HashMap::new()}
+        Self {
+            adjacent: HashMap::new(),
+        }
     }
 
     pub fn add_node(&mut self, node: IROperand) {
@@ -397,14 +453,21 @@ impl InterferenceGraph {
 
     pub fn add_edge(&mut self, first: IROperand, second: IROperand) {
         if first != second {
-            //This addsd undirected edge meaning its a two way interference, if A interferes with B 
+            //This addsd undirected edge meaning its a two way interference, if A interferes with B
             //B automatically interference with A which makes sense
-            self.adjacent.entry(first.clone()).or_default().insert(second.clone());
+            self.adjacent
+                .entry(first.clone())
+                .or_default()
+                .insert(second.clone());
             self.adjacent.entry(second).or_default().insert(first);
         }
     }
     //Weighted Degree is sum of neighbor's sizes in bytes
-    pub fn get_weighted_degree(&self, node: &IROperand, active_nodes: &HashSet<IROperand>) -> usize {
+    pub fn get_weighted_degree(
+        &self,
+        node: &IROperand,
+        active_nodes: &HashSet<IROperand>,
+    ) -> usize {
         self.adjacent
             .get(node)
             .map(|neighbors| {
@@ -418,17 +481,44 @@ impl InterferenceGraph {
     }
 }
 
-fn rx31() -> AsmOperand { reg_op(rx31_reg()) } //Here is a cool trick
-fn rx30() -> AsmOperand { reg_op(rx30_reg()) } //Unfortunately we do in fact need second scratch
+fn rx31() -> AsmOperand {
+    reg_op(rx31_reg())
+} //Here is a cool trick
+fn rx30() -> AsmOperand {
+    reg_op(rx30_reg())
+} //Unfortunately we do in fact need second scratch
 
-fn rx30_reg() -> Register { Register { id: 30, reg_type: RegType::B32, sub_index: 0 } }
-fn rx31_reg() -> Register { Register { id: 31, reg_type: RegType::B32, sub_index: 0 } }
+fn rx30_reg() -> Register {
+    Register {
+        id: 30,
+        reg_type: RegType::B32,
+        sub_index: 0,
+    }
+}
+fn rx31_reg() -> Register {
+    Register {
+        id: 31,
+        reg_type: RegType::B32,
+        sub_index: 0,
+    }
+}
 
-fn reg_op(reg: Register) -> AsmOperand { AsmOperand::Reg(Reg::TheRealOne(reg)) }
-fn half_op(reg: Register, sub_index: u8) -> AsmOperand { reg_op(Register { id: reg.id, reg_type: RegType::B16, sub_index }) }
+fn reg_op(reg: Register) -> AsmOperand {
+    AsmOperand::Reg(Reg::TheRealOne(reg))
+}
+fn half_op(reg: Register, sub_index: u8) -> AsmOperand {
+    reg_op(Register {
+        id: reg.id,
+        reg_type: RegType::B16,
+        sub_index,
+    })
+}
 
 fn is_const(op: &IROperand) -> bool {
-    matches!(op, IROperand::SignedConstant(_) | IROperand::UnsignedConstant(_))
+    matches!(
+        op,
+        IROperand::SignedConstant(_) | IROperand::UnsignedConstant(_)
+    )
 }
 fn const_val(op: &IROperand) -> i32 {
     match op {
@@ -438,8 +528,8 @@ fn const_val(op: &IROperand) -> i32 {
     }
 }
 
-
-fn fits(value: i64, bits: u32, signed: bool) -> bool { //Literally what it means
+fn fits(value: i64, bits: u32, signed: bool) -> bool {
+    //Literally what it means
     if signed {
         let lo = -(1i64 << (bits - 1));
         let hi = (1i64 << (bits - 1)) - 1;
@@ -451,12 +541,15 @@ fn fits(value: i64, bits: u32, signed: bool) -> bool { //Literally what it means
 
 fn load_const(dest: Register, value: i32, out: &mut Vec<AsmInst>) {
     match dest.reg_type {
-        RegType::B32 if fits(value as i64, 18, true) => { //Fits into imm18
+        RegType::B32 if fits(value as i64, 18, true) => {
+            //Fits into imm18
             out.push(AsmInst::Load(reg_op(dest), AsmOperand::Imm18(value)));
         }
-        RegType::B32 if fits(value as i64, 26, true) => { //Fits into imm26, 
+        RegType::B32 if fits(value as i64, 26, true) => {
+            //Fits into imm26,
             out.push(AsmInst::Lma(AsmOperand::Imm26(value)));
-            if dest.id != 31 { //If we actually wanted it in rx31, jic tbh tho
+            if dest.id != 31 {
+                //If we actually wanted it in rx31, jic tbh tho
                 out.push(AsmInst::Mov(reg_op(dest), rx31(), AsmOperand::Imm10(0)));
                 out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
             }
@@ -488,20 +581,29 @@ pub struct Codegen<'a> {
 }
 
 impl<'a> Codegen<'a> {
-
-    pub fn new(ir_func: &'a IRFunction, structs: &'a HashMap<String, StructDef>, global_layout: &'a GlobalLayout) -> Self {
+    pub fn new(
+        ir_func: &'a IRFunction,
+        structs: &'a HashMap<String, StructDef>,
+        global_layout: &'a GlobalLayout,
+    ) -> Self {
         let legalized_body = Self::legalize_globals(&ir_func.body, global_layout);
         let mut pins = Self::collect_pins(&legalized_body);
         pins.extend(global_layout.pins.clone());
 
-        let next_temp = legalized_body.iter()
+        let next_temp = legalized_body
+            .iter()
             .flat_map(|i| i.uses().into_iter().chain(i.kills()))
-            .filter_map(|op| match op { IROperand::Temp(n) => Some(n + 1), _ => None })
+            .filter_map(|op| match op {
+                IROperand::Temp(n) => Some(n + 1),
+                _ => None,
+            })
             .max()
             .unwrap_or(0);
 
         let mut codegen = Self {
-            ir_func, structs, global_layout,
+            ir_func,
+            structs,
+            global_layout,
             cfg: Vec::new(),
             allocations: HashMap::new(),
             frame_size: 0,
@@ -518,73 +620,212 @@ impl<'a> Codegen<'a> {
     pub fn parse_pin_register(pin_str: &str) -> Register {
         let upper = pin_str.to_uppercase();
 
-        let prefix = if upper.starts_with("RZ") { "RZ" }
-            else if upper.starts_with("RY") { "RY" }
-            else if upper.starts_with("RX") { "RX" }
-            else if upper.starts_with('R')  { "R"  }
-            else { panic!("Codegen Error: invalid pin register {}", pin_str) };
+        let prefix = if upper.starts_with("RZ") {
+            "RZ"
+        } else if upper.starts_with("RY") {
+            "RY"
+        } else if upper.starts_with("RX") {
+            "RX"
+        } else if upper.starts_with('R') {
+            "R"
+        } else {
+            panic!("Codegen Error: invalid pin register {}", pin_str)
+        };
 
         let rest = &upper[prefix.len()..];
-        let num: u32 = rest.parse().unwrap_or_else(|_| {
-            panic!("Codegen Error: invalid pin register {}", pin_str)
-        });
+        let num: u32 = rest
+            .parse()
+            .unwrap_or_else(|_| panic!("Codegen Error: invalid pin register {}", pin_str));
 
         match prefix {
             "RZ" => {
                 let reg_id = (num / 10) as u8;
                 let byte_sel = (num % 10) as u8;
-                Register { id: reg_id, reg_type: RegType::B8, sub_index: byte_sel }
+                Register {
+                    id: reg_id,
+                    reg_type: RegType::B8,
+                    sub_index: byte_sel,
+                }
             }
             "RY" => {
                 let reg_id = (num / 10) as u8;
                 let half_sel = (num % 10) as u8;
-                Register { id: reg_id, reg_type: RegType::B16, sub_index: half_sel * 2 }
+                Register {
+                    id: reg_id,
+                    reg_type: RegType::B16,
+                    sub_index: half_sel * 2,
+                }
             }
             _ => {
                 let reg_id = num as u8;
-                Register { id: reg_id, reg_type: RegType::B32, sub_index: 0 }
+                Register {
+                    id: reg_id,
+                    reg_type: RegType::B32,
+                    sub_index: 0,
+                }
             }
         }
     }
-
 }
 
 fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst {
     let sub = |op: IROperand| if &op == old { new.clone() } else { op };
     match inst {
-        IRInst::Add { dest, left, right } => IRInst::Add { dest: sub(dest), left: sub(left), right: sub(right) },
-        IRInst::Sub { dest, left, right } => IRInst::Sub { dest: sub(dest), left: sub(left), right: sub(right) },
-        IRInst::Mul { dest, left, right } => IRInst::Mul { dest: sub(dest), left: sub(left), right: sub(right) },
-        IRInst::Div { dest, left, right, signed } => IRInst::Div { dest: sub(dest), left: sub(left), right: sub(right), signed },
-        IRInst::Mod { dest, left, right, signed } => IRInst::Mod { dest: sub(dest), left: sub(left), right: sub(right), signed },
-        IRInst::Shl { dest, left, right } => IRInst::Shl { dest: sub(dest), left: sub(left), right: sub(right) },
-        IRInst::Shr { dest, left, right } => IRInst::Shr { dest: sub(dest), left: sub(left), right: sub(right) },
-        IRInst::Xor { dest, left, right } => IRInst::Xor { dest: sub(dest), left: sub(left), right: sub(right) },
-        IRInst::Or  { dest, left, right } => IRInst::Or  { dest: sub(dest), left: sub(left), right: sub(right) },
-        IRInst::And { dest, left, right } => IRInst::And { dest: sub(dest), left: sub(left), right: sub(right) },
-        IRInst::Not { dest, src } => IRInst::Not { dest: sub(dest), src: sub(src) },
-        IRInst::Negate { dest, src } => IRInst::Negate { dest: sub(dest), src: sub(src) },
-        IRInst::Cpy { dest, src } => IRInst::Cpy { dest: sub(dest), src: sub(src) },
-        IRInst::Cast { dest, src, target_type, src_type } => IRInst::Cast { dest: sub(dest), src: sub(src), target_type, src_type },
-        IRInst::LoadPtr { dest, ptr_addr } => IRInst::LoadPtr { dest: sub(dest), ptr_addr: sub(ptr_addr) },
-        IRInst::StorePtr { ptr_addr, src } => IRInst::StorePtr { ptr_addr: sub(ptr_addr), src: sub(src) },
-        IRInst::AntiEqual { left, right, target } => IRInst::AntiEqual { left: sub(left), right: sub(right), target },
-        IRInst::Equal { left, right, target } => IRInst::Equal { left: sub(left), right: sub(right), target },
-        IRInst::AntiMore { left, right, target, signed } => IRInst::AntiMore { left: sub(left), right: sub(right), target, signed },
-        IRInst::AntiLess { left, right, target, signed } => IRInst::AntiLess { left: sub(left), right: sub(right), target, signed },
-        IRInst::Call { dest, name, args } => IRInst::Call { dest: dest.map(sub), name, args: args.into_iter().map(sub).collect() },
+        IRInst::Add { dest, left, right } => IRInst::Add {
+            dest: sub(dest),
+            left: sub(left),
+            right: sub(right),
+        },
+        IRInst::Sub { dest, left, right } => IRInst::Sub {
+            dest: sub(dest),
+            left: sub(left),
+            right: sub(right),
+        },
+        IRInst::Mul { dest, left, right } => IRInst::Mul {
+            dest: sub(dest),
+            left: sub(left),
+            right: sub(right),
+        },
+        IRInst::Div {
+            dest,
+            left,
+            right,
+            signed,
+        } => IRInst::Div {
+            dest: sub(dest),
+            left: sub(left),
+            right: sub(right),
+            signed,
+        },
+        IRInst::Mod {
+            dest,
+            left,
+            right,
+            signed,
+        } => IRInst::Mod {
+            dest: sub(dest),
+            left: sub(left),
+            right: sub(right),
+            signed,
+        },
+        IRInst::Shl { dest, left, right } => IRInst::Shl {
+            dest: sub(dest),
+            left: sub(left),
+            right: sub(right),
+        },
+        IRInst::Shr { dest, left, right } => IRInst::Shr {
+            dest: sub(dest),
+            left: sub(left),
+            right: sub(right),
+        },
+        IRInst::Xor { dest, left, right } => IRInst::Xor {
+            dest: sub(dest),
+            left: sub(left),
+            right: sub(right),
+        },
+        IRInst::Or { dest, left, right } => IRInst::Or {
+            dest: sub(dest),
+            left: sub(left),
+            right: sub(right),
+        },
+        IRInst::And { dest, left, right } => IRInst::And {
+            dest: sub(dest),
+            left: sub(left),
+            right: sub(right),
+        },
+        IRInst::Not { dest, src } => IRInst::Not {
+            dest: sub(dest),
+            src: sub(src),
+        },
+        IRInst::Negate { dest, src } => IRInst::Negate {
+            dest: sub(dest),
+            src: sub(src),
+        },
+        IRInst::Cpy { dest, src } => IRInst::Cpy {
+            dest: sub(dest),
+            src: sub(src),
+        },
+        IRInst::Cast {
+            dest,
+            src,
+            target_type,
+            src_type,
+        } => IRInst::Cast {
+            dest: sub(dest),
+            src: sub(src),
+            target_type,
+            src_type,
+        },
+        IRInst::LoadPtr { dest, ptr_addr } => IRInst::LoadPtr {
+            dest: sub(dest),
+            ptr_addr: sub(ptr_addr),
+        },
+        IRInst::StorePtr { ptr_addr, src } => IRInst::StorePtr {
+            ptr_addr: sub(ptr_addr),
+            src: sub(src),
+        },
+        IRInst::AntiEqual {
+            left,
+            right,
+            target,
+        } => IRInst::AntiEqual {
+            left: sub(left),
+            right: sub(right),
+            target,
+        },
+        IRInst::Equal {
+            left,
+            right,
+            target,
+        } => IRInst::Equal {
+            left: sub(left),
+            right: sub(right),
+            target,
+        },
+        IRInst::AntiMore {
+            left,
+            right,
+            target,
+            signed,
+        } => IRInst::AntiMore {
+            left: sub(left),
+            right: sub(right),
+            target,
+            signed,
+        },
+        IRInst::AntiLess {
+            left,
+            right,
+            target,
+            signed,
+        } => IRInst::AntiLess {
+            left: sub(left),
+            right: sub(right),
+            target,
+            signed,
+        },
+        IRInst::Call {
+            dest,
+            name,
+            args,
+            stack_args,
+        } => IRInst::Call {
+            dest: dest.map(|d| sub(d)),
+            name,
+            args: args.into_iter().map(|(arg, pin)| (sub(arg), pin)).collect(),
+            stack_args: stack_args.into_iter().map(|arg| sub(arg)).collect(),
+        },
         IRInst::Return(val) => IRInst::Return(val.map(sub)),
         other => other,
     }
 }
 
 impl<'a> Codegen<'a> {
-
     //Pins before cfg
     fn collect_pins(body: &[IRInst]) -> HashMap<String, Register> {
         let mut pins = HashMap::new();
         for inst in body {
-            if let IRInst::Pin {var, register} = inst {
+            if let IRInst::Pin { var, register } = inst {
                 pins.insert(var.clone(), Self::parse_pin_register(register));
             }
         }
@@ -593,22 +834,29 @@ impl<'a> Codegen<'a> {
 
     //Building basics blocks of cfg, basic block is the largest code of block that doesn't contain branching
     //For example statements bodies without branching
-    pub fn build_bbs(body: &[IRInst]) -> Vec<BasicBlock> { //basic blocks &[IRInst] is basically
+    pub fn build_bbs(body: &[IRInst]) -> Vec<BasicBlock> {
+        //basic blocks &[IRInst] is basically
         //reference to the vector of IRInst but we don't copy it we just know where it is
         let mut leaders = std::collections::BTreeSet::new(); //Vector with auto sort, plus uniqueness
         leaders.insert(0);
 
         for (idx, inst) in body.iter().enumerate() {
             match inst {
-                IRInst::Label(_) => { leaders.insert(idx); }
+                IRInst::Label(_) => {
+                    leaders.insert(idx);
+                }
 
-                IRInst::JMP(_) | IRInst::Return(_) | IRInst::AntiEqual{..} | IRInst::Equal{..} | IRInst::AntiLess{..} | IRInst::AntiMore{..} => {
+                IRInst::JMP(_)
+                | IRInst::Return(_)
+                | IRInst::AntiEqual { .. }
+                | IRInst::Equal { .. }
+                | IRInst::AntiLess { .. }
+                | IRInst::AntiMore { .. } => {
                     if idx + 1 < body.len() {
                         leaders.insert(idx + 1);
                     }
                 }
                 _ => {}
-
             }
         }
 
@@ -616,7 +864,8 @@ impl<'a> Codegen<'a> {
         indices.push(body.len());
         let mut blocks: Vec<BasicBlock> = Vec::new();
 
-        for (id, window) in indices.windows(2).enumerate() { //Exactly what it sounds like we are
+        for (id, window) in indices.windows(2).enumerate() {
+            //Exactly what it sounds like we are
             //creating a window between 2 leaders
             let start = window[0];
             let end = window[1];
@@ -625,7 +874,7 @@ impl<'a> Codegen<'a> {
 
             let label = match instructions.first() {
                 Some(IRInst::Label(lbl)) => Some(lbl.clone()),
-                _ => None
+                _ => None,
             };
 
             blocks.push(BasicBlock {
@@ -640,7 +889,6 @@ impl<'a> Codegen<'a> {
                 live_out: HashSet::new(),
                 loop_depth: 0,
             });
-
         }
         blocks
     }
@@ -650,7 +898,7 @@ impl<'a> Codegen<'a> {
 
         //Building successors and predecessors, successors are the blocks that might come after one
         //of the blocks after branching or if falling through
-        //predecessors are the blocks from which current block might have came through 
+        //predecessors are the blocks from which current block might have came through
         //whether it is bracnhing or just falling through
         for block in &self.cfg {
             if let Some(ref label_name) = block.label {
@@ -672,7 +920,10 @@ impl<'a> Codegen<'a> {
                             raw_succ.push(target_id);
                         }
                     }
-                    IRInst::AntiEqual{target, ..} | IRInst::Equal{target, ..} | IRInst::AntiLess{target, ..} | IRInst::AntiMore{target, ..} => {
+                    IRInst::AntiEqual { target, .. }
+                    | IRInst::Equal { target, .. }
+                    | IRInst::AntiLess { target, .. }
+                    | IRInst::AntiMore { target, .. } => {
                         if let Some(&target_id) = label_to_block.get(target) {
                             raw_succ.push(target_id);
                         }
@@ -687,13 +938,13 @@ impl<'a> Codegen<'a> {
                         }
                     }
                 }
-
             }
             self.cfg[i].successors = raw_succ;
         }
 
         let num_blocks = self.cfg.len();
-        for src_id in 0..num_blocks { //predecessors are easy, if block B is successors of block A,
+        for src_id in 0..num_blocks {
+            //predecessors are easy, if block B is successors of block A,
             //block A is predecessors of block B
             let succs = self.cfg[src_id].successors.clone();
 
@@ -729,7 +980,6 @@ impl<'a> Codegen<'a> {
             changed = false;
             //Looping in reverse because i don't feel like explaining
             for i in (0..self.cfg.len()).rev() {
-
                 //Computing new live_out
                 //LiveOut = Union of LiveIn[succ] for all succs
                 let mut new_live_out = HashSet::new();
@@ -737,11 +987,12 @@ impl<'a> Codegen<'a> {
                     new_live_out.extend(self.cfg[succ_id].live_in.clone());
                 }
 
-                //Computing new live_in 
+                //Computing new live_in
                 //LiveIn = UEVar[current] union (LiveOut[current] minus VarKill[current])
                 let mut new_live_in = self.cfg[i].uevar.clone();
                 for var in &new_live_out {
-                    if !self.cfg[i].varkill.contains(var) { //Minus VarKill
+                    if !self.cfg[i].varkill.contains(var) {
+                        //Minus VarKill
                         new_live_in.insert(var.clone()); //Union with LiveOut
                     }
                 }
@@ -755,9 +1006,7 @@ impl<'a> Codegen<'a> {
             }
         }
     }
-    //Any var live across a Call is never safe in a register (no callee-saved registers, and
-    //callees don't know about a caller's local pins either), so force it to the stack up front
-    //instead of letting the allocator try and then spilling it after the fact
+    //Just spill all the registers to the stack on call im just tired
     fn find_call_crossing_vars(&self) -> HashSet<IROperand> {
         let mut crossing = HashSet::new();
         for block in &self.cfg {
@@ -825,7 +1074,9 @@ impl<'a> Codegen<'a> {
     pub fn color(&mut self, graph: InterferenceGraph) -> Vec<IROperand> {
         let spill_costs = self.compute_spill_costs();
 
-        let mut active_nodes: HashSet<IROperand> = graph.adjacent.keys()
+        let mut active_nodes: HashSet<IROperand> = graph
+            .adjacent
+            .keys()
             .filter(|a| !self.allocations.contains_key(a))
             .cloned()
             .collect();
@@ -848,21 +1099,21 @@ impl<'a> Codegen<'a> {
                 //minimizes SpillCost/Degree it will be our optimistic candidate, and because we are
                 //using spill cost which is 10^depth chances of optimistic candidate of getting
                 //allocated are pretty high, but not 100%
-                None => {
-                    active_nodes
-                        .iter()
-                        .min_by(|a, b| {
-                            let degree_a = graph.get_weighted_degree(a, &active_nodes) as f64;
-                            let degree_b = graph.get_weighted_degree(b, &active_nodes) as f64;
+                None => active_nodes
+                    .iter()
+                    .min_by(|a, b| {
+                        let degree_a = graph.get_weighted_degree(a, &active_nodes) as f64;
+                        let degree_b = graph.get_weighted_degree(b, &active_nodes) as f64;
 
-                            let cost_a = spill_costs.get(a).unwrap_or(&1.0) / degree_a;
-                            let cost_b = spill_costs.get(b).unwrap_or(&1.0) / degree_b;
+                        let cost_a = spill_costs.get(a).unwrap_or(&1.0) / degree_a;
+                        let cost_b = spill_costs.get(b).unwrap_or(&1.0) / degree_b;
 
-                            cost_a.partial_cmp(&cost_b).unwrap_or(std::cmp::Ordering::Equal)
-                        })
-                        .cloned()
-                        .unwrap()
-                }
+                        cost_a
+                            .partial_cmp(&cost_b)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .cloned()
+                    .unwrap(),
             };
 
             active_nodes.remove(&chosen_node);
@@ -885,20 +1136,22 @@ impl<'a> Codegen<'a> {
                         tracker.mark(reg.id, reg.reg_type, reg.sub_index);
                     }
                 }
-
             }
             let operand_type = operand.get_type();
             if let Some((phys_reg_id, sub_index)) = tracker.find_free(operand_type) {
-                let assigned_reg = Register{
+                let assigned_reg = Register {
                     id: phys_reg_id,
                     reg_type: operand_type,
                     sub_index,
                 };
-                self.allocations.insert(operand, Location::Register(assigned_reg));
-            } else { //Spill
+                self.allocations
+                    .insert(operand, Location::Register(assigned_reg));
+            } else {
+                //Spill
                 let offset = self.frame_size;
                 self.frame_size += operand_type.get_size();
-                self.allocations.insert(operand, Location::StackOffset(offset));
+                self.allocations
+                    .insert(operand, Location::StackOffset(offset));
             }
         }
     }
@@ -913,12 +1166,15 @@ impl<'a> Codegen<'a> {
             let crossing = self.find_call_crossing_vars();
             for var in &crossing {
                 if let IROperand::Var(name) = var {
-                    if self.global_layout.pins.contains_key(name) { continue; }
+                    if self.global_layout.pins.contains_key(name) {
+                        continue;
+                    }
                 }
                 if !self.allocations.contains_key(var) {
                     let offset = self.frame_size;
                     self.frame_size += var.get_type().get_size();
-                    self.allocations.insert(var.clone(), Location::StackOffset(offset));
+                    self.allocations
+                        .insert(var.clone(), Location::StackOffset(offset));
                 }
             }
 
@@ -930,19 +1186,25 @@ impl<'a> Codegen<'a> {
             self.allocate(alloc_stack, &graph);
 
             //Check for spilled
-            let spilled: HashSet<IROperand> = self.allocations.iter()
+            let spilled: HashSet<IROperand> = self
+                .allocations
+                .iter()
                 .filter(|(_, loc)| matches!(loc, Location::StackOffset(_)))
                 .map(|(op, _)| op.clone())
                 .collect();
 
-            if spilled.is_empty() { break; } //No spilled? Nice - break
+            if spilled.is_empty() {
+                break;
+            } //No spilled? Nice - break
 
             self.rewrite_spills(&spilled);
             self.allocations.clear();
 
             passes += 1;
             if passes > 10 {
-                panic!("Codegen Error: More than 10 passes occured, there must be something wrong, can't help though");
+                panic!(
+                    "Codegen Error: More than 10 passes occured, there must be something wrong, can't help though"
+                );
             }
         }
     }
@@ -950,7 +1212,9 @@ impl<'a> Codegen<'a> {
     //Check for pin conflicts
     fn seed_pins(&mut self, graph: &InterferenceGraph) {
         for (var_name, reg) in &self.pins {
-            self.allocations.entry(IROperand::Var(var_name.clone())).or_insert(Location::Register(*reg));
+            self.allocations
+                .entry(IROperand::Var(var_name.clone()))
+                .or_insert(Location::Register(*reg));
         }
 
         for (var_name, reg) in &self.pins {
@@ -1003,7 +1267,10 @@ impl<'a> Codegen<'a> {
     }
     //Natural loop is a sequence of blocks that all have the same dominating block(header) so
     //usually loop declaration like while[true]
-    pub fn find_loops( cfg: &[BasicBlock], doms: &HashMap<usize, HashSet<usize>>) -> Vec<HashSet<usize>> {
+    pub fn find_loops(
+        cfg: &[BasicBlock],
+        doms: &HashMap<usize, HashSet<usize>>,
+    ) -> Vec<HashSet<usize>> {
         let mut loops = Vec::new();
 
         //Looking for back edges which is edge between A and B where A dominates B
@@ -1030,7 +1297,9 @@ impl<'a> Codegen<'a> {
         let mut stack = vec![latch];
 
         while let Some(node) = stack.pop() {
-            if node == header { continue; }
+            if node == header {
+                continue;
+            }
 
             if let Some(block) = cfg.iter().find(|b| b.id == node) {
                 for &pred in &block.predecessors {
@@ -1080,7 +1349,9 @@ impl<'a> Codegen<'a> {
     //And we recompute coloring for them because its a new set of registers
     //It only changes individual blocks though, doesn't change successors, predecessors etc
     fn spill_offset(&self, operand: &IROperand, spilled: &HashSet<IROperand>) -> Option<usize> {
-        if !spilled.contains(operand) { return None; }
+        if !spilled.contains(operand) {
+            return None;
+        }
         match self.allocations.get(operand) {
             Some(Location::StackOffset(off)) => Some(*off),
             _ => None,
@@ -1103,7 +1374,10 @@ impl<'a> Codegen<'a> {
                 for used in inst.uses() {
                     if let Some(off) = self.spill_offset(&used, spilled) {
                         let val = self.new_scratch();
-                        new_body.push(IRInst::LoadPtr { dest: val.clone(), ptr_addr: IROperand::FrameSlot(off) });
+                        new_body.push(IRInst::LoadPtr {
+                            dest: val.clone(),
+                            ptr_addr: IROperand::FrameSlot(off),
+                        });
                         inst = substitute_operand(inst, &used, &val);
                     }
                 }
@@ -1113,7 +1387,10 @@ impl<'a> Codegen<'a> {
                     if let Some(off) = self.spill_offset(&def, spilled) {
                         let tmp = self.new_scratch();
                         inst = substitute_operand(inst, &def, &tmp);
-                        store_backs.push(IRInst::StorePtr { ptr_addr: IROperand::FrameSlot(off), src: tmp });
+                        store_backs.push(IRInst::StorePtr {
+                            ptr_addr: IROperand::FrameSlot(off),
+                            src: tmp,
+                        });
                     }
                 }
 
@@ -1128,21 +1405,36 @@ impl<'a> Codegen<'a> {
     //Only non-leaf functions ever clobber LR (by calling something else), so only they
     //need to save/restore it - leaf functions can RET straight off the caller's LR
     fn is_leaf(&self) -> bool {
-        !self.cfg.iter().any(|b| b.body.iter().any(|i| matches!(i, IRInst::Call { .. })))
+        !self
+            .cfg
+            .iter()
+            .any(|b| b.body.iter().any(|i| matches!(i, IRInst::Call { .. })))
     }
 
-    //Actual codegen time 
-    fn lower_func(&mut self) -> Vec<AsmInst> {
+    //Actual codegen time
+    pub fn lower_func(&mut self) -> Vec<AsmInst> {
         let mut compiled = Vec::new();
         let leaf = self.is_leaf();
 
         if self.frame_size > 0 {
-            compiled.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(0)));
-            compiled.push(AsmInst::SprSub(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(self.frame_size as i16)));
+            compiled.push(AsmInst::SprLea(
+                reg_op(rx30_reg()),
+                Spr::SP,
+                AsmOperand::Imm16(0),
+            ));
+            compiled.push(AsmInst::SprSub(
+                reg_op(rx30_reg()),
+                Spr::SP,
+                AsmOperand::Imm16(self.frame_size as i16),
+            ));
         }
 
         if !leaf {
-            compiled.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::LR, AsmOperand::Imm16(0)));
+            compiled.push(AsmInst::SprLea(
+                reg_op(rx30_reg()),
+                Spr::LR,
+                AsmOperand::Imm16(0),
+            ));
             compiled.push(AsmInst::Push(reg_op(rx30_reg())));
         }
 
@@ -1156,9 +1448,13 @@ impl<'a> Codegen<'a> {
 
     //Place the globals before the stack
     fn legalize_globals(body: &[IRInst], layout: &GlobalLayout) -> Vec<IRInst> {
-        let mut next_temp = body.iter()
+        let mut next_temp = body
+            .iter()
             .flat_map(|i| i.uses().into_iter().chain(i.kills()))
-            .filter_map(|op| match op { IROperand::Temp(n) => Some(n + 1), _ => None })
+            .filter_map(|op| match op {
+                IROperand::Temp(n) => Some(n + 1),
+                _ => None,
+            })
             .max()
             .unwrap_or(0);
 
@@ -1172,7 +1468,10 @@ impl<'a> Codegen<'a> {
                     if let Some(&off) = layout.offsets.get(name) {
                         let tmp = IROperand::Temp(next_temp);
                         next_temp += 1;
-                        new_body.push(IRInst::LoadPtr { dest: tmp.clone(), ptr_addr: IROperand::GlobalSlot(off) });
+                        new_body.push(IRInst::LoadPtr {
+                            dest: tmp.clone(),
+                            ptr_addr: IROperand::GlobalSlot(off),
+                        });
                         inst = substitute_operand(inst, &used, &tmp);
                     }
                 }
@@ -1185,7 +1484,10 @@ impl<'a> Codegen<'a> {
                         let tmp = IROperand::Temp(next_temp);
                         next_temp += 1;
                         inst = substitute_operand(inst, &def, &tmp);
-                        store_backs.push(IRInst::StorePtr { ptr_addr: IROperand::GlobalSlot(off), src: tmp });
+                        store_backs.push(IRInst::StorePtr {
+                            ptr_addr: IROperand::GlobalSlot(off),
+                            src: tmp,
+                        });
                     }
                 }
             }
@@ -1208,7 +1510,6 @@ impl<'a> Codegen<'a> {
             IROperand::FrameSlot(_) => unreachable!("Only valid as ptr_addr"),
             IROperand::GlobalSlot(_) => unreachable!("Only valid as ptr_addr"),
             IROperand::IncomingArgSlot(_) => unreachable!("Only valid as ptr_addr"),
-
         }
     }
 
@@ -1217,10 +1518,15 @@ impl<'a> Codegen<'a> {
     //So we can load into stack, pointer, or raw address that function resolves that
     fn resolve_addr(&self, ptr_addr: &IROperand, out: &mut Vec<AsmInst>) -> (AddrBase, i32, bool) {
         match ptr_addr {
-            IROperand::FrameSlot(off)  => (AddrBase::Spr(Spr::SP), *off as i32, false),
+            IROperand::FrameSlot(off) => (AddrBase::Spr(Spr::SP), *off as i32, false),
             IROperand::GlobalSlot(off) => (AddrBase::Spr(Spr::GP), *off as i32, false),
-            IROperand::IncomingArgSlot(idx) => (AddrBase::Spr(Spr::SP), (self.frame_size + idx * 4) as i32, false),
-            _ if is_const(ptr_addr) => {  //If its true, it means that rx31 got corrupted or sum, and we gotta clean in up
+            IROperand::IncomingArgSlot(idx) => (
+                AddrBase::Spr(Spr::SP),
+                (self.frame_size + idx * 4) as i32,
+                false,
+            ),
+            _ if is_const(ptr_addr) => {
+                //If its true, it means that rx31 got corrupted or sum, and we gotta clean in up
                 load_const(rx30_reg(), const_val(ptr_addr), out);
                 (AddrBase::Reg(rx30()), 0, true)
             }
@@ -1232,9 +1538,21 @@ impl<'a> Codegen<'a> {
         let mut out = Vec::new();
 
         if layout.total_size > 0 {
-            out.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(0)));
-            out.push(AsmInst::SprSub(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(layout.total_size as i16)));
-            out.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(0)));
+            out.push(AsmInst::SprLea(
+                reg_op(rx30_reg()),
+                Spr::SP,
+                AsmOperand::Imm16(0),
+            ));
+            out.push(AsmInst::SprSub(
+                reg_op(rx30_reg()),
+                Spr::SP,
+                AsmOperand::Imm16(layout.total_size as i16),
+            ));
+            out.push(AsmInst::SprLea(
+                reg_op(rx30_reg()),
+                Spr::SP,
+                AsmOperand::Imm16(0),
+            ));
             out.push(AsmInst::SprSet(reg_op(rx30_reg()), Spr::GP));
         }
 
@@ -1244,7 +1562,11 @@ impl<'a> Codegen<'a> {
                     load_const(*reg, *v, &mut out);
                 } else if let Some(&off) = layout.offsets.get(name) {
                     load_const(rx30_reg(), *v, &mut out);
-                    out.push(AsmInst::SprStr(reg_op(rx30_reg()), Spr::GP, AsmOperand::Imm16(off as i16)));
+                    out.push(AsmInst::SprStr(
+                        reg_op(rx30_reg()),
+                        Spr::GP,
+                        AsmOperand::Imm16(off as i16),
+                    ));
                 }
             }
         }
@@ -1252,9 +1574,14 @@ impl<'a> Codegen<'a> {
         out
     }
 
-
-    //Lowers further, low load and store ptr 
-    fn lower_mem(&self, dest_or_src: &IROperand, ptr_addr: &IROperand, is_load: bool, out: &mut Vec<AsmInst>) {
+    //Lowers further, low load and store ptr
+    fn lower_mem(
+        &self,
+        dest_or_src: &IROperand,
+        ptr_addr: &IROperand,
+        is_load: bool,
+        out: &mut Vec<AsmInst>,
+    ) {
         let (base, off, used_rx30) = self.resolve_addr(ptr_addr, out);
 
         let value_operand = if is_load {
@@ -1279,23 +1606,35 @@ impl<'a> Codegen<'a> {
             }),
         }
 
-        if used_rx30 { out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0))); }
+        if used_rx30 {
+            out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));
+        }
     }
 
     //R-type, so 2 operand like xor, or etc, its rx0 = rx0 OP (rx1 + imm10)
-    fn lower_rtype_alu(&mut self, dest: &IROperand, left: &IROperand, right: &IROperand,
-                        make: fn(AsmOperand, AsmOperand, AsmOperand) -> AsmInst, out: &mut Vec<AsmInst>) {
+    fn lower_rtype_alu(
+        &mut self,
+        dest: &IROperand,
+        left: &IROperand,
+        right: &IROperand,
+        make: fn(AsmOperand, AsmOperand, AsmOperand) -> AsmInst,
+        out: &mut Vec<AsmInst>,
+    ) {
         let dest_asm = self.operand_to_asm(dest);
         let left_asm = self.operand_to_asm(left);
 
         if dest_asm != left_asm {
-            out.push(AsmInst::Mov(dest_asm.clone(), left_asm, AsmOperand::Imm10(0)));
+            out.push(AsmInst::Mov(
+                dest_asm.clone(),
+                left_asm,
+                AsmOperand::Imm10(0),
+            ));
         }
 
         let mut used_rx31 = false;
         let (rx1, imm10) = if is_const(right) && fits(const_val(right) as i64, 10, false) {
             (rx31(), AsmOperand::Imm10(const_val(right) as i16)) //As long as fits into imm10, we
-            //are good
+        //are good
         } else if is_const(right) {
             load_const(rx30_reg(), const_val(right), out); //But if it doesn't use rx30
             used_rx31 = true;
@@ -1306,7 +1645,7 @@ impl<'a> Codegen<'a> {
 
         out.push(make(dest_asm, rx1, imm10));
 
-        if used_rx31 { 
+        if used_rx31 {
             out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
         }
     }
@@ -1314,17 +1653,22 @@ impl<'a> Codegen<'a> {
     fn fits_imm2(val: i64) -> Option<i8> {
         match val {
             -1 => Some(0b11),
-            0  => Some(0b00),
-            1  => Some(0b01),
-            2  => Some(0b10),
-            _  => None,
+            0 => Some(0b00),
+            1 => Some(0b01),
+            2 => Some(0b10),
+            _ => None,
         }
     }
 
     //B-type 3 operand: mul, add, sub
-    fn lower_btype_alu(&mut self, dest: &IROperand, left: &IROperand, right: &IROperand,
-                        make: fn(AsmOperand, AsmOperand, AsmOperand, AsmOperand) -> AsmInst, out: &mut Vec<AsmInst>) {
-
+    fn lower_btype_alu(
+        &mut self,
+        dest: &IROperand,
+        left: &IROperand,
+        right: &IROperand,
+        make: fn(AsmOperand, AsmOperand, AsmOperand, AsmOperand) -> AsmInst,
+        out: &mut Vec<AsmInst>,
+    ) {
         let (l, left_used_rx30) = if is_const(left) && const_val(left) == 0 {
             (rx31(), false)
         } else if is_const(left) {
@@ -1336,14 +1680,23 @@ impl<'a> Codegen<'a> {
 
         //Again imm2 is purely for "for" loops
         if is_const(right) {
-            if let Some(imm2) = fits_imm2(const_val(right) as i64) {
-                out.push(make(self.operand_to_asm(dest), l, rx31(), AsmOperand::Imm2(imm2)));
+            if let Some(imm2) = Self::fits_imm2(const_val(right) as i64) {
+                out.push(make(
+                    self.operand_to_asm(dest),
+                    l,
+                    rx31(),
+                    AsmOperand::Imm2(imm2),
+                ));
                 return;
             }
         }
 
         let (r, used_rx31) = if is_const(right) {
-            let target = if left_used_rx30 { rx31_reg() } else { rx30_reg() };
+            let target = if left_used_rx30 {
+                rx31_reg()
+            } else {
+                rx30_reg()
+            };
             load_const(target, const_val(right), out);
             (reg_op(target), left_used_rx30)
         } else {
@@ -1397,22 +1750,31 @@ impl<'a> Codegen<'a> {
     }
 
     fn cast_const(val: i32, target_type: &Type) -> i32 {
-        let bits = type_bits(target_type);
-        if bits == 32 { return val; }
+        let bits = Self::type_bits(target_type);
+        if bits == 32 {
+            return val;
+        }
         let mask = (1u32 << bits) - 1;
         let truncated = (val as u32) & mask;
-        if is_signed(target_type) && (truncated & (1 << (bits - 1))) != 0 {
+        if Self::is_signed(target_type) && (truncated & (1 << (bits - 1))) != 0 {
             (truncated | !mask) as i32
         } else {
             truncated as i32
         }
     }
 
-    fn lower_cast(&mut self, dest: &IROperand, src: &IROperand, target_type: &Type, src_type: &Type, out: &mut Vec<AsmInst>) {
+    fn lower_cast(
+        &mut self,
+        dest: &IROperand,
+        src: &IROperand,
+        target_type: &Type,
+        src_type: &Type,
+        out: &mut Vec<AsmInst>,
+    ) {
         let dest_asm = self.operand_to_asm(dest);
 
         if is_const(src) {
-            let casted = cast_const(const_val(src), target_type);
+            let casted = Self::cast_const(const_val(src), target_type);
             if let AsmOperand::Reg(Reg::TheRealOne(reg)) = dest_asm {
                 load_const(reg, casted, out);
             }
@@ -1420,16 +1782,24 @@ impl<'a> Codegen<'a> {
         }
 
         let src_asm = self.operand_to_asm(src);
-        let src_bits = type_bits(src_type);
-        let target_bits = type_bits(target_type);
+        let src_bits = Self::type_bits(src_type);
+        let target_bits = Self::type_bits(target_type);
 
-        if is_signed(src_type) && target_bits > src_bits {
+        if Self::is_signed(src_type) && target_bits > src_bits {
             //widening the signed is the only case where we need actual work
             if dest_asm != src_asm {
-                out.push(AsmInst::Mov(dest_asm.clone(), src_asm, AsmOperand::Imm10(0)));
+                out.push(AsmInst::Mov(
+                    dest_asm.clone(),
+                    src_asm,
+                    AsmOperand::Imm10(0),
+                ));
             }
             let shift = (32 - src_bits) as i16;
-            out.push(AsmInst::Shl(dest_asm.clone(), rx31(), AsmOperand::Imm10(shift)));
+            out.push(AsmInst::Shl(
+                dest_asm.clone(),
+                rx31(),
+                AsmOperand::Imm10(shift),
+            ));
             out.push(AsmInst::Sra(dest_asm, rx31(), AsmOperand::Imm10(shift)));
         } else {
             //Any other operation is just move, because mov automatically zero extends,
@@ -1443,21 +1813,37 @@ impl<'a> Codegen<'a> {
             IRInst::Label(lab) => out.push(AsmInst::Label(format!("{}", lab))),
             IRInst::JMP(target) => out.push(AsmInst::Jmp(target.clone())),
 
-            IRInst::LoadPtr  { dest, ptr_addr } => self.lower_mem(dest, ptr_addr, true, out),
+            IRInst::LoadPtr { dest, ptr_addr } => self.lower_mem(dest, ptr_addr, true, out),
             IRInst::StorePtr { ptr_addr, src } => self.lower_mem(src, ptr_addr, false, out),
 
-            IRInst::Add {dest, left, right} => self.lower_btype_alu(dest, left, right, AsmInst::Add, out),
-            IRInst::Sub {dest, left, right} => self.lower_btype_alu(dest, left, right, AsmInst::Sub, out),
-            IRInst::Mul {dest, left, right} => self.lower_btype_alu(dest, left, right, AsmInst::Mul, out),
+            IRInst::Add { dest, left, right } => {
+                self.lower_btype_alu(dest, left, right, AsmInst::Add, out)
+            }
+            IRInst::Sub { dest, left, right } => {
+                self.lower_btype_alu(dest, left, right, AsmInst::Sub, out)
+            }
+            IRInst::Mul { dest, left, right } => {
+                self.lower_btype_alu(dest, left, right, AsmInst::Mul, out)
+            }
 
-            IRInst::Xor {dest, left, right} => self.lower_rtype_alu(dest, left, right, AsmInst::Xor, out),
-            IRInst::Or  {dest, left, right} => self.lower_rtype_alu(dest, left, right, AsmInst::Or,  out),
-            IRInst::And {dest, left, right} => self.lower_rtype_alu(dest, left, right, AsmInst::And, out),
-            IRInst::Shl {dest, left, right} => self.lower_rtype_alu(dest, left, right, AsmInst::Shl, out),
-            IRInst::Shr {dest, left, right} => self.lower_rtype_alu(dest, left, right, AsmInst::Shr, out),
+            IRInst::Xor { dest, left, right } => {
+                self.lower_rtype_alu(dest, left, right, AsmInst::Xor, out)
+            }
+            IRInst::Or { dest, left, right } => {
+                self.lower_rtype_alu(dest, left, right, AsmInst::Or, out)
+            }
+            IRInst::And { dest, left, right } => {
+                self.lower_rtype_alu(dest, left, right, AsmInst::And, out)
+            }
+            IRInst::Shl { dest, left, right } => {
+                self.lower_rtype_alu(dest, left, right, AsmInst::Shl, out)
+            }
+            IRInst::Shr { dest, left, right } => {
+                self.lower_rtype_alu(dest, left, right, AsmInst::Shr, out)
+            }
 
             //Just code those 3 without functions its gonna be easier
-            IRInst::Not {dest, src} => {
+            IRInst::Not { dest, src } => {
                 let dest_asm = self.operand_to_asm(dest);
 
                 //They are pretty much the same, so we first handle constants
@@ -1466,10 +1852,16 @@ impl<'a> Codegen<'a> {
                     if let AsmOperand::Reg(Reg::TheRealOne(reg)) = dest_asm {
                         load_const(reg, !val, out);
                     }
-                } else { //that variables
+                } else {
+                    //that variables
                     let src_asm = self.operand_to_asm(src);
-                    if dest != src { //And then dest, src
-                        out.push(AsmInst::Mov(dest_asm.clone(), src_asm, AsmOperand::Imm10(0)));
+                    if dest != src {
+                        //And then dest, src
+                        out.push(AsmInst::Mov(
+                            dest_asm.clone(),
+                            src_asm,
+                            AsmOperand::Imm10(0),
+                        ));
                         out.push(AsmInst::Not(dest_asm));
                     } else {
                         out.push(AsmInst::Not(src_asm));
@@ -1477,7 +1869,7 @@ impl<'a> Codegen<'a> {
                 }
             }
 
-            IRInst::Negate {dest, src} => {
+            IRInst::Negate { dest, src } => {
                 let dest_asm = self.operand_to_asm(dest);
 
                 if is_const(src) {
@@ -1491,7 +1883,7 @@ impl<'a> Codegen<'a> {
                 }
             }
 
-            IRInst::Cpy {dest, src} => {
+            IRInst::Cpy { dest, src } => {
                 let dest_asm = self.operand_to_asm(dest);
 
                 if is_const(src) {
@@ -1507,17 +1899,33 @@ impl<'a> Codegen<'a> {
                 }
             }
 
-            IRInst::Cast { dest, src, target_type, src_type } => self.lower_cast(dest, src, target_type, src_type, out),
+            IRInst::Cast {
+                dest,
+                src,
+                target_type,
+                src_type,
+            } => self.lower_cast(dest, src, target_type, src_type, out),
 
-            IRInst::RegFieldRead { dest, struct_var, byte_offset, byte_size } => {
+            IRInst::RegFieldRead {
+                dest,
+                struct_var,
+                byte_offset,
+                byte_size,
+            } => {
                 let struct_asm = self.operand_to_asm(struct_var);
                 let field_asm = match struct_asm {
                     AsmOperand::Reg(Reg::TheRealOne(reg)) => reg_op(Register {
                         id: reg.id,
-                        reg_type: match byte_size { 1 => RegType::B8, 2 => RegType::B16, _ => RegType::B32 },
+                        reg_type: match byte_size {
+                            1 => RegType::B8,
+                            2 => RegType::B16,
+                            _ => RegType::B32,
+                        },
                         sub_index: reg.sub_index + *byte_offset as u8,
                     }),
-                    _ => panic!("Codegen Error: regarch field access requires a register-resident struct"),
+                    _ => panic!(
+                        "Codegen Error: regarch field access requires a register-resident struct"
+                    ),
                 };
                 let dest_asm = self.operand_to_asm(dest);
                 if dest_asm != field_asm {
@@ -1525,15 +1933,26 @@ impl<'a> Codegen<'a> {
                 }
             }
 
-            IRInst::RegFieldWrite { src, struct_var, byte_offset, byte_size } => {
+            IRInst::RegFieldWrite {
+                src,
+                struct_var,
+                byte_offset,
+                byte_size,
+            } => {
                 let struct_asm = self.operand_to_asm(struct_var);
                 let field_asm = match struct_asm {
                     AsmOperand::Reg(Reg::TheRealOne(reg)) => reg_op(Register {
                         id: reg.id,
-                        reg_type: match byte_size { 1 => RegType::B8, 2 => RegType::B16, _ => RegType::B32 },
+                        reg_type: match byte_size {
+                            1 => RegType::B8,
+                            2 => RegType::B16,
+                            _ => RegType::B32,
+                        },
                         sub_index: reg.sub_index + *byte_offset as u8,
                     }),
-                    _ => panic!("Codegen Error: regarch field access requires a register-resident struct"),
+                    _ => panic!(
+                        "Codegen Error: regarch field access requires a register-resident struct"
+                    ),
                 };
                 if is_const(src) {
                     if let AsmOperand::Reg(Reg::TheRealOne(reg)) = field_asm {
@@ -1547,28 +1966,46 @@ impl<'a> Codegen<'a> {
                 }
             }
 
-            IRInst::AntiEqual {left, right, target} => {
+            IRInst::AntiEqual {
+                left,
+                right,
+                target,
+            } => {
                 self.lower_cmp(left, right, out);
                 out.push(AsmInst::Beq(target.clone()));
             }
 
-            IRInst::Equal {left, right, target} => {
+            IRInst::Equal {
+                left,
+                right,
+                target,
+            } => {
                 self.lower_cmp(left, right, out);
                 out.push(AsmInst::Bne(target.clone()));
             }
 
-            IRInst::AntiMore {left, right, target, signed} => {
+            IRInst::AntiMore {
+                left,
+                right,
+                target,
+                signed,
+            } => {
                 self.lower_cmp(left, right, out);
-                if signed {
+                if *signed {
                     out.push(AsmInst::Bgs(target.clone()));
-                } else{
+                } else {
                     out.push(AsmInst::Bgu(target.clone()));
                 }
             }
 
-            IRInst::AntiLess {left, right, target, signed} => {
+            IRInst::AntiLess {
+                left,
+                right,
+                target,
+                signed,
+            } => {
                 self.lower_cmp(left, right, out);
-                if signed {
+                if *signed {
                     out.push(AsmInst::Bss(target.clone()));
                 } else {
                     out.push(AsmInst::Bsu(target.clone()));
@@ -1577,18 +2014,24 @@ impl<'a> Codegen<'a> {
 
             IRInst::InlineAsm(asm) => {
                 for line in asm {
-                    out.push(AsmInst::Inline(line));
+                    out.push(AsmInst::Inline(line.to_string()));
                 }
             }
 
-            IRInst::Div { .. } | IRInst::Mod { .. } => panic!("Codegen Error: division and modulo aren't implemented yet"),
+            IRInst::Div { .. } | IRInst::Mod { .. } => {
+                panic!("Codegen Error: division and modulo aren't implemented yet")
+            }
 
             IRInst::Pin { .. } => {}
 
-
             //So first 4 arguments go into 4 first registers depending on their size, rest are
             //spilled on the stack
-            IRInst::Call { dest, name, args, stack_args } => {
+            IRInst::Call {
+                dest,
+                name,
+                args,
+                stack_args,
+            } => {
                 for (arg, reg_str) in args {
                     let target_reg = Self::parse_pin_register(reg_str);
                     let target_asm = reg_op(target_reg);
@@ -1614,8 +2057,16 @@ impl<'a> Codegen<'a> {
                 out.push(AsmInst::Call(name.clone()));
 
                 if !stack_args.is_empty() {
-                    out.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(0)));
-                    out.push(AsmInst::SprAdd(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16((stack_args.len() * 4) as i16)));
+                    out.push(AsmInst::SprLea(
+                        reg_op(rx30_reg()),
+                        Spr::SP,
+                        AsmOperand::Imm16(0),
+                    ));
+                    out.push(AsmInst::SprAdd(
+                        reg_op(rx30_reg()),
+                        Spr::SP,
+                        AsmOperand::Imm16((stack_args.len() * 4) as i16),
+                    ));
                 }
 
                 if let Some(dest) = dest {
@@ -1646,8 +2097,16 @@ impl<'a> Codegen<'a> {
                 }
 
                 if self.frame_size > 0 {
-                    out.push(AsmInst::SprLea(reg_op(rx31_reg()), Spr::SP, AsmOperand::Imm16(0)));
-                    out.push(AsmInst::SprAdd(reg_op(rx31_reg()), Spr::SP, AsmOperand::Imm16(self.frame_size as i16)));
+                    out.push(AsmInst::SprLea(
+                        reg_op(rx31_reg()),
+                        Spr::SP,
+                        AsmOperand::Imm16(0),
+                    ));
+                    out.push(AsmInst::SprAdd(
+                        reg_op(rx31_reg()),
+                        Spr::SP,
+                        AsmOperand::Imm16(self.frame_size as i16),
+                    ));
                 }
 
                 out.push(AsmInst::Ret);

@@ -16,7 +16,7 @@ pub enum IROperand {
     IncomingArgSlot(usize),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IRInst {
     Add {
         dest: IROperand,
@@ -99,7 +99,8 @@ pub enum IRInst {
         src: IROperand,
     },
 
-    RegFieldRead { //Fields of regarches are accessed using sub-registers, even though IR doesn't
+    RegFieldRead {
+        //Fields of regarches are accessed using sub-registers, even though IR doesn't
         //know about it
         //Register fragmentation comes into play again
         dest: IROperand,
@@ -427,7 +428,7 @@ impl IR {
             Expr::Binary { left, .. } => self.infer_type(left),
             Expr::Unary { expr, .. } => self.infer_type(expr),
             Expr::Cast { target_type, .. } => target_type.clone(),
-            Expr::Ref {..} => panic!("Invalid reference"),
+            Expr::Ref { .. } => panic!("Invalid reference"),
             _ => panic!("Error expression in infer_type: {:?}", expr),
         }
     }
@@ -634,15 +635,29 @@ impl IR {
                         if let Type::Struct(struct_name) = self.infer_type(base) {
                             if self.structs[&struct_name].is_reg {
                                 let offset = self.get_field_offset(&struct_name, field);
-                                let field_ty = self.structs[&struct_name].fields.iter().find(|f| &f.name == field).unwrap().ty.clone();
+                                let field_ty = self.structs[&struct_name]
+                                    .fields
+                                    .iter()
+                                    .find(|f| &f.name == field)
+                                    .unwrap()
+                                    .ty
+                                    .clone();
                                 let size = self.get_type_size(&field_ty);
                                 let struct_var = self.lower_lvalue(base);
-                                self.emit(IRInst::RegFieldWrite { struct_var, byte_offset: offset, byte_size: size, src: r_op.clone() });
+                                self.emit(IRInst::RegFieldWrite {
+                                    struct_var,
+                                    byte_offset: offset,
+                                    byte_size: size,
+                                    src: r_op.clone(),
+                                });
                                 return r_op;
                             }
                         }
                         let ptr_op = self.lower_lvalue(lhs);
-                        self.emit(IRInst::StorePtr { ptr_addr: ptr_op, src: r_op.clone() });
+                        self.emit(IRInst::StorePtr {
+                            ptr_addr: ptr_op,
+                            src: r_op.clone(),
+                        });
                         r_op
                     }
                     _ => {
@@ -719,17 +734,31 @@ impl IR {
                 if let Type::Struct(struct_name) = self.infer_type(base) {
                     if self.structs[&struct_name].is_reg {
                         let offset = self.get_field_offset(&struct_name, field);
-                        let field_ty = self.structs[&struct_name].fields.iter().find(|f| &f.name == field).unwrap().ty.clone();
+                        let field_ty = self.structs[&struct_name]
+                            .fields
+                            .iter()
+                            .find(|f| &f.name == field)
+                            .unwrap()
+                            .ty
+                            .clone();
                         let size = self.get_type_size(&field_ty);
                         let struct_var = self.lower_lvalue(base);
                         let dest = self.new_temp();
-                        self.emit(IRInst::RegFieldRead { dest: dest.clone(), struct_var, byte_offset: offset, byte_size: size });
+                        self.emit(IRInst::RegFieldRead {
+                            dest: dest.clone(),
+                            struct_var,
+                            byte_offset: offset,
+                            byte_size: size,
+                        });
                         return dest;
                     }
                 }
                 let addr = self.lower_lvalue(expr);
                 let dest = self.new_temp();
-                self.emit(IRInst::LoadPtr { dest: dest.clone(), ptr_addr: addr });
+                self.emit(IRInst::LoadPtr {
+                    dest: dest.clone(),
+                    ptr_addr: addr,
+                });
                 dest
             }
             _ => panic!("Unsupported expression format"),
@@ -950,7 +979,10 @@ impl IR {
 
         IRFunction {
             name: func.name.clone(),
-            params: param_names.into_iter().zip(param_types.into_iter()).collect(),
+            params: param_names
+                .into_iter()
+                .zip(param_types.into_iter())
+                .collect(),
             body: self.insts_buffer.clone(),
         }
     }

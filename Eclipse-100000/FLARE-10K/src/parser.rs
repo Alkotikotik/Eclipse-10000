@@ -65,7 +65,7 @@ pub enum Stmt {
     Expr(Expr), //Assigments or function calls
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     U8,
     U16,

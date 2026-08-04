@@ -1,3 +1,11 @@
 func main() {
-    i32 a = 256;
+
+    u32 x = 5 + 10;
+    #rx5 u32 y = x + 5;
+    #rx6 u32 ptr = 4096;
+
+    inline [
+        SPSET rx6
+        PUSH rx5
+    outline];
 }
