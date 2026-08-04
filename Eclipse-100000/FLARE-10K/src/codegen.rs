@@ -6,6 +6,7 @@ use crate::IR3AC::{IRFunction, IRInst, IROperand, align_to, get_type_align, get_
 use crate::parser::{Expr, StructDef, Type};
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 
 pub const REGS_BYTES: usize = 120; //rx31, rx30 is scratchpad/0
 
@@ -204,6 +205,45 @@ impl RegType {
 impl IROperand {
     pub fn is_var(&self) -> bool {
         matches!(self, IROperand::Var(_) | IROperand::Temp(_))
+    }
+
+    pub fn get_type(&self) -> RegType {
+        RegType::B32
+    }
+}
+
+//Just formatting
+impl fmt::Display for AsmOperand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AsmOperand::Reg(r) => write!(f, "{}", r),
+            AsmOperand::Imm26(val)
+            | AsmOperand::Imm18(val) => write!(f, "{}", val),
+            AsmOperand::Imm16(val)
+            | AsmOperand::Imm10(val) => write!(f, "{}", val),
+            AsmOperand::Imm2(val) => write!(f, "{}", val),
+            AsmOperand::Label(lbl) => write!(f, "{}", lbl),
+        }
+    }
+}
+
+impl fmt::Display for Register {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let prefix = match self.reg_type {
+            RegType::B8 => "rz",
+            RegType::B16 => "ry",
+            RegType::B32 => "rx",
+        };
+        write!(f, "{}{}", prefix, self.id)
+    }
+}
+
+impl fmt::Display for Reg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Reg::TheRealOne(r) => write!(f, "{}", r),
+            &Reg::Virtual(_, _) => unreachable!(),
+        }
     }
 }
 
@@ -1348,23 +1388,26 @@ impl<'a> Codegen<'a> {
     //the IR because we need to add LDR, STR between operation
     //And we recompute coloring for them because its a new set of registers
     //It only changes individual blocks though, doesn't change successors, predecessors etc
-    fn spill_offset(&self, operand: &IROperand, spilled: &HashSet<IROperand>) -> Option<usize> {
+    fn spill_offset(allocations: &HashMap<IROperand, Location>, operand: &IROperand, spilled: &HashSet<IROperand>) -> Option<usize> {
         if !spilled.contains(operand) {
             return None;
         }
-        match self.allocations.get(operand) {
+        match allocations.get(operand) {
             Some(Location::StackOffset(off)) => Some(*off),
             _ => None,
         }
     }
 
-    fn new_scratch(&mut self) -> IROperand {
-        let t = IROperand::Temp(self.next_temp);
-        self.next_temp += 1;
+    fn new_scratch(next_temp: &mut usize) -> IROperand {
+        let t = IROperand::Temp(*next_temp);
+        *next_temp += 1;
         t
     }
 
     fn rewrite_spills(&mut self, spilled: &HashSet<IROperand>) {
+        let allocations = &self.allocations;
+        let next_temp = &mut self.next_temp;
+
         for block in &mut self.cfg {
             let mut new_body = Vec::new();
 
@@ -1372,8 +1415,8 @@ impl<'a> Codegen<'a> {
                 let mut inst = inst.clone();
 
                 for used in inst.uses() {
-                    if let Some(off) = self.spill_offset(&used, spilled) {
-                        let val = self.new_scratch();
+                    if let Some(off) = Self::spill_offset(allocations, &used, spilled) {
+                        let val = Self::new_scratch(next_temp);
                         new_body.push(IRInst::LoadPtr {
                             dest: val.clone(),
                             ptr_addr: IROperand::FrameSlot(off),
@@ -1384,8 +1427,8 @@ impl<'a> Codegen<'a> {
 
                 let mut store_backs = Vec::new();
                 for def in inst.kills() {
-                    if let Some(off) = self.spill_offset(&def, spilled) {
-                        let tmp = self.new_scratch();
+                    if let Some(off) = Self::spill_offset(allocations, &def, spilled) {
+                        let tmp = Self::new_scratch(next_temp);
                         inst = substitute_operand(inst, &def, &tmp);
                         store_backs.push(IRInst::StorePtr {
                             ptr_addr: IROperand::FrameSlot(off),
@@ -1438,7 +1481,8 @@ impl<'a> Codegen<'a> {
             compiled.push(AsmInst::Push(reg_op(rx30_reg())));
         }
 
-        for block in &self.cfg {
+        let blocks = self.cfg.clone();
+        for block in &blocks {
             for inst in &block.body {
                 self.lower_inst(inst, &mut compiled);
             }
@@ -1992,9 +2036,9 @@ impl<'a> Codegen<'a> {
             } => {
                 self.lower_cmp(left, right, out);
                 if *signed {
-                    out.push(AsmInst::Bgs(target.clone()));
+                    out.push(AsmInst::Bss(target.clone()));
                 } else {
-                    out.push(AsmInst::Bgu(target.clone()));
+                    out.push(AsmInst::Bsu(target.clone()));
                 }
             }
 
@@ -2006,9 +2050,9 @@ impl<'a> Codegen<'a> {
             } => {
                 self.lower_cmp(left, right, out);
                 if *signed {
-                    out.push(AsmInst::Bss(target.clone()));
+                    out.push(AsmInst::Bgs(target.clone()));
                 } else {
-                    out.push(AsmInst::Bsu(target.clone()));
+                    out.push(AsmInst::Bgu(target.clone()));
                 }
             }
 

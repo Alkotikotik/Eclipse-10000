@@ -1,0 +1,24 @@
+XOR [rx31, rx31]
+XOR [rx30, rx30]
+
+~main:
+    LOAD rx11 <- 4096
+    LOAD rx0 <- 0
+
+~Lab_for_start_0:
+    LOAD rx30 <- 100
+    CMP rx0 <- rx30
+    BSU -> ~Lab_for_end_1
+    ADD rx1 <- [rx2, rx1]
+    MOV rx10 <- rx1
+    MOV rx1 <- rx2
+    MOV rx2 <- rx10
+    XOR [rx30, rx30]
+    LOAD rx30 <- 4
+    SUB rx3 <- [rx11, rx30]
+    MOV rx11 <- rx3
+    STR rx10 -> rx11
+    ADD rx0 <- [rx0, rx31 1]
+    JMP -> ~Lab_for_start_0
+
+~Lab_for_end_1:

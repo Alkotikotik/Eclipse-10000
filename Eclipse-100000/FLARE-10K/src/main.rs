@@ -47,16 +47,8 @@ fn main() {
     println!("Generating Assembly Instructions...");
 
     let mut ast_structs = HashMap::new();
-    for stmt in &ast {
-        if let parser::Expr::StructDef { name, fields } = stmt {
-            ast_structs.insert(
-                name.clone(),
-                parser::StructDef {
-                    name: name.clone(),
-                    fields: fields.clone(),
-                },
-            );
-        }
+    for s in &ast.structs {
+        ast_structs.insert(s.name.clone(), s.clone());
     }
 
     let global_layout = GlobalLayout::build(&ir_program.globals, &ast_structs);

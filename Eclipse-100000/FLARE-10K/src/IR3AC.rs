@@ -913,7 +913,7 @@ impl IR {
         self.reset_temp();
         self.current_return_var = func.return_name.clone();
 
-        self.emit(IRInst::Label(func.name.clone()));
+        self.emit(IRInst::Label(format!("~{}", func.name)));
 
         let mut param_names = Vec::new();
         let mut param_types = Vec::new();

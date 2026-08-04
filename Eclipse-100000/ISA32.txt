@@ -82,14 +82,14 @@ CMP:
 110000 : CMP rx0 rx1
 
 Unsigned branching
-111110 : BEQ imm26 //Likely ~Label
+110001 : BEQ imm26 //Likely ~Label
 111100 : BNE imm26
-110001 : BGU imm26
-110011 : BSU imm26
+110011 : BGU imm26
+110100 : BSU imm26
 
 Signed branching
 110101 : BGS imm26
-111010 : BSS imm26
+110110 : BSS imm26
 
 Jumps & Subroutines
 111111 : JMP imm26        // Unconditional Jump to imm26 address/label

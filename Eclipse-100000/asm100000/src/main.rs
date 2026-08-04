@@ -130,7 +130,7 @@ fn main() -> io::Result<()> {
             .replace("]", " ")
             .replace(",", " ")
             .replace("->", " ")
-            .replace("<->", " ")
+            .replace(">", " ")
             .replace("+", " ");
 
         let tokens: Vec<&str> = cleared.split_whitespace().collect();

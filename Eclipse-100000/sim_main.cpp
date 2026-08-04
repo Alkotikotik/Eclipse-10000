@@ -63,13 +63,15 @@ int main(int argc, char **argv) {
     std::cout << "\nSimulation stopped (" << (g_stop ? "Ctrl+C" : "finish()")
               << "). Waveform saved to 'waveform.vcd'" << std::endl;
 
-    std::cout << "\n--- RAM DUMP (nonzero bytes) ---" << std::endl;
-    for (int addr = 0; addr <= 4096; addr++) {
-        unsigned int b = top->rootp->CORE__DOT__system_ram__DOT__ramm[addr];
-        if (b != 0) {
-            std::cout << "Address [" << std::dec << addr << "]: 0x" << std::hex << b << " ("
-                      << std::dec << b << ")" << std::endl;
-        }
+    std::cout << "\n--- RAM DUMP (32-bit Words) ---" << std::endl;
+    for (int addr = 4016; addr <= 4096; addr += 4) {
+        uint32_t word = top->rootp->CORE__DOT__system_ram__DOT__ramm[addr] |
+                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 8) |
+                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 2] << 16) |
+                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 3] << 24);
+
+        std::cout << "Address [" << std::dec << addr << "]: 0x" << std::hex << word << " ("
+                  << std::dec << word << ")" << std::endl;
     }
 
     return 0;
