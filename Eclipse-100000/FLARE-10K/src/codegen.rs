@@ -507,6 +507,7 @@ impl InterferenceGraph {
         &self,
         node: &IROperand,
         active_nodes: &HashSet<IROperand>,
+        sizes: &HashMap<IROperand, RegType>,
     ) -> usize {
         self.adjacent
             .get(node)
@@ -514,7 +515,7 @@ impl InterferenceGraph {
                 neighbors
                     .iter()
                     .filter(|n| active_nodes.contains(n))
-                    .map(|n| n.get_type().get_size())
+                    .map(|n| sizes.get(n).copied().unwrap_or(RegType::B32).get_size())
                     .sum()
             })
             .unwrap_or(0)
@@ -568,6 +569,14 @@ fn const_val(op: &IROperand) -> i32 {
     }
 }
 
+fn type_to_regtype(ty: &Type) -> RegType {
+    match ty {
+        Type::U8 | Type::I8 | Type::Bool => RegType::B8,
+        Type::U16 | Type::I16 => RegType::B16,
+        _ => RegType::B32,
+    }
+}
+
 fn fits(value: i64, bits: u32, signed: bool) -> bool {
     //Literally what it means
     if signed {
@@ -617,6 +626,7 @@ pub struct Codegen<'a> {
     pins: HashMap<String, Register>,
     global_layout: &'a GlobalLayout,
     next_temp: usize,
+    operand_sizes: HashMap<IROperand, RegType>,
     wait_for_the_final_result: Vec<AsmInst>,
 }
 
@@ -640,6 +650,11 @@ impl<'a> Codegen<'a> {
             .max()
             .unwrap_or(0);
 
+        let mut operand_sizes: HashMap<IROperand, RegType> = HashMap::new();
+        for (name, ty) in ir_func.var_types.iter() {
+            operand_sizes.insert(IROperand::Var(name.clone()), type_to_regtype(ty));
+        }
+
         let mut codegen = Self {
             ir_func,
             structs,
@@ -650,6 +665,7 @@ impl<'a> Codegen<'a> {
             slots: RegisterTracker::new(&global_layout.pins),
             pins,
             next_temp,
+            operand_sizes,
             wait_for_the_final_result: Vec::new(),
         };
 
@@ -1126,8 +1142,8 @@ impl<'a> Codegen<'a> {
             let candidate = active_nodes //find node where Weighted degree is less than REGS_BYTES
                 .iter()
                 .find(|node| {
-                    let neighbor_bytes = graph.get_weighted_degree(node, &active_nodes);
-                    let node_bytes = node.get_type().get_size();
+                    let neighbor_bytes = graph.get_weighted_degree(node, &active_nodes, &self.operand_sizes);
+                    let node_bytes = self.size_of(node).get_size();
 
                     neighbor_bytes + node_bytes <= REGS_BYTES
                 })
@@ -1177,7 +1193,7 @@ impl<'a> Codegen<'a> {
                     }
                 }
             }
-            let operand_type = operand.get_type();
+            let operand_type = self.size_of(&operand);
             if let Some((phys_reg_id, sub_index)) = tracker.find_free(operand_type) {
                 let assigned_reg = Register {
                     id: phys_reg_id,
@@ -1211,10 +1227,10 @@ impl<'a> Codegen<'a> {
                     }
                 }
                 if !self.allocations.contains_key(var) {
+                    let sz = self.size_of(var).get_size();
                     let offset = self.frame_size;
-                    self.frame_size += var.get_type().get_size();
-                    self.allocations
-                        .insert(var.clone(), Location::StackOffset(offset));
+                    self.frame_size += sz;
+                    self.allocations.insert(var.clone(), Location::StackOffset(offset));
                 }
             }
 

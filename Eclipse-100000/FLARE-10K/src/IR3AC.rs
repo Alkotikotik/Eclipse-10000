@@ -159,6 +159,7 @@ pub enum IRInst {
 pub struct IRFunction {
     pub name: String,
     pub params: Vec<(String, Type)>,
+    pub var_types: HashMap<String, Type>,
     pub body: Vec<IRInst>,
 }
 
@@ -720,9 +721,11 @@ impl IR {
                     _ => {
                         if let Some(init_expr) = initial {
                             let init_op = self.reduce_expr(init_expr);
+                            self.emit(IRInst::Cpy { dest: IROperand::Var(name.clone()), src: init_op });
+                        } else {
                             self.emit(IRInst::Cpy {
                                 dest: IROperand::Var(name.clone()),
-                                src: init_op,
+                                src: IROperand::SignedConstant(0),
                             });
                         }
                     }
@@ -983,6 +986,7 @@ impl IR {
                 .into_iter()
                 .zip(param_types.into_iter())
                 .collect(),
+            var_types: self.var_types.clone(),
             body: self.insts_buffer.clone(),
         }
     }
