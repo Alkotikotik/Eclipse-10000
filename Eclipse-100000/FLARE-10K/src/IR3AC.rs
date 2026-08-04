@@ -13,6 +13,7 @@ pub enum IROperand {
     Temp(usize),
     FrameSlot(usize),
     GlobalSlot(usize),
+    IncomingArgSlot(usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,23 +117,23 @@ pub enum IRInst {
     AntiEqual {
         left: IROperand,
         right: IROperand,
-        label: String,
+        target: String,
     }, //Branch if false, so they are
     Equal {
         left: IROperand,
         right: IROperand,
-        label: String,
+        target: String,
     }, //Inverted AntiEqual becomes
     AntiMore {
         left: IROperand,
         right: IROperand,
-        label: String,
+        target: String,
         signed: bool,
     }, //Branch if not equal
     AntiLess {
         left: IROperand,
         right: IROperand,
-        label: String,
+        target: String,
         signed: bool,
     }, //Branch if more becomes branch
     //If less
@@ -142,7 +143,8 @@ pub enum IRInst {
     Call {
         dest: Option<IROperand>,
         name: String,
-        args: Vec<IROperand>,
+        args: Vec<(IROperand, String)>,
+        stack_args: Vec<IROperand>,
     },
     Return(Option<IROperand>),
     InlineAsm(Vec<String>),
@@ -155,7 +157,7 @@ pub enum IRInst {
 #[derive(Debug, Clone)]
 pub struct IRFunction {
     pub name: String,
-    pub params: Vec<String>,
+    pub params: Vec<(String, Type)>,
     pub body: Vec<IRInst>,
 }
 
@@ -174,6 +176,138 @@ pub struct IR {
     var_types: HashMap<String, Type>,
     loop_exit_stack: Vec<String>,
     current_return_var: Option<String>,
+}
+
+pub fn get_type_align(ty: &Type, structs: &HashMap<String, StructDef>) -> usize {
+    match ty {
+        Type::U8 | Type::I8 | Type::Bool => 1,
+        Type::U16 | Type::I16 => 2,
+        Type::U32 | Type::I32 | Type::Ptr(_) => 4,
+        Type::Array(elem_ty, _) => get_type_align(elem_ty, structs),
+        Type::Struct(name) => {
+            let struct_def = structs
+                .get(name)
+                .unwrap_or_else(|| panic!("Unknown struct type: {}", name));
+            if struct_def.is_reg {
+                4
+            } else {
+                struct_def
+                    .fields
+                    .iter()
+                    .map(|f| get_type_align(&f.ty, structs))
+                    .max()
+                    .unwrap_or(1)
+            }
+        }
+    }
+}
+
+pub fn get_type_size(ty: &Type, structs: &HashMap<String, StructDef>) -> usize {
+    match ty {
+        Type::U32 | Type::I32 | Type::Ptr(_) => 4,
+        Type::U16 | Type::I16 => 2,
+        Type::U8 | Type::I8 | Type::Bool => 1,
+        Type::Array(elem_ty, count) => get_type_size(elem_ty, structs) * *count,
+        Type::Struct(name) => {
+            let struct_def = structs
+                .get(name)
+                .unwrap_or_else(|| panic!("Unknown struct type: {}", name));
+
+            if struct_def.is_reg {
+                struct_def
+                    .fields
+                    .iter()
+                    .map(|f| get_type_size(&f.ty, structs))
+                    .sum()
+            } else {
+                let mut current_offset = 0;
+                let mut max_align = 1;
+
+                for field in &struct_def.fields {
+                    let field_align = get_type_align(&field.ty, structs);
+                    if field_align > max_align {
+                        max_align = field_align;
+                    }
+                    current_offset = align_to(current_offset, field_align);
+                    current_offset += get_type_size(&field.ty, structs);
+                }
+
+                align_to(current_offset, max_align)
+            }
+        }
+    }
+}
+
+pub enum ArgPlacement {
+    Reg(String),
+    Stack(usize),
+}
+
+pub fn classify_params(types: &[Type], structs: &HashMap<String, StructDef>) -> Vec<ArgPlacement> {
+    let mut reg_slots: [[bool; 4]; 4] = [[false; 4]; 4];
+    let mut stack_slot: usize = 0;
+    let mut result = Vec::new();
+
+    for ty in types {
+        let by_reference = match ty {
+            Type::Array(_, _) => true,
+            Type::Struct(name) => !structs.get(name).map(|s| s.is_reg).unwrap_or(false),
+            _ => false,
+        };
+
+        if by_reference {
+            result.push(ArgPlacement::Stack(stack_slot));
+            stack_slot += 1;
+            continue;
+        }
+
+        let size = get_type_size(ty, structs);
+        match find_arg_reg_slot(&mut reg_slots, size) {
+            Some(reg_str) => result.push(ArgPlacement::Reg(reg_str)),
+            None => {
+                result.push(ArgPlacement::Stack(stack_slot));
+                stack_slot += 1;
+            }
+        }
+    }
+
+    result
+}
+
+fn find_arg_reg_slot(slots: &mut [[bool; 4]; 4], size: usize) -> Option<String> {
+    for reg_id in 0..4 {
+        match size {
+            1 => {
+                for b in 0..4 {
+                    if !slots[reg_id][b] {
+                        slots[reg_id][b] = true;
+                        return Some(format!("RZ{}{}", reg_id, b));
+                    }
+                }
+            }
+            2 => {
+                if !slots[reg_id][0] && !slots[reg_id][1] {
+                    slots[reg_id][0] = true;
+                    slots[reg_id][1] = true;
+                    return Some(format!("RY{}0", reg_id));
+                }
+                if !slots[reg_id][2] && !slots[reg_id][3] {
+                    slots[reg_id][2] = true;
+                    slots[reg_id][3] = true;
+                    return Some(format!("RY{}1", reg_id));
+                }
+            }
+            _ => {
+                if slots[reg_id].iter().all(|&used| !used) {
+                    for b in 0..4 {
+                        slots[reg_id][b] = true;
+                    }
+                    return Some(format!("RX{}", reg_id));
+                }
+            }
+        }
+    }
+    None
 }
 
 //Helpers
@@ -216,66 +350,12 @@ impl IR {
 
     //Theoretically should have done it in semantic but idc
     pub fn get_type_align(&self, ty: &Type) -> usize {
-        match ty {
-            Type::U8 | Type::I8 | Type::Bool => 1,
-            Type::U16 | Type::I16 => 2,
-            Type::U32 | Type::I32 | Type::Ptr(_) => 4,
-            Type::Array(elem_ty, _) => self.get_type_align(elem_ty),
-            Type::Struct(name) => {
-                let struct_def = self
-                    .structs
-                    .get(name)
-                    .unwrap_or_else(|| panic!("Unknown struct type: {}", name));
-                if struct_def.is_reg {
-                    4
-                } else {
-                    struct_def
-                        .fields
-                        .iter()
-                        .map(|f| self.get_type_align(&f.ty))
-                        .max()
-                        .unwrap_or(1)
-                }
-            }
-        }
+        get_type_align(ty, &self.structs)
     }
 
     //Calculate size based on padding and types
     pub fn get_type_size(&self, ty: &Type) -> usize {
-        match ty {
-            Type::U32 | Type::I32 | Type::Ptr(_) => 4,
-            Type::U16 | Type::I16 => 2,
-            Type::U8 | Type::I8 | Type::Bool => 1,
-            Type::Array(elem_ty, count) => self.get_type_size(elem_ty) * *count,
-            Type::Struct(name) => {
-                let struct_def = self
-                    .structs
-                    .get(name)
-                    .unwrap_or_else(|| panic!("Unknown struct type: {}", name));
-
-                if struct_def.is_reg {
-                    struct_def
-                        .fields
-                        .iter()
-                        .map(|f| self.get_type_size(&f.ty))
-                        .sum()
-                } else {
-                    let mut current_offset = 0;
-                    let mut max_align = 1;
-
-                    for field in &struct_def.fields {
-                        let field_align = self.get_type_align(&field.ty);
-                        if field_align > max_align {
-                            max_align = field_align;
-                        }
-                        current_offset = align_to(current_offset, field_align);
-                        current_offset += self.get_type_size(&field.ty);
-                    }
-
-                    align_to(current_offset, max_align)
-                }
-            }
-        }
+        get_type_size(ty, &self.structs)
     }
 
     //Get offset of specific field
@@ -347,12 +427,45 @@ impl IR {
             Expr::Binary { left, .. } => self.infer_type(left),
             Expr::Unary { expr, .. } => self.infer_type(expr),
             Expr::Cast { target_type, .. } => target_type.clone(),
+            Expr::Ref {..} => panic!("Invalid reference"),
             _ => panic!("Error expression in infer_type: {:?}", expr),
         }
     }
 }
 
 impl IR {
+    fn reduce_call_args(&mut self, args: &[Expr]) -> (Vec<(IROperand, String)>, Vec<IROperand>) {
+        let arg_types: Vec<Type> = args.iter().map(|a| self.infer_type(a)).collect();
+        let placements = classify_params(&arg_types, &self.structs);
+
+        let mut reg_args = Vec::new();
+        let mut stack_words: Vec<(usize, IROperand)> = Vec::new();
+
+        for (arg_expr, placement) in args.iter().zip(placements.iter()) {
+            let by_reference = match self.infer_type(arg_expr) {
+                Type::Array(_, _) => true,
+                Type::Struct(name) => !self.structs.get(&name).map(|s| s.is_reg).unwrap_or(false),
+                _ => false,
+            };
+            match placement {
+                ArgPlacement::Reg(reg_str) => {
+                    reg_args.push((self.reduce_expr(arg_expr), reg_str.clone()));
+                }
+                ArgPlacement::Stack(slot) if by_reference => {
+                    let addr = self.lower_lvalue(arg_expr);
+                    stack_words.push((*slot, addr));
+                }
+                ArgPlacement::Stack(slot) => {
+                    stack_words.push((*slot, self.reduce_expr(arg_expr)));
+                }
+            }
+        }
+
+        stack_words.sort_by_key(|(slot, _)| *slot);
+        let stack_args = stack_words.into_iter().map(|(_, op)| op).collect();
+        (reg_args, stack_args)
+    }
+
     fn reduce_expr(&mut self, expr: &Expr) -> IROperand {
         match expr {
             Expr::IntLiteral(a) => IROperand::SignedConstant(*a),
@@ -383,16 +496,13 @@ impl IR {
 
             Expr::FunctionCall { name, args } => {
                 let dest = self.new_temp();
-                let mut reduced_args = Vec::new();
-
-                for arg in args {
-                    reduced_args.push(self.reduce_expr(arg));
-                }
+                let (reg_args, stack_args) = self.reduce_call_args(args);
 
                 self.emit(IRInst::Call {
                     dest: Some(dest.clone()),
                     name: name.clone(),
-                    args: reduced_args,
+                    args: reg_args,
+                    stack_args,
                 });
 
                 dest
@@ -632,15 +742,13 @@ impl IR {
                 match expr {
                     //Function with no dest
                     Expr::FunctionCall { name, args } => {
-                        let mut reduced_args = Vec::new();
-                        for arg in args {
-                            reduced_args.push(self.reduce_expr(arg));
-                        }
+                        let (reg_args, stack_args) = self.reduce_call_args(args);
 
                         self.emit(IRInst::Call {
                             dest: None,
                             name: name.clone(),
-                            args: reduced_args,
+                            args: reg_args,
+                            stack_args,
                         });
                     }
                     _ => {
@@ -779,9 +887,34 @@ impl IR {
         self.emit(IRInst::Label(func.name.clone()));
 
         let mut param_names = Vec::new();
+        let mut param_types = Vec::new();
         for param in &func.params {
             self.var_types.insert(param.name.clone(), param.ty.clone());
             param_names.push(param.name.clone());
+            param_types.push(param.ty.clone());
+        }
+
+        let placements = classify_params(&param_types, &self.structs);
+        for (param, placement) in func.params.iter().zip(placements.iter()) {
+            match placement {
+                ArgPlacement::Reg(reg_str) => {
+                    let arg_name = format!("__arg_{}", reg_str);
+                    self.emit(IRInst::Pin {
+                        var: arg_name.clone(),
+                        register: reg_str.clone(),
+                    });
+                    self.emit(IRInst::Cpy {
+                        dest: IROperand::Var(param.name.clone()),
+                        src: IROperand::Var(arg_name),
+                    });
+                }
+                ArgPlacement::Stack(slot) => {
+                    self.emit(IRInst::LoadPtr {
+                        dest: IROperand::Var(param.name.clone()),
+                        ptr_addr: IROperand::IncomingArgSlot(*slot),
+                    });
+                }
+            }
         }
 
         if let (Some(ret_name), Some(ret_ty)) = (&func.return_name, &func.to_return) {
@@ -817,7 +950,7 @@ impl IR {
 
         IRFunction {
             name: func.name.clone(),
-            params: param_names,
+            params: param_names.into_iter().zip(param_types.into_iter()).collect(),
             body: self.insts_buffer.clone(),
         }
     }
@@ -836,23 +969,23 @@ impl IR {
                     MoreLess::Eq => IRInst::AntiEqual {
                         left: l_op,
                         right: r_op,
-                        label: false_label,
+                        target: false_label,
                     },
                     MoreLess::NotEq => IRInst::Equal {
                         left: l_op,
                         right: r_op,
-                        label: false_label,
+                        target: false_label,
                     },
                     MoreLess::More => IRInst::AntiMore {
                         left: l_op,
                         right: r_op,
-                        label: false_label,
+                        target: false_label,
                         signed: is_signed,
                     },
                     MoreLess::Less => IRInst::AntiLess {
                         left: l_op,
                         right: r_op,
-                        label: false_label,
+                        target: false_label,
                         signed: is_signed,
                     },
                 };
@@ -864,7 +997,7 @@ impl IR {
                 self.emit(IRInst::AntiEqual {
                     left: cond_op,
                     right: IROperand::SignedConstant(0),
-                    label: false_label,
+                    target: false_label,
                 });
             }
         }
@@ -955,7 +1088,7 @@ impl IR {
 }
 
 #[inline] //Didn't know rust had inlines until now
-fn align_to(offset: usize, align: usize) -> usize {
+pub fn align_to(offset: usize, align: usize) -> usize {
     if align == 0 {
         return offset;
     }

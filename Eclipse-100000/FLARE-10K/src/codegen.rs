@@ -237,8 +237,20 @@ impl IRInst {
                 if src.is_var() { ls.push(src.clone()); }
             }
 
-            IRInst::Call { args, .. } => {
-                for arg in args {
+            IRInst::RegFieldRead { struct_var, .. } => {
+                if struct_var.is_var() { ls.push(struct_var.clone()); }
+            }
+
+            IRInst::RegFieldWrite { struct_var, src, .. } => {
+                if struct_var.is_var() { ls.push(struct_var.clone()); }
+                if src.is_var() { ls.push(src.clone()); }
+            }
+
+            IRInst::Call { args, stack_args, .. } => {
+                for (arg, _) in args {
+                    if arg.is_var() { ls.push(arg.clone()); }
+                }
+                for arg in stack_args {
                     if arg.is_var() { ls.push(arg.clone()); }
                 }
             }
@@ -272,6 +284,10 @@ impl IRInst {
             | IRInst::Cpy { dest, .. }
             | IRInst::Cast { dest, .. }
             | IRInst::LoadPtr { dest, .. } => {
+                if dest.is_var() { ls.push(dest.clone()); }
+            }
+
+            IRInst::RegFieldRead { dest, .. } => {
                 if dest.is_var() { ls.push(dest.clone()); }
             }
 
@@ -1493,6 +1509,44 @@ impl<'a> Codegen<'a> {
 
             IRInst::Cast { dest, src, target_type, src_type } => self.lower_cast(dest, src, target_type, src_type, out),
 
+            IRInst::RegFieldRead { dest, struct_var, byte_offset, byte_size } => {
+                let struct_asm = self.operand_to_asm(struct_var);
+                let field_asm = match struct_asm {
+                    AsmOperand::Reg(Reg::TheRealOne(reg)) => reg_op(Register {
+                        id: reg.id,
+                        reg_type: match byte_size { 1 => RegType::B8, 2 => RegType::B16, _ => RegType::B32 },
+                        sub_index: reg.sub_index + *byte_offset as u8,
+                    }),
+                    _ => panic!("Codegen Error: regarch field access requires a register-resident struct"),
+                };
+                let dest_asm = self.operand_to_asm(dest);
+                if dest_asm != field_asm {
+                    out.push(AsmInst::Mov(dest_asm, field_asm, AsmOperand::Imm10(0)));
+                }
+            }
+
+            IRInst::RegFieldWrite { src, struct_var, byte_offset, byte_size } => {
+                let struct_asm = self.operand_to_asm(struct_var);
+                let field_asm = match struct_asm {
+                    AsmOperand::Reg(Reg::TheRealOne(reg)) => reg_op(Register {
+                        id: reg.id,
+                        reg_type: match byte_size { 1 => RegType::B8, 2 => RegType::B16, _ => RegType::B32 },
+                        sub_index: reg.sub_index + *byte_offset as u8,
+                    }),
+                    _ => panic!("Codegen Error: regarch field access requires a register-resident struct"),
+                };
+                if is_const(src) {
+                    if let AsmOperand::Reg(Reg::TheRealOne(reg)) = field_asm {
+                        load_const(reg, const_val(src), out);
+                    }
+                } else {
+                    let src_asm = self.operand_to_asm(src);
+                    if src_asm != field_asm {
+                        out.push(AsmInst::Mov(field_asm, src_asm, AsmOperand::Imm10(0)));
+                    }
+                }
+            }
+
             IRInst::AntiEqual {left, right, target} => {
                 self.lower_cmp(left, right, out);
                 out.push(AsmInst::Beq(target.clone()));
@@ -1534,21 +1588,21 @@ impl<'a> Codegen<'a> {
 
             //So first 4 arguments go into 4 first registers depending on their size, rest are
             //spilled on the stack
-            IRInst::Call { dest, name, args } => {
-                for (i, arg) in args.iter().enumerate().take(4) {
-                    let arg_reg_asm = reg_op(Register { id: i as u8, reg_type: RegType::B32, sub_index: 0 });
+            IRInst::Call { dest, name, args, stack_args } => {
+                for (arg, reg_str) in args {
+                    let target_reg = Self::parse_pin_register(reg_str);
+                    let target_asm = reg_op(target_reg);
                     if is_const(arg) {
-                        load_const(Register { id: i as u8, reg_type: RegType::B32, sub_index: 0 }, const_val(arg), out);
+                        load_const(target_reg, const_val(arg), out);
                     } else {
                         let arg_asm = self.operand_to_asm(arg);
-                        if arg_asm != arg_reg_asm {
-                            out.push(AsmInst::Mov(arg_reg_asm, arg_asm, AsmOperand::Imm10(0)));
+                        if arg_asm != target_asm {
+                            out.push(AsmInst::Mov(target_asm, arg_asm, AsmOperand::Imm10(0)));
                         }
                     }
                 }
 
-                let overflow = if args.len() > 4 { &args[4..] } else { &[] };
-                for arg in overflow.iter().rev() {
+                for arg in stack_args.iter().rev() {
                     if is_const(arg) {
                         load_const(rx30_reg(), const_val(arg), out);
                         out.push(AsmInst::Push(rx30()));
@@ -1559,9 +1613,9 @@ impl<'a> Codegen<'a> {
 
                 out.push(AsmInst::Call(name.clone()));
 
-                if !overflow.is_empty() {
+                if !stack_args.is_empty() {
                     out.push(AsmInst::SprLea(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16(0)));
-                    out.push(AsmInst::SprAdd(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16((overflow.len() * 4) as i16)));
+                    out.push(AsmInst::SprAdd(reg_op(rx30_reg()), Spr::SP, AsmOperand::Imm16((stack_args.len() * 4) as i16)));
                 }
 
                 if let Some(dest) = dest {

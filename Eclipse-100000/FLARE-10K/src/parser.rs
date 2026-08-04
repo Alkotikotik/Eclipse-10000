@@ -274,6 +274,7 @@ impl<'a> Parser<'a> {
 
         while let Some(&(ref token, line, col)) = self.tokens.peek() {
             match token {
+                //Field access
                 Token::Dot => {
                     self.advance();
                     let (next_tok, f_line, f_col) =
@@ -304,6 +305,7 @@ impl<'a> Parser<'a> {
                         );
                     }
                 }
+                //Array access
                 Token::LBracket => {
                     self.advance();
                     let index_expr = self.parse_assign();
@@ -494,7 +496,7 @@ impl<'a> Parser<'a> {
             match token {
                 Token::More => {
                     self.advance();
-                    let right = self.parse_term();
+                    let right = self.parse_bitwises();
 
                     expr = Expr::MoreLessEq {
                         left: Box::new(expr),

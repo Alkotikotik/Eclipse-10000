@@ -19,7 +19,7 @@ regarch Rgba {
 >_ Global structs are avaliable, they can kinda be used as OOP
 #def #rx11 Rgba color;
 
-func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regular var in that func
+func bootstrap_os(u32 x, u32 y) => u32 c{ >_ c acts as a regular var in that func
 
 
     >_ bitwises
@@ -33,7 +33,7 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regu
 
     >_ w = w % w; mod and division aren't implemented yet
 
-    [z].Entry = 18;
+    >_[z].Entry = 18;
 
     PageTableEntry sigma;
     sigma.Entry = 20;
@@ -87,7 +87,7 @@ func main(){
     z.Entry = 10;
     z.flags = 11;
 
-    bootstrap_os(X_BOUND, Y_BOUND, &z);
+    bootstrap_os(X_BOUND, Y_BOUND);
 }
 
 func get_color() => Rgba color {
