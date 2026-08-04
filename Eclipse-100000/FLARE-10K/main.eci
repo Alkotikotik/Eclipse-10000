@@ -2,25 +2,34 @@ XOR [rx31, rx31]
 XOR [rx30, rx30]
 
 ~main:
-	LOAD rx2 <- 0
-	LOAD rx3 <- 1
+	LOAD rx3 <- 0
+	LOAD rx4 <- 1
 	LOAD rx0 <- 4100
-	LOAD rx4 <- 0
+	LOAD rx1 <- 0
+	LOAD rx2 <- 0
 
 ~Lab_for_start_0:
 	LOAD rx30 <- 20
-	CMP rx4 <-> rx30
+	CMP rx2 <-> rx30
 	XOR [rx30, rx30 0]
 	BGU -> ~Lab_for_end_1
-	ADD rx1 <- [rx2, rx3 0]
-	MOV rx2 <- rx3 0
-	MOV rx3 <- rx1 0
+	ADD rx1 <- [rx3, rx4 0]
+	MOV rx3 <- rx4 0
+	MOV rx4 <- rx1 0
 	LOAD rx30 <- 4
 	SUB rx0 <- [rx0, rx30 0]
 	STR rx1 -> rx0
-	ADD rx1 <- [rx4, rx31 1]
-	MOV rx4 <- rx1 0
+	ADD rx1 <- [rx2, rx31 1]
+	MOV rx2 <- rx1 0
 	JMP -> ~Lab_for_start_0
 
 ~Lab_for_end_1:
+	RET
+
+~double:
+	MOV rx0 <- rz0 0
+	LOAD rx1 <- 0
+	MUL rx0 <- [rx0, rx31 2]
+	MOV rx1 <- rx0 0
+	MOV rx30 <- rx1 0
 	RET

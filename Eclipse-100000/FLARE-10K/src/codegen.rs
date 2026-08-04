@@ -1143,7 +1143,7 @@ impl<'a> Codegen<'a> {
                 .iter()
                 .find(|node| {
                     let neighbor_bytes = graph.get_weighted_degree(node, &active_nodes, &self.operand_sizes);
-                    let node_bytes = self.size_of(node).get_size();
+                    let node_bytes = node.get_type().get_size();
 
                     neighbor_bytes + node_bytes <= REGS_BYTES
                 })
@@ -1158,8 +1158,8 @@ impl<'a> Codegen<'a> {
                 None => active_nodes
                     .iter()
                     .min_by(|a, b| {
-                        let degree_a = graph.get_weighted_degree(a, &active_nodes) as f64;
-                        let degree_b = graph.get_weighted_degree(b, &active_nodes) as f64;
+                        let degree_a = graph.get_weighted_degree(a, &active_nodes, &self.operand_sizes) as f64;
+                        let degree_b = graph.get_weighted_degree(b, &active_nodes, &self.operand_sizes) as f64;
 
                         let cost_a = spill_costs.get(a).unwrap_or(&1.0) / degree_a;
                         let cost_b = spill_costs.get(b).unwrap_or(&1.0) / degree_b;
@@ -1193,7 +1193,7 @@ impl<'a> Codegen<'a> {
                     }
                 }
             }
-            let operand_type = self.size_of(&operand);
+            let operand_type = operand.get_type();
             if let Some((phys_reg_id, sub_index)) = tracker.find_free(operand_type) {
                 let assigned_reg = Register {
                     id: phys_reg_id,
@@ -1227,9 +1227,8 @@ impl<'a> Codegen<'a> {
                     }
                 }
                 if !self.allocations.contains_key(var) {
-                    let sz = self.size_of(var).get_size();
                     let offset = self.frame_size;
-                    self.frame_size += sz;
+                    self.frame_size += var.get_type().get_size();
                     self.allocations.insert(var.clone(), Location::StackOffset(offset));
                 }
             }
@@ -1256,10 +1255,11 @@ impl<'a> Codegen<'a> {
             self.rewrite_spills(&spilled);
             self.allocations.clear();
 
+            let max_passes = 100;
             passes += 1;
-            if passes > 10 {
+            if passes > max_passes {
                 panic!(
-                    "Codegen Error: More than 10 passes occured, there must be something wrong, can't help though"
+                    "Codegen Error: More than {} passes occured, there must be something wrong, can't help though", max_passes
                 );
             }
         }

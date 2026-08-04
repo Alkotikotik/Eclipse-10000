@@ -13,5 +13,9 @@ func main() {
             STR rx1 -> rx0
         outline];
     }
+    u32 res = double(2);
 }
 
+func double(u8 num) => u8 result{
+    result = num * 2;
+}
