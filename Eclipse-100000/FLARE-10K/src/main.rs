@@ -14,34 +14,67 @@ use semantic::Semantic;
 use std::collections::HashMap;
 use std::fs;
 
+use clap::Parser as ClapParser;
+use std::path::PathBuf;
+use std::process::Command;
+
+#[derive(ClapParser, Debug)]
+#[command(author = "Qclipsing", version = "v0.0", about = "Flare-10k Compiler", long_about = None)]
+struct Args {
+    #[arg(value_name = "FILE")]
+    input: PathBuf,
+
+    #[arg(short = 'o', long, value_name = "FILE", default_value = input)]
+    output: Option<PathBuf>,
+
+    #[arg(long)]
+    lex: bool,
+
+    #[arg(long)]
+    ast: bool,
+
+    #[arg(long)]
+    ir: bool,
+
+    #[arg(long)]
+    asm: bool,
+}
+
 fn main() {
-    let input_path = "main.flar";
-    let output_path = "main.eci";
+    let args = Args::parse();
 
-    let src = fs::read_to_string(input_path).expect("[Fatal: file not found] you are cooked buddy");
+    // Read Source File
+    let src = fs::read_to_string(&args.input).unwrap_or_else(|err| {
+        eprintln!("Error: Could not read file {:?}: {}", args.input, err);
+        std::process::exit(1);
+    });
 
-    println!("Lexer:");
-    let lexer_debug = Lexer::new(&src, 1, 1);
-
-    println!("Parser");
     let lexer = Lexer::new(&src, 1, 1);
+    if args.lex {
+        println!("Lexer:");
+        println!("{:#?}", lexer);
+        return;
+    }
+
     let mut parser = Parser::new(lexer);
     let ast = parser.parse_everything();
+    if args.ast {
+        println!("Parser's AST:");
+        println!("{:#?}", ast);
+        return;
+    }
 
-    println!("Parser Success! Generated AST:");
-    println!("{:#?}", ast);
-
-    println!("Semantic");
     let mut semantic_analyzer = Semantic::new(&ast);
     semantic_analyzer.check_program(&ast);
-    println!("Semantic Analysis Success, you are not cooked buddy");
 
-    println!("Intermediate Representation (3AC):");
     let mut ir_generator = IR::new(&ast);
     let ir_program = ir_generator.reduce_everything(&ast);
-    println!("{:#?}", ir_program);
 
-    println!("Generating Assembly Instructions...");
+    if args.ir {
+        println!("IR:");
+        println!("{:#?}", ir_program);
+        return;
+    }
 
     let mut ast_structs = HashMap::new();
     for s in &ast.structs {
@@ -49,7 +82,6 @@ fn main() {
     }
 
     let global_layout = GlobalLayout::build(&ir_program.globals, &ast_structs);
-
     let mut all_instructions = Vec::new();
 
     let global_prologue = Codegen::emit_global_prologue(&global_layout);
@@ -57,20 +89,22 @@ fn main() {
 
     for ir_func in &ir_program.functions {
         let mut cg = Codegen::new(ir_func, &ast_structs, &global_layout);
-
         cg.run_allocator();
-
         let func_instructions = cg.lower_func();
         all_instructions.extend(func_instructions);
     }
 
-    println!("Formatting Assembly Code...");
     let asm_text = generate_assembly(all_instructions)
-        .expect("[Fatal: Assembly Formatting Error] Failed to serialize assembly instructions");
+        .expect("Codegen error: failed to compile");
 
-    println!("Writing assembly to output file: {}", output_path);
-    fs::write(output_path, asm_text)
-        .expect("[Fatal: File Write Error] Failed to write generated assembly to disk");
+    let asm_path = args.input.with_extension("s");
+    let final_output = args.output.clone().unwrap_or_else(|| args.input.with_extension("eci"));
 
-    println!("File compiled and exited with code 0");
+    fs::write(&asm_path, &asm_text).expect("Failed to write assembly file");
+
+    if args.asm {
+        println!("Assembly written to {:?}", asm_path);
+        return;
+    }
+    println!("Compilation succeeded! Output generated at: {:?}", final_output);
 }
