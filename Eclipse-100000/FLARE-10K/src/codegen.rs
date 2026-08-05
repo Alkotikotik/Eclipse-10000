@@ -229,12 +229,11 @@ impl fmt::Display for AsmOperand {
 
 impl fmt::Display for Register {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let prefix = match self.reg_type {
-            RegType::B8 => "rz",
-            RegType::B16 => "ry",
-            RegType::B32 => "rx",
-        };
-        write!(f, "{}{}", prefix, self.id)
+        match self.reg_type {
+            RegType::B8 => write!(f, "rz{}{}", self.id, self.sub_index),
+            RegType::B16 => write!(f, "ry{}{}", self.id, self.sub_index / 2),
+            RegType::B32 => write!(f, "rx{}", self.id),
+        }
     }
 }
 
@@ -569,14 +568,6 @@ fn const_val(op: &IROperand) -> i32 {
     }
 }
 
-fn type_to_regtype(ty: &Type) -> RegType {
-    match ty {
-        Type::U8 | Type::I8 | Type::Bool => RegType::B8,
-        Type::U16 | Type::I16 => RegType::B16,
-        _ => RegType::B32,
-    }
-}
-
 fn fits(value: i64, bits: u32, signed: bool) -> bool {
     //Literally what it means
     if signed {
@@ -626,8 +617,17 @@ pub struct Codegen<'a> {
     pins: HashMap<String, Register>,
     global_layout: &'a GlobalLayout,
     next_temp: usize,
+    call_saves: HashMap<(usize, usize), Vec<IROperand>>,
     operand_sizes: HashMap<IROperand, RegType>,
     wait_for_the_final_result: Vec<AsmInst>,
+}
+
+fn type_to_regtype(ty: &Type) -> RegType {
+    match ty {
+        Type::U8 | Type::I8 | Type::Bool => RegType::B8,
+        Type::U16 | Type::I16 => RegType::B16,
+        _ => RegType::B32,
+    }
 }
 
 impl<'a> Codegen<'a> {
@@ -650,11 +650,6 @@ impl<'a> Codegen<'a> {
             .max()
             .unwrap_or(0);
 
-        let mut operand_sizes: HashMap<IROperand, RegType> = HashMap::new();
-        for (name, ty) in ir_func.var_types.iter() {
-            operand_sizes.insert(IROperand::Var(name.clone()), type_to_regtype(ty));
-        }
-
         let mut codegen = Self {
             ir_func,
             structs,
@@ -665,7 +660,12 @@ impl<'a> Codegen<'a> {
             slots: RegisterTracker::new(&global_layout.pins),
             pins,
             next_temp,
-            operand_sizes,
+            call_saves: HashMap::new(),
+            operand_sizes: ir_func
+                .var_types
+                .iter()
+                .map(|(name, ty)| (IROperand::Var(name.clone()), type_to_regtype(ty)))
+                .collect(),
             wait_for_the_final_result: Vec::new(),
         };
 
@@ -721,6 +721,10 @@ impl<'a> Codegen<'a> {
                 }
             }
         }
+    }
+
+    fn size_of(&self, op: &IROperand) -> RegType {
+        self.operand_sizes.get(op).copied().unwrap_or(RegType::B32)
     }
 }
 
@@ -1062,17 +1066,25 @@ impl<'a> Codegen<'a> {
             }
         }
     }
-    //Just spill all the registers to the stack on call im just tired
-    fn find_call_crossing_vars(&self) -> HashSet<IROperand> {
-        let mut crossing = HashSet::new();
+    fn compute_call_save_sets(&self) -> HashMap<(usize, usize), Vec<IROperand>> {
+        let mut result = HashMap::new();
+
         for block in &self.cfg {
             let mut live = block.live_out.clone();
-            for inst in block.body.iter().rev() {
+
+            for (idx, inst) in block.body.iter().enumerate().rev() {
                 if matches!(inst, IRInst::Call { .. }) {
-                    for var in &live {
-                        crossing.insert(var.clone());
-                    }
+                    let kills: HashSet<IROperand> = inst.kills().into_iter().collect();
+                    let mut to_save: Vec<IROperand> = live
+                        .iter()
+                        .filter(|v| !kills.contains(v))
+                        .filter(|v| self.is_caller_saved_register(v))
+                        .cloned()
+                        .collect();
+                    to_save.sort_by_key(|v| format!("{:?}", v));
+                    result.insert((block.id, idx), to_save);
                 }
+
                 for definition in inst.kills() {
                     live.remove(&definition);
                 }
@@ -1081,7 +1093,17 @@ impl<'a> Codegen<'a> {
                 }
             }
         }
-        crossing
+
+        result
+    }
+
+    fn is_caller_saved_register(&self, op: &IROperand) -> bool {
+        if let IROperand::Var(name) = op {
+            if self.pins.contains_key(name) {
+                return false;
+            }
+        }
+        matches!(self.allocations.get(op), Some(Location::Register(_)))
     }
 
     //InterferenceGraph where nodes are Var or Temp representing data that needs to be somewhere
@@ -1142,8 +1164,9 @@ impl<'a> Codegen<'a> {
             let candidate = active_nodes //find node where Weighted degree is less than REGS_BYTES
                 .iter()
                 .find(|node| {
-                    let neighbor_bytes = graph.get_weighted_degree(node, &active_nodes, &self.operand_sizes);
-                    let node_bytes = node.get_type().get_size();
+                    let neighbor_bytes =
+                        graph.get_weighted_degree(node, &active_nodes, &self.operand_sizes);
+                    let node_bytes = self.size_of(node).get_size();
 
                     neighbor_bytes + node_bytes <= REGS_BYTES
                 })
@@ -1158,8 +1181,10 @@ impl<'a> Codegen<'a> {
                 None => active_nodes
                     .iter()
                     .min_by(|a, b| {
-                        let degree_a = graph.get_weighted_degree(a, &active_nodes, &self.operand_sizes) as f64;
-                        let degree_b = graph.get_weighted_degree(b, &active_nodes, &self.operand_sizes) as f64;
+                        let degree_a =
+                            graph.get_weighted_degree(a, &active_nodes, &self.operand_sizes) as f64;
+                        let degree_b =
+                            graph.get_weighted_degree(b, &active_nodes, &self.operand_sizes) as f64;
 
                         let cost_a = spill_costs.get(a).unwrap_or(&1.0) / degree_a;
                         let cost_b = spill_costs.get(b).unwrap_or(&1.0) / degree_b;
@@ -1184,7 +1209,7 @@ impl<'a> Codegen<'a> {
     //optimistic cadidate failed(RIP), spill it
     pub fn allocate(&mut self, mut alloc_stack: Vec<IROperand>, graph: &InterferenceGraph) {
         while let Some(operand) = alloc_stack.pop() {
-            let mut tracker = RegisterTracker::new(&self.global_layout.pins);
+            let mut tracker = RegisterTracker::new(&self.pins);
 
             if let Some(neighbors) = graph.adjacent.get(&operand) {
                 for neighbor in neighbors {
@@ -1193,7 +1218,7 @@ impl<'a> Codegen<'a> {
                     }
                 }
             }
-            let operand_type = operand.get_type();
+            let operand_type = self.size_of(&operand);
             if let Some((phys_reg_id, sub_index)) = tracker.find_free(operand_type) {
                 let assigned_reg = Register {
                     id: phys_reg_id,
@@ -1219,20 +1244,6 @@ impl<'a> Codegen<'a> {
         loop {
             self.compute_liveness();
 
-            let crossing = self.find_call_crossing_vars();
-            for var in &crossing {
-                if let IROperand::Var(name) = var {
-                    if self.global_layout.pins.contains_key(name) {
-                        continue;
-                    }
-                }
-                if !self.allocations.contains_key(var) {
-                    let offset = self.frame_size;
-                    self.frame_size += var.get_type().get_size();
-                    self.allocations.insert(var.clone(), Location::StackOffset(offset));
-                }
-            }
-
             let graph = self.build_iterf_graph();
 
             self.seed_pins(&graph);
@@ -1255,11 +1266,10 @@ impl<'a> Codegen<'a> {
             self.rewrite_spills(&spilled);
             self.allocations.clear();
 
-            let max_passes = 100;
             passes += 1;
-            if passes > max_passes {
+            if passes > 10 {
                 panic!(
-                    "Codegen Error: More than {} passes occured, there must be something wrong, can't help though", max_passes
+                    "Codegen Error: More than 10 passes occured, there must be something wrong, can't help though"
                 );
             }
         }
@@ -1497,10 +1507,12 @@ impl<'a> Codegen<'a> {
             compiled.push(AsmInst::Push(reg_op(rx30_reg())));
         }
 
+        self.call_saves = self.compute_call_save_sets();
+
         let blocks = self.cfg.clone();
         for block in &blocks {
-            for inst in &block.body {
-                self.lower_inst(inst, &mut compiled);
+            for (idx, inst) in block.body.iter().enumerate() {
+                self.lower_inst(inst, (block.id, idx), &mut compiled);
             }
         }
         compiled
@@ -1868,7 +1880,7 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn lower_inst(&mut self, inst: &IRInst, out: &mut Vec<AsmInst>) {
+    fn lower_inst(&mut self, inst: &IRInst, site: (usize, usize), out: &mut Vec<AsmInst>) {
         match inst {
             IRInst::Label(lab) => out.push(AsmInst::Label(format!("{}", lab))),
             IRInst::JMP(target) => out.push(AsmInst::Jmp(target.clone())),
@@ -2092,6 +2104,15 @@ impl<'a> Codegen<'a> {
                 args,
                 stack_args,
             } => {
+                let to_save = self
+                    .call_saves
+                    .get(&site)
+                    .cloned()
+                    .unwrap_or_default();
+                for var in &to_save {
+                    out.push(AsmInst::Push(self.operand_to_asm(var)));
+                }
+
                 for (arg, reg_str) in args {
                     let target_reg = Self::parse_pin_register(reg_str);
                     let target_asm = reg_op(target_reg);
@@ -2134,6 +2155,10 @@ impl<'a> Codegen<'a> {
                     if dest_asm != rx30() {
                         out.push(AsmInst::Mov(dest_asm, rx30(), AsmOperand::Imm10(0)));
                     }
+                }
+
+                for var in to_save.iter().rev() {
+                    out.push(AsmInst::Pop(self.operand_to_asm(var)));
                 }
             }
 
