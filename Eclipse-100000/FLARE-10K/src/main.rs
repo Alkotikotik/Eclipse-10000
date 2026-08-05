@@ -52,7 +52,7 @@ fn main() {
     let lexer = Lexer::new(&src, 1, 1);
     if args.lex {
         println!("Lexer:");
-        println!("{:#?}", lexer);
+        println!("{:?}", lexer);
         return;
     }
 
@@ -94,11 +94,13 @@ fn main() {
         all_instructions.extend(func_instructions);
     }
 
-    let asm_text = generate_assembly(all_instructions)
-        .expect("Codegen error: failed to compile");
+    let asm_text = generate_assembly(all_instructions).expect("Codegen error: failed to compile");
 
     let asm_path = args.input.with_extension("s");
-    let final_output = args.output.clone().unwrap_or_else(|| args.input.with_extension("eci"));
+    let final_output = args
+        .output
+        .clone()
+        .unwrap_or_else(|| args.input.with_extension("eci"));
 
     fs::write(&asm_path, &asm_text).expect("Failed to write assembly file");
 
@@ -106,5 +108,8 @@ fn main() {
         println!("Assembly written to {:?}", asm_path);
         return;
     }
-    println!("Compilation succeeded! Output generated at: {:?}", final_output);
+    println!(
+        "Compilation succeeded! Output generated at: {:?}",
+        final_output
+    );
 }

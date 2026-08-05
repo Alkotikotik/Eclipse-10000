@@ -217,10 +217,8 @@ impl fmt::Display for AsmOperand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AsmOperand::Reg(r) => write!(f, "{}", r),
-            AsmOperand::Imm26(val)
-            | AsmOperand::Imm18(val) => write!(f, "{}", val),
-            AsmOperand::Imm16(val)
-            | AsmOperand::Imm10(val) => write!(f, "{}", val),
+            AsmOperand::Imm26(val) | AsmOperand::Imm18(val) => write!(f, "{}", val),
+            AsmOperand::Imm16(val) | AsmOperand::Imm10(val) => write!(f, "{}", val),
             AsmOperand::Imm2(val) => write!(f, "{}", val),
             AsmOperand::Label(lbl) => write!(f, "{}", lbl),
         }
@@ -1267,12 +1265,13 @@ impl<'a> Codegen<'a> {
 
             self.rewrite_spills(&spilled);
             self.allocations.clear();
-            
+
             let max_passes = 100;
             passes += 1;
             if passes > max_passes {
                 panic!(
-                    "Codegen Error: More than {} passes occured, there must be something wrong, can't help though", max_passes
+                    "Codegen Error: More than {} passes occured, there must be something wrong, can't help though",
+                    max_passes
                 );
             }
         }
@@ -1417,7 +1416,11 @@ impl<'a> Codegen<'a> {
     //the IR because we need to add LDR, STR between operation
     //And we recompute coloring for them because its a new set of registers
     //It only changes individual blocks though, doesn't change successors, predecessors etc
-    fn spill_offset(allocations: &HashMap<IROperand, Location>, operand: &IROperand, spilled: &HashSet<IROperand>) -> Option<usize> {
+    fn spill_offset(
+        allocations: &HashMap<IROperand, Location>,
+        operand: &IROperand,
+        spilled: &HashSet<IROperand>,
+    ) -> Option<usize> {
         if !spilled.contains(operand) {
             return None;
         }
@@ -1474,8 +1477,8 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    //Only non-leaf functions ever clobber LR (by calling something else), so only they
-    //need to save/restore it - leaf functions can RET straight off the caller's LR
+    //If function calls another function its a leaf function, we need this because there is only 1
+    //LR register meaning it has to be saved before the call and restored after the call
     fn is_leaf(&self) -> bool {
         !self
             .cfg
@@ -1521,7 +1524,9 @@ impl<'a> Codegen<'a> {
 
         for (bidx, block) in blocks.iter().enumerate() {
             for (idx, inst) in block.body.iter().enumerate() {
-                if bidx == 0 && idx == 0 { continue; }
+                if bidx == 0 && idx == 0 {
+                    continue;
+                }
                 self.lower_inst(inst, (block.id, idx), &mut compiled);
             }
         }
@@ -1529,6 +1534,7 @@ impl<'a> Codegen<'a> {
     }
 
     //Place the globals before the stack
+    //Global | SP <-free space-> <-Heap(Later)->
     fn legalize_globals(body: &[IRInst], layout: &GlobalLayout) -> Vec<IRInst> {
         let mut next_temp = body
             .iter()
@@ -1594,8 +1600,6 @@ impl<'a> Codegen<'a> {
             IROperand::IncomingArgSlot(_) => unreachable!("Only valid as ptr_addr"),
         }
     }
-
-    //Minimal version of codegen for now
 
     //So we can load into stack, pointer, or raw address that function resolves that
     fn resolve_addr(&self, ptr_addr: &IROperand, out: &mut Vec<AsmInst>) -> (AddrBase, i32, bool) {
@@ -2114,11 +2118,7 @@ impl<'a> Codegen<'a> {
                 args,
                 stack_args,
             } => {
-                let to_save = self
-                    .call_saves
-                    .get(&site)
-                    .cloned()
-                    .unwrap_or_default();
+                let to_save = self.call_saves.get(&site).cloned().unwrap_or_default();
                 for var in &to_save {
                     out.push(AsmInst::Push(self.operand_to_asm(var)));
                 }
@@ -2147,11 +2147,9 @@ impl<'a> Codegen<'a> {
                             out.push(AsmInst::Mov(reg_op(t), s, AsmOperand::Imm10(0)));
                         }
                     } else {
-                        // pure cycle left: break it via rx30
                         let (t, s) = pending.remove(0);
-                        out.push(AsmInst::Mov(rx30(), reg_op(t), AsmOperand::Imm10(0))); // save clobbered value
+                        out.push(AsmInst::Mov(rx30(), reg_op(t), AsmOperand::Imm10(0)));
                         out.push(AsmInst::Mov(reg_op(t), s, AsmOperand::Imm10(0)));
-                        // whoever was waiting on old `t`'s value now reads it from rx30
                         for (_, src) in pending.iter_mut() {
                             if matches!(src, AsmOperand::Reg(Reg::TheRealOne(sr)) if *sr == t) {
                                 *src = rx30();

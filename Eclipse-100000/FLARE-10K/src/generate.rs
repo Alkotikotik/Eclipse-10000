@@ -26,9 +26,7 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error
             AsmInst::Xor(dest, src, imm) => {
                 writeln!(assembly, "\tXOR [{}, {} {}]", dest, src, imm)?
             }
-            AsmInst::Or(dest, src, imm) => {
-                writeln!(assembly, "\tOR  [{}, {} {}]", dest, src, imm)?
-            }
+            AsmInst::Or(dest, src, imm) => writeln!(assembly, "\tOR  [{}, {} {}]", dest, src, imm)?,
             AsmInst::And(dest, src, imm) => {
                 writeln!(assembly, "\tAND [{}, {} {}]", dest, src, imm)?
             }

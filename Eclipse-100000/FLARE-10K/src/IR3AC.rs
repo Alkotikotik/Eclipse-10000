@@ -724,7 +724,10 @@ impl IR {
                     _ => {
                         if let Some(init_expr) = initial {
                             let init_op = self.reduce_expr(init_expr);
-                            self.emit(IRInst::Cpy { dest: IROperand::Var(name.clone()), src: init_op });
+                            self.emit(IRInst::Cpy {
+                                dest: IROperand::Var(name.clone()),
+                                src: init_op,
+                            });
                         } else {
                             self.emit(IRInst::Cpy {
                                 dest: IROperand::Var(name.clone()),
