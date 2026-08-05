@@ -2,6 +2,10 @@
     LOAD rx31 <- 4096
     SPSET rx31
 
+    MOV rx0 <- rx31
+    STR rx0 -> rx31 - 4
+    XOR[rx0, rx0]
+
     LOAD rx27 <- 512
     GPSET rx27
 

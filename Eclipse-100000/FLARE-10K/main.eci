@@ -1,47 +1,62 @@
 XOR [rx31, rx31]
 XOR [rx30, rx30]
-	SPRLEA rx30 <- [LR 0]
-	PUSH <- rx30
 
 ~main:
-	LOAD rx1 <- 0
-	LOAD rx3 <- 1
-	LOAD rx0 <- 4100
+	SPRLEA rx30 <- [LR 0]
+	PUSH <- rx30
 	LOAD rx4 <- 0
+	LOAD rx3 <- 1
+	LOAD rx1 <- 4100
+	LOAD rx0 <- 0
 	LOAD rz20 <- 0
 
 ~Lab_for_start_0:
-	LOAD rx30 <- 20
+	LOAD rx30 <- 19
 	CMP rz20 <-> rx30
 	XOR [rx30, rx30 0]
 	BGU -> ~Lab_for_end_1
-	ADD rx1 <- [rx1, rx3 0]
-	MOV rx4 <- rx1 0
-	MOV rx1 <- rx3 0
-	MOV rx3 <- rx4 0
+	ADD rx0 <- [rx4, rx3 0]
+	MOV rx4 <- rx3 0
+	MOV rx3 <- rx0 0
 	LOAD rx30 <- 4
-	SUB rx0 <- [rx0, rx30 0]
-	STR rx4 -> [rx0 0]
-	ADD rx2 <- [rz20, rx31 1]
-	MOV rz20 <- rx2 0
+	SUB rx1 <- [rx1, rx30 0]
+	STR rx0 -> [rx1 0]
+	ADD rx0 <- [rz20, rx31 1]
+	MOV rz20 <- rx0 0
 	JMP -> ~Lab_for_start_0
 
 ~Lab_for_end_1:
 	LOAD rx0 <- 2
-	CALL double
+	CALL double_triple
 	MOV rx0 <- rx30 0
 	LOAD rx30 <- 4016
 	STR rx0 -> [rx30 0]
 	XOR [rx30, rx30 0]
 	POP -> rx31
 	SPRSET rx31 -> LR
-	JMP ~End
+	RET
 
-~double:
+~double_triple:
+	SPRLEA rx30 <- [LR 0]
+	PUSH <- rx30
 	MOV rz01 <- rz00 0
 	LOAD rz02 <- 0
 	MUL rx1 <- [rz01, rx31 2]
 	MOV rz02 <- rx1 0
+	MOV rz00 <- rz02 0
+	CALL triple
+	MOV rx1 <- rx30 0
+	MOV rz02 <- rx1 0
+	MOV rx30 <- rz02 0
+	POP -> rx31
+	SPRSET rx31 -> LR
+	RET
+
+~triple:
+	MOV rz01 <- rz00 0
+	LOAD rz02 <- 0
+	LOAD rx30 <- 3
+	MUL rx1 <- [rz01, rx30 0]
+	MOV rz02 <- rx1 0
 	MOV rx30 <- rz02 0
 	RET
-~End:

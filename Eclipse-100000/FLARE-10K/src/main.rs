@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::fs;
 
 fn main() {
-    let input_path = "test.flar";
+    let input_path = "main.flar";
     let output_path = "main.eci";
 
     let src = fs::read_to_string(input_path).expect("[Fatal: file not found] you are cooked buddy");

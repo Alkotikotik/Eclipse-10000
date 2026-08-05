@@ -1066,6 +1066,8 @@ impl<'a> Codegen<'a> {
             }
         }
     }
+
+    //Using varkills to determine if variable is alive at the call, if yes spill it
     fn compute_call_save_sets(&self) -> HashMap<(usize, usize), Vec<IROperand>> {
         let mut result = HashMap::new();
 
@@ -1484,6 +1486,13 @@ impl<'a> Codegen<'a> {
     pub fn lower_func(&mut self) -> Vec<AsmInst> {
         let mut compiled = Vec::new();
         let leaf = self.is_leaf();
+        let blocks = self.cfg.clone();
+
+        if let Some(first_inst) = blocks.first().and_then(|b| b.body.first()) {
+            if let IRInst::Label(_) = first_inst {
+                self.lower_inst(first_inst, (0, 0), &mut compiled);
+            }
+        }
 
         if self.frame_size > 0 {
             compiled.push(AsmInst::SprLea(
@@ -1509,9 +1518,9 @@ impl<'a> Codegen<'a> {
 
         self.call_saves = self.compute_call_save_sets();
 
-        let blocks = self.cfg.clone();
-        for block in &blocks {
+        for (bidx, block) in blocks.iter().enumerate() {
             for (idx, inst) in block.body.iter().enumerate() {
+                if bidx == 0 && idx == 0 { continue; }
                 self.lower_inst(inst, (block.id, idx), &mut compiled);
             }
         }
