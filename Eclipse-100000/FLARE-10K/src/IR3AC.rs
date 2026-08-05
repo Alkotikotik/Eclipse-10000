@@ -429,7 +429,10 @@ impl IR {
             Expr::Binary { left, .. } => self.infer_type(left),
             Expr::Unary { expr, .. } => self.infer_type(expr),
             Expr::Cast { target_type, .. } => target_type.clone(),
-            Expr::Ref { .. } => panic!("Invalid reference"),
+            Expr::Ref(inner) => {
+                let inner_ty = self.infer_type(inner);
+                Type::Ptr(Box::new(inner_ty))
+            }
             _ => panic!("Error expression in infer_type: {:?}", expr),
         }
     }

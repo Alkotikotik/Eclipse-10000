@@ -22,9 +22,6 @@ fn main() {
 
     println!("Lexer:");
     let lexer_debug = Lexer::new(&src, 1, 1);
-    for _token in lexer_debug {
-        // println!("[ {:?} ]", _token);
-    }
 
     println!("Parser");
     let lexer = Lexer::new(&src, 1, 1);

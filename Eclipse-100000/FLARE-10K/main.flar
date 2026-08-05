@@ -87,7 +87,8 @@ func main(){
     z.Entry = 10;
     z.flags = 11;
 
-    bootstrap_os(X_BOUND, Y_BOUND, &z);
+    u32 c = bootstrap_os(X_BOUND, Y_BOUND, &z);
+    [4092] = c;
 }
 
 func get_color() => Rgba color {

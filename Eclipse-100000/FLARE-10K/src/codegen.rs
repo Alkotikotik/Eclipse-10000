@@ -1267,11 +1267,12 @@ impl<'a> Codegen<'a> {
 
             self.rewrite_spills(&spilled);
             self.allocations.clear();
-
+            
+            let max_passes = 100;
             passes += 1;
-            if passes > 10 {
+            if passes > max_passes {
                 panic!(
-                    "Codegen Error: More than 10 passes occured, there must be something wrong, can't help though"
+                    "Codegen Error: More than {} passes occured, there must be something wrong, can't help though", max_passes
                 );
             }
         }
@@ -2122,25 +2123,40 @@ impl<'a> Codegen<'a> {
                     out.push(AsmInst::Push(self.operand_to_asm(var)));
                 }
 
+                let mut pending: Vec<(Register, AsmOperand)> = Vec::new();
                 for (arg, reg_str) in args {
                     let target_reg = Self::parse_pin_register(reg_str);
-                    let target_asm = reg_op(target_reg);
                     if is_const(arg) {
-                        load_const(target_reg, const_val(arg), out);
+                        load_const(target_reg, const_val(arg), out); // consts have no source-reg conflict
                     } else {
-                        let arg_asm = self.operand_to_asm(arg);
-                        if arg_asm != target_asm {
-                            out.push(AsmInst::Mov(target_asm, arg_asm, AsmOperand::Imm10(0)));
-                        }
+                        pending.push((target_reg, self.operand_to_asm(arg)));
                     }
                 }
 
-                for arg in stack_args.iter().rev() {
-                    if is_const(arg) {
-                        load_const(rx30_reg(), const_val(arg), out);
-                        out.push(AsmInst::Push(rx30()));
+                //So it previosely moved variable to the argument registers not in the correct
+                //order, because it isn't aware of cycles.
+                //Thus fix is making it kinda aware of cycles.
+                while !pending.is_empty() {
+                    let is_source = |r: &Register| {
+                        pending.iter().any(|(_, src)| matches!(src, AsmOperand::Reg(Reg::TheRealOne(sr)) if sr == r))
+                    };
+
+                    if let Some(idx) = pending.iter().position(|(t, _)| !is_source(t)) {
+                        let (t, s) = pending.remove(idx);
+                        if AsmOperand::Reg(Reg::TheRealOne(t)) != s {
+                            out.push(AsmInst::Mov(reg_op(t), s, AsmOperand::Imm10(0)));
+                        }
                     } else {
-                        out.push(AsmInst::Push(self.operand_to_asm(arg)));
+                        // pure cycle left: break it via rx30
+                        let (t, s) = pending.remove(0);
+                        out.push(AsmInst::Mov(rx30(), reg_op(t), AsmOperand::Imm10(0))); // save clobbered value
+                        out.push(AsmInst::Mov(reg_op(t), s, AsmOperand::Imm10(0)));
+                        // whoever was waiting on old `t`'s value now reads it from rx30
+                        for (_, src) in pending.iter_mut() {
+                            if matches!(src, AsmOperand::Reg(Reg::TheRealOne(sr)) if *sr == t) {
+                                *src = rx30();
+                            }
+                        }
                     }
                 }
 
