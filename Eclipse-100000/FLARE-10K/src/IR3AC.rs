@@ -1,5 +1,6 @@
 //3AC IR generator, again similar to parser, actually most of compiler parts are very similar
-//I use "reduce" instead of "lower" because I think it sounds better
+//I ocacsionally use "reduce" instead of "lower" because I think it sounds better, though sometimes
+//still stick to lower
 use crate::parser::{
     BinaryOpKind, Expr, FunctionSignature, MoreLess, Program, Stmt, StructDef, Type, UnaryOpKind,
 };
@@ -153,6 +154,10 @@ pub enum IRInst {
         var: String,
         register: String,
     },
+    LocalAddr {
+        dest: IROperand,
+        offset: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +166,7 @@ pub struct IRFunction {
     pub params: Vec<(String, Type)>,
     pub var_types: HashMap<String, Type>,
     pub body: Vec<IRInst>,
+    pub local_frame_size: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +184,8 @@ pub struct IR {
     var_types: HashMap<String, Type>,
     loop_exit_stack: Vec<String>,
     current_return_var: Option<String>,
+    local_slots: HashMap<String, usize>,
+    local_frame_size: usize,
 }
 
 pub fn get_type_align(ty: &Type, structs: &HashMap<String, StructDef>) -> usize {
@@ -283,7 +291,7 @@ fn find_arg_reg_slot(slots: &mut [[bool; 4]; 4], size: usize) -> Option<String> 
                 for b in 0..4 {
                     if !slots[reg_id][b] {
                         slots[reg_id][b] = true;
-                        return Some(format!("RZ{}{}", reg_id, b));
+                        return Some(format!("rz{}{}", reg_id, b));
                     }
                 }
             }
@@ -291,12 +299,12 @@ fn find_arg_reg_slot(slots: &mut [[bool; 4]; 4], size: usize) -> Option<String> 
                 if !slots[reg_id][0] && !slots[reg_id][1] {
                     slots[reg_id][0] = true;
                     slots[reg_id][1] = true;
-                    return Some(format!("RY{}0", reg_id));
+                    return Some(format!("ry{}0", reg_id));
                 }
                 if !slots[reg_id][2] && !slots[reg_id][3] {
                     slots[reg_id][2] = true;
                     slots[reg_id][3] = true;
-                    return Some(format!("RY{}1", reg_id));
+                    return Some(format!("ry{}1", reg_id));
                 }
             }
             _ => {
@@ -304,7 +312,7 @@ fn find_arg_reg_slot(slots: &mut [[bool; 4]; 4], size: usize) -> Option<String> 
                     for b in 0..4 {
                         slots[reg_id][b] = true;
                     }
-                    return Some(format!("RX{}", reg_id));
+                    return Some(format!("rx{}", reg_id));
                 }
             }
         }
@@ -328,6 +336,8 @@ impl IR {
             var_types: HashMap::new(),
             loop_exit_stack: Vec::new(),
             current_return_var: None,
+            local_slots: HashMap::new(),
+            local_frame_size: 0,
         }
     }
     pub fn new_temp(&mut self) -> IROperand {
@@ -489,7 +499,7 @@ impl IR {
 
             Expr::Ref(mem) => self.lower_lvalue(mem),
 
-            Expr::Index { array, index } => {
+            Expr::Index {array, index} => {
                 let addr = self.compute_index_addr(array, index);
                 let dest = self.new_temp();
                 self.emit(IRInst::LoadPtr {
@@ -499,7 +509,7 @@ impl IR {
                 dest
             }
 
-            Expr::FunctionCall { name, args } => {
+            Expr::FunctionCall {name, args} => {
                 let dest = self.new_temp();
                 let (reg_args, stack_args) = self.reduce_call_args(args);
 
@@ -513,7 +523,7 @@ impl IR {
                 dest
             }
 
-            Expr::Cast { expr, target_type } => {
+            Expr::Cast {expr, target_type} => {
                 let src_type = self.infer_type(expr);
                 let dest = self.new_temp();
                 let src = self.reduce_expr(expr);
@@ -526,7 +536,7 @@ impl IR {
                 dest
             }
 
-            Expr::Unary { op, expr } => {
+            Expr::Unary {op, expr} => {
                 let dest = self.new_temp();
                 let src = self.reduce_expr(expr);
                 let inst = match op {
@@ -543,7 +553,8 @@ impl IR {
                 dest
             }
 
-            Expr::Binary { left, op, right } => {
+            Expr::Binary {left, op, right} => {
+                //Just future proofing
                 if matches!(op, BinaryOpKind::Div | BinaryOpKind::Mod) {
                     let left_ty = self.infer_type(left);
                     let right_ty = self.infer_type(right);
@@ -692,21 +703,34 @@ impl IR {
                     });
                 }
 
+                let is_local_struct = matches!(ty, Type::Struct(sname) if !self.structs[sname].is_reg);
+
                 match ty {
-                    Type::Array(elem_ty, _) => {
+                    Type::Array(elem_ty, count) => {
+                        let elem_size = self.get_type_size(elem_ty);
+                        let elem_align = self.get_type_align(elem_ty);
+                        let slot_size = elem_size * count;
+                        let offset = align_to(self.local_frame_size, elem_align);
+                        self.local_frame_size = offset + slot_size;
+                        self.local_slots.insert(name.clone(), offset);
+
+                        let base = self.new_temp();
+                        self.emit(IRInst::LocalAddr {
+                            dest: base.clone(),
+                            offset,
+                        });
+
                         if let Some(init_expr) = initial {
                             if let Expr::ArrayLiteral(elems) = &**init_expr {
-                                let elem_size = self.get_type_size(elem_ty);
                                 for (i, elem_expr) in elems.iter().enumerate() {
                                     let val_op = self.reduce_expr(elem_expr);
-                                    let base = IROperand::Var(name.clone());
                                     let addr = if i == 0 {
-                                        base
+                                        base.clone()
                                     } else {
                                         let off_temp = self.new_temp();
                                         self.emit(IRInst::Add {
                                             dest: off_temp.clone(),
-                                            left: base,
+                                            left: base.clone(),
                                             right: IROperand::UnsignedConstant(
                                                 (i * elem_size) as u32,
                                             ),
@@ -719,15 +743,39 @@ impl IR {
                                     });
                                 }
                             }
+                        } else {
+                            for i in 0..*count {
+                                let addr = if i == 0 {
+                                    base.clone()
+                                } else {
+                                    let off_temp = self.new_temp();
+                                    self.emit(IRInst::Add {
+                                        dest: off_temp.clone(),
+                                        left: base.clone(),
+                                        right: IROperand::UnsignedConstant(
+                                            (i * elem_size) as u32,
+                                        ),
+                                    });
+                                    off_temp
+                                };
+                                self.emit(IRInst::StorePtr {
+                                    ptr_addr: addr,
+                                    src: IROperand::SignedConstant(0),
+                                });
+                            }
                         }
+                    }
+                    Type::Struct(_) if is_local_struct => {
+                        let size = self.get_type_size(ty);
+                        let align = self.get_type_align(ty);
+                        let offset = align_to(self.local_frame_size, align);
+                        self.local_frame_size = offset + size;
+                        self.local_slots.insert(name.clone(), offset);
                     }
                     _ => {
                         if let Some(init_expr) = initial {
                             let init_op = self.reduce_expr(init_expr);
-                            self.emit(IRInst::Cpy {
-                                dest: IROperand::Var(name.clone()),
-                                src: init_op,
-                            });
+                            self.emit(IRInst::Cpy { dest: IROperand::Var(name.clone()), src: init_op });
                         } else {
                             self.emit(IRInst::Cpy {
                                 dest: IROperand::Var(name.clone()),
@@ -920,6 +968,8 @@ impl IR {
     fn reduce_func(&mut self, func: &FunctionSignature) -> IRFunction {
         self.insts_buffer.clear();
         self.reset_temp();
+        self.local_slots.clear();
+        self.local_frame_size = 0;
         self.current_return_var = func.return_name.clone();
 
         self.emit(IRInst::Label(format!("~{}", func.name)));
@@ -994,6 +1044,7 @@ impl IR {
                 .collect(),
             var_types: self.var_types.clone(),
             body: self.insts_buffer.clone(),
+            local_frame_size: self.local_frame_size,
         }
     }
 
@@ -1047,7 +1098,18 @@ impl IR {
 
     fn lower_lvalue(&mut self, expr: &Expr) -> IROperand {
         match expr {
-            Expr::Identifier(name) => IROperand::Var(name.clone()),
+            Expr::Identifier(name) => {
+                if let Some(&offset) = self.local_slots.get(name) {
+                    let dest = self.new_temp();
+                    self.emit(IRInst::LocalAddr {
+                        dest: dest.clone(),
+                        offset,
+                    });
+                    dest
+                } else {
+                    IROperand::Var(name.clone())
+                }
+            }
 
             Expr::Deref(ptr_expr) => self.reduce_expr(ptr_expr),
 

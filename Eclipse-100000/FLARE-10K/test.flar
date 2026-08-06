@@ -1,25 +1,25 @@
+regarch coords {
+    i16 x;
+    i16 y;
+};
+
+#def #rx29 coords cube;
+
 func main() {
-    u32 a = 0;
-    u32 b = 1;
-    u32 c = 4100;
+    u32 ptr = 4096;
+    init_cube();
 
-    u32 result;
-    for [u8 i = 0; i < 19; i = i + 1] {
-        result = a + b;
-        a = b;
-        b = result;
-        c = c - 4;
-        [c] = result;
+    while [1 == 1] {
+        [ptr] = cube.x * 4;
+        [ptr - 4] = cube.y * 4;
+        ptr = ptr - 8;
+        if [ptr < 2048] {
+            break;
+        }
     }
-    u32 res = double_triple(2);
-    [4016] = res;
 }
 
-func double_triple(u8 num) => u8 result{
-  result = num * 2;
-  result = triple(result);
-}
-
-func triple(u8 num) => u8 result {
-    result = num * 3;
+func init_cube(){
+    cube.x = 1;
+    cube.y = 2;
 }

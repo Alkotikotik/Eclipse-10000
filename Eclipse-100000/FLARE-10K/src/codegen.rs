@@ -1,6 +1,6 @@
 //Codegen, lets see what's it about
 //Technically when I use "alive" its incorrect because the right term for it is just "live"
-//But I don't like how plain "live" sound so ill use "alive"
+//But I don't like how plain "live" sound so sometimes ill use "alive" instead of "live"
 
 use crate::IR3AC::{IRFunction, IRInst, IROperand, align_to, get_type_align, get_type_size};
 use crate::parser::{Expr, StructDef, Type};
@@ -25,7 +25,7 @@ pub struct Register {
 }
 
 pub struct RegisterTracker {
-    //31 registers made up of 4 bytes, bool indicates whether bytes are used or not
+    //30 registers made up of 4 bytes, bool indicates whether bytes are used or not
     slots: [[bool; 4]; 30],
 }
 
@@ -212,7 +212,7 @@ impl IROperand {
     }
 }
 
-//Just formatting
+//Just formatting, for outputting actual assembly
 impl fmt::Display for AsmOperand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -245,7 +245,8 @@ impl fmt::Display for Reg {
 }
 
 impl IRInst {
-    //If the value is being read
+    //So we need to know which operands are read and which operands are written to in a particular instruction
+    //Based on that we will build varkill and uevar
     pub fn uses(&self) -> Vec<IROperand> {
         let mut ls = Vec::new();
 
@@ -490,7 +491,7 @@ impl InterferenceGraph {
 
     pub fn add_edge(&mut self, first: IROperand, second: IROperand) {
         if first != second {
-            //This addsd undirected edge meaning its a two way interference, if A interferes with B
+            //This adds undirected edge meaning its a two way interference, if A interferes with B
             //B automatically interference with A which makes sense
             self.adjacent
                 .entry(first.clone())
@@ -524,7 +525,8 @@ fn rx31() -> AsmOperand {
 } //Here is a cool trick
 fn rx30() -> AsmOperand {
     reg_op(rx30_reg())
-} //Unfortunately we do in fact need second scratch
+} //Unfortunately we do in fact need second scratch for like 0.1% of cases, but you know what they
+//say 0.1 > 0
 
 fn rx30_reg() -> Register {
     Register {
@@ -580,11 +582,11 @@ fn fits(value: i64, bits: u32, signed: bool) -> bool {
 fn load_const(dest: Register, value: i32, out: &mut Vec<AsmInst>) {
     match dest.reg_type {
         RegType::B32 if fits(value as i64, 18, true) => {
-            //Fits into imm18
+            //If it fits into 18 bits use regular load
             out.push(AsmInst::Load(reg_op(dest), AsmOperand::Imm18(value)));
         }
         RegType::B32 if fits(value as i64, 26, true) => {
-            //Fits into imm26,
+            //If it fits between 18-26 bits we use LMA and then mov the value to dest
             out.push(AsmInst::Lma(AsmOperand::Imm26(value)));
             if dest.id != 31 {
                 //If we actually wanted it in rx31, jic tbh tho
@@ -595,7 +597,8 @@ fn load_const(dest: Register, value: i32, out: &mut Vec<AsmInst>) {
         RegType::B32 => {
             // If it doesn't fit even in 26 bits, we utilize register
             // fragmentation by loading lower 16 bits into ry310 higher into ry311 and result
-            // will just be in rx31, genuis, love register fragmentation
+            // will just be in rx31, genuis, love register fragmentation, wait why the hell are we
+            // loading it into rx31? We can just load it in any register, gotta fix it later
             let lo = (value as u32 & 0xFFFF) as i32;
             let hi = ((value as u32 >> 16) & 0xFFFF) as i32;
             out.push(AsmInst::Load(half_op(dest, 0), AsmOperand::Imm18(lo)));
@@ -680,7 +683,7 @@ impl<'a> Codegen<'a> {
             "RY"
         } else if upper.starts_with("RX") {
             "RX"
-        } else if upper.starts_with('R') {
+        } else if upper.starts_with('R') { //JIC again
             "R"
         } else {
             panic!("Codegen Error: invalid pin register {}", pin_str)
@@ -726,6 +729,7 @@ impl<'a> Codegen<'a> {
     }
 }
 
+//Literally rewriting that to dest, left, right and subbing it
 fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst {
     let sub = |op: IROperand| if &op == old { new.clone() } else { op };
     match inst {
@@ -2110,6 +2114,14 @@ impl<'a> Codegen<'a> {
 
             IRInst::Pin { .. } => {}
 
+            IRInst::LocalAddr { dest, offset } => {
+                let dest_asm = self.operand_to_asm(dest);
+                out.push(AsmInst::SprLea(
+                    dest_asm,
+                    Spr::SP,
+                    AsmOperand::Imm16(*offset as i16),
+                ));
+            }
             //So first 4 arguments go into 4 first registers depending on their size, rest are
             //spilled on the stack
             IRInst::Call {

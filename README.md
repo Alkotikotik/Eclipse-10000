@@ -6,7 +6,7 @@ This project aims to recreate full computer stack from the very scratch
 *[-] Currently working on Compiler than compiles my own programming language to that Assembler
 *[.] OS on that programming language
 
-many of the CPU and Compiler files do not contain much of a comments, its because only when finishing compiler I realized how good comments are.
+many of the CPU and Compiler files do not contain much of a comments, its because only when finishing compiler I realized how good comments are. This project is NOT vibecoded or anything like that, there is just no point of me doing that.
 
-# FLARE-10K 
-Compiled language documentation in docs/flare.md
+# FLARE-10K
+Language documentation in docs/flare.md

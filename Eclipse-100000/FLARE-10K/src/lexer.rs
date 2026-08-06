@@ -65,7 +65,7 @@ pub enum Token {
     Pin(String),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Lexer<'a> {
     chars: Peekable<Chars<'a>>,
     line: usize,
