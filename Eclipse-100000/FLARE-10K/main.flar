@@ -19,7 +19,7 @@ regarch Rgba {
 >_ Global structs are avaliable, they can kinda be used as OOP
 #def #rx11 Rgba color;
 
-func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regular var in that func
+func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c { >_ c acts as a regular var in that func
 
 
     >_ bitwises
@@ -60,7 +60,7 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c{ >_ c acts as a regu
     }
     while [true] {
         >_ It works just fine(ignoring subtle fact that it will just be stuck forever)
-        if [false]{
+        if [true]{ >_ not anymore though
             break;
         }
     }
@@ -88,7 +88,7 @@ func main(){
     z.flags = 11;
 
     u32 c = bootstrap_os(X_BOUND, Y_BOUND, &z);
-    [4092] = c;
+    [4060] = c;
 }
 
 func get_color() => Rgba color {

@@ -353,7 +353,8 @@ impl IRInst {
             | IRInst::Negate { dest, .. }
             | IRInst::Cpy { dest, .. }
             | IRInst::Cast { dest, .. }
-            | IRInst::LoadPtr { dest, .. } => {
+            | IRInst::LoadPtr { dest, .. }
+            | IRInst::LocalAddr { dest, .. } => {
                 if dest.is_var() {
                     ls.push(dest.clone());
                 }
@@ -657,7 +658,7 @@ impl<'a> Codegen<'a> {
             global_layout,
             cfg: Vec::new(),
             allocations: HashMap::new(),
-            frame_size: 0,
+            frame_size: ir_func.local_frame_size,
             slots: RegisterTracker::new(&global_layout.pins),
             pins,
             next_temp,
@@ -878,6 +879,10 @@ fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst 
             stack_args: stack_args.into_iter().map(|arg| sub(arg)).collect(),
         },
         IRInst::Return(val) => IRInst::Return(val.map(sub)),
+        IRInst::LocalAddr { dest, offset } => IRInst::LocalAddr {
+            dest: sub(dest),
+            offset,
+        },
         other => other,
     }
 }
@@ -1672,13 +1677,20 @@ impl<'a> Codegen<'a> {
         is_load: bool,
         out: &mut Vec<AsmInst>,
     ) {
-        let (base, off, used_rx30) = self.resolve_addr(ptr_addr, out);
+        let (base, off, mut used_rx30) = self.resolve_addr(ptr_addr, out);
+        let mut used_rx31 = false;
 
         let value_operand = if is_load {
             self.operand_to_asm(dest_or_src)
         } else if is_const(dest_or_src) {
-            load_const(rx30_reg(), const_val(dest_or_src), out);
-            reg_op(rx30_reg())
+            let target = if used_rx30 { rx31_reg() } else { rx30_reg() };
+            load_const(target, const_val(dest_or_src), out);
+            if target.id == 31 {
+                used_rx31 = true;
+            } else {
+                used_rx30 = true;
+            }
+            reg_op(target)
         } else {
             self.operand_to_asm(dest_or_src)
         };
@@ -1698,6 +1710,9 @@ impl<'a> Codegen<'a> {
 
         if used_rx30 {
             out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));
+        }
+        if used_rx31 {
+            out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
         }
     }
 
@@ -1802,6 +1817,7 @@ impl<'a> Codegen<'a> {
 
     fn lower_cmp(&mut self, left: &IROperand, right: &IROperand, out: &mut Vec<AsmInst>) {
         let mut used_rx30 = false;
+        let mut used_rx31 = false;
 
         let l_op = if is_const(left) {
             load_const(rx30_reg(), const_val(left), out);
@@ -1812,9 +1828,14 @@ impl<'a> Codegen<'a> {
         };
 
         let r_op = if is_const(right) {
-            load_const(rx30_reg(), const_val(right), out);
-            used_rx30 = true;
-            reg_op(rx30_reg())
+            let target = if used_rx30 { rx31_reg() } else { rx30_reg() };
+            load_const(target, const_val(right), out);
+            if target.id == 31 {
+                used_rx31 = true;
+            } else {
+                used_rx30 = true;
+            }
+            reg_op(target)
         } else {
             self.operand_to_asm(right)
         };
@@ -1823,6 +1844,9 @@ impl<'a> Codegen<'a> {
 
         if used_rx30 {
             out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));
+        }
+        if used_rx31 {
+            out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
         }
     }
 
@@ -2062,7 +2086,7 @@ impl<'a> Codegen<'a> {
                 target,
             } => {
                 self.lower_cmp(left, right, out);
-                out.push(AsmInst::Bne(target.clone()));
+                out.push(AsmInst::Beq(target.clone()));
             }
 
             IRInst::Equal {
@@ -2071,7 +2095,7 @@ impl<'a> Codegen<'a> {
                 target,
             } => {
                 self.lower_cmp(left, right, out);
-                out.push(AsmInst::Beq(target.clone()));
+                out.push(AsmInst::Bne(target.clone()));
             }
 
             IRInst::AntiMore {
@@ -2081,6 +2105,7 @@ impl<'a> Codegen<'a> {
                 signed,
             } => {
                 self.lower_cmp(left, right, out);
+                out.push(AsmInst::Beq(target.clone()));
                 if *signed {
                     out.push(AsmInst::Bss(target.clone()));
                 } else {
@@ -2095,6 +2120,7 @@ impl<'a> Codegen<'a> {
                 signed,
             } => {
                 self.lower_cmp(left, right, out);
+                out.push(AsmInst::Beq(target.clone()));
                 if *signed {
                     out.push(AsmInst::Bgs(target.clone()));
                 } else {
@@ -2167,6 +2193,15 @@ impl<'a> Codegen<'a> {
                                 *src = rx30();
                             }
                         }
+                    }
+                }
+
+                for arg in stack_args.iter().rev() {
+                    if is_const(arg) {
+                        load_const(rx30_reg(), const_val(arg), out);
+                        out.push(AsmInst::Push(rx30()));
+                    } else {
+                        out.push(AsmInst::Push(self.operand_to_asm(arg)));
                     }
                 }
 

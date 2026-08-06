@@ -14,22 +14,23 @@
 
 ~Lab_while_start_0:
 	LOAD rx30 <- 1
-	LOAD rx30 <- 0
-	CMP rx30 <-> rx30
+	LOAD rx31 <- 0
+	CMP rx30 <-> rx31
 	XOR [rx30, rx30 0]
-	BNE -> ~Lab_while_end_1
+	XOR [rx31, rx31 0]
+	BEQ -> ~Lab_while_end_1
 	MOV rx0 <- rz290 0
+	SHL [rx0, rx31 12]
+	MOV rx1 <- rz291 0
+	SHL [rx1, rx31 8]
 	MOV rx1 <- rx0 0
-	SHL [rx1, rx31 12]
-	MOV rx0 <- rz291 0
-	SHL [rx0, rx31 8]
-	OR  [rx1, rx0 0]
+	OR  [rx1, rx1 0]
 	MOV rx0 <- rz292 0
 	SHL [rx0, rx31 4]
-	OR  [rx1, rx0 0]
-	MOV rx0 <- rz293 0
 	MOV rx0 <- rx1 0
 	OR  [rx0, rx0 0]
+	MOV rx1 <- rz293 0
+	OR  [rx0, rx1 0]
 	STR rx0 -> [rx3 0]
 	ADD rx0 <- [rx3, rx31 2]
 	MOV rx3 <- rx0 0

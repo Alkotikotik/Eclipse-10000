@@ -896,8 +896,7 @@ impl IR {
 
                 self.loop_exit_stack.pop();
 
-                self.emit(IRInst::JMP(start_label.clone()));
-                println!("Jumping to loop start: {}", start_label);
+                self.emit(IRInst::JMP(start_label));
                 self.emit(IRInst::Label(end_label));
             }
             Stmt::IfElse {
@@ -932,9 +931,8 @@ impl IR {
                 self.emit(IRInst::Label(end_label));
             }
             Stmt::Break => {
-                if let Some(target) = self.loop_exit_stack.last().cloned() {
+                if let Some(target) = self.loop_exit_stack.last() {
                     self.emit(IRInst::JMP(target.clone()));
-                    println!("Jumping to loop end: {}", target);
                 } else {
                     panic!("Break outside valid scope");
                 }
@@ -1061,12 +1059,12 @@ impl IR {
                 let is_signed =
                     left_ty == right_ty && matches!(left_ty, Type::I32 | Type::I16 | Type::I8);
                 let inst = match op {
-                    MoreLess::Eq => IRInst::AntiEqual {
+                    MoreLess::Eq => IRInst::Equal {
                         left: l_op,
                         right: r_op,
                         target: false_label,
                     },
-                    MoreLess::NotEq => IRInst::Equal {
+                    MoreLess::NotEq => IRInst::AntiEqual {
                         left: l_op,
                         right: r_op,
                         target: false_label,
