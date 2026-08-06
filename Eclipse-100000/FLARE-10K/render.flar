@@ -1,0 +1,15 @@
+func main(){
+    u32 ptr = 0x04000000;
+    u16 color = 0x0000;
+
+    while [true] {
+        [ptr] = color;
+        [ptr - 2] = !color;
+        ptr = ptr + 2;
+        color = color + 2;
+        if [color > 0xFFFF] {
+            color = 0x0000;
+        }
+    }
+}
+

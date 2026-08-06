@@ -1,0 +1,9 @@
+~Init:
+    LOAD ry01 <- 0x0400
+    LOAD rx1 <- 0xFFFF
+    LOAD rx2 <- 4
+
+~Render:
+    STR rx1 -> rx0
+    ADD [rx0, rx0, rx31, 2]
+    JMP ~Render

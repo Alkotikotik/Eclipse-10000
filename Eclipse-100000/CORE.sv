@@ -218,7 +218,7 @@ module CORE(
             RegY <= 32'd0;
             EA <= 32'd0;
             KernelMode <= 1;
-            SP <= 32'h03FFFFFC;
+            SP <= 32'h03FFFFF0;
             KSP <= 32'h00000FFC;
             LR  <= 32'd0;
             KScratch <= 32'd0;
@@ -284,14 +284,14 @@ module CORE(
         endcase
     end
 
-    //First 2GB(0x00000000 - 0x00000000) - regular RAM
-    //Next 1MB(0x80000000 - 0x800FFFFF) - VRAM
-    //Then I/O registers
-    //Starting with 64MB
+    // Address Map:
+    // 64MB System RAM : 0x00000000 - 0x03FFFFFF
+    // 1MB VRAM        : 0x04000000 - 0x040FFFFF
+    // MMIO Registers  : I/O stuff
     always_comb begin
-        RAM_cs = 0;
+        RAM_cs  = 0;
         VRAM_cs = 0;
-        IO_cs = 0;
+        IO_cs   = 0;
 
         if (IRWrite) begin
             RAM_cs = 1;
@@ -300,13 +300,13 @@ module CORE(
             if (memTarget <= 32'h03FFFFFF) begin
                 RAM_cs = 1;
             end
-            else if (memTarget >= 32'h80000000 && memTarget <= 32'h800FFFFF) begin
+            else if (memTarget >= 32'h04000000 && memTarget <= 32'h040FFFFF) begin
                 VRAM_cs = 1;
             end
-            else if (memTarget >= 32'hFFFFFF00) begin
+            else if (memTarget >= 32'h04100000 && memTarget <= 32'h041000FF) begin
                 IO_cs = 1;
             end
-            //Else [Fatal errors: you are cooked buddy]
+            //Else memFault
         end
     end
 
@@ -337,20 +337,19 @@ module CORE(
             cpu_mem_data_out = ram_data_out;
         end else if (IO_cs) begin
             unique case (memTarget)
-                32'hFFFFFF00: cpu_mem_data_out = {24'd0, ENC_10K_KeyIn};
-                32'hFFFFFF04: cpu_mem_data_out = {16'd0, mmio_timer_reg};
-                32'hFFFFFF14: cpu_mem_data_out = SP;
-                32'hFFFFFF18: cpu_mem_data_out = KSP;
-                32'hFFFFFF1C: cpu_mem_data_out = KScratch;
-                32'hFFFFFF20: cpu_mem_data_out = ActiveSP;
-                32'hFFFFFF24: cpu_mem_data_out = LR;
+                32'h04100000: cpu_mem_data_out = {24'd0, ENC_10K_KeyIn};
+                32'h04100004: cpu_mem_data_out = {16'd0, mmio_timer_reg};
+                32'h04100014: cpu_mem_data_out = SP;
+                32'h04100018: cpu_mem_data_out = KSP;
+                32'h0410001C: cpu_mem_data_out = KScratch;
+                32'h04100020: cpu_mem_data_out = ActiveSP;
+                32'h04100024: cpu_mem_data_out = LR;
                 default:      cpu_mem_data_out = 32'd0; 
             endcase
         end else begin
-            cpu_mem_data_out = 32'd0; // VRAM read fallback or unmapped space
+            cpu_mem_data_out = 32'd0; //fallback to unmapped space
         end
     end
-
     assign GPRs_data_in = (GPRsSrc == 3'b001) ? cpu_mem_data_out :
                   (GPRsSrc == 3'b010) ? PC :
                   (GPRsSrc == 3'b011) ? sign_ext_imm18 :
@@ -421,8 +420,8 @@ module CORE(
         .data_out(ram_data_out)
     );
 
-    assign vram_addr = memTarget - 32'h80000000;
+    assign vram_addr     = memTarget - 32'h04000000;
     assign vram_data_out = RegX;
-    assign vram_write = (memWrite && VRAM_cs);
+    assign vram_write    = (memWrite && VRAM_cs);
 
 endmodule

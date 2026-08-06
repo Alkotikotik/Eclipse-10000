@@ -9,13 +9,15 @@ func main() {
     u32 ptr = 4096;
     init_cube();
 
-    while [1 == 1] {
+    while [true] {
+        if [ptr < 4000] {
+            break;
+        }
+
         [ptr] = cube.x * 4;
         [ptr - 4] = cube.y * 4;
         ptr = ptr - 8;
-        if [ptr < 2048] {
-            break;
-        }
+
     }
 }
 

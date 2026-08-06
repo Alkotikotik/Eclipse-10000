@@ -2062,7 +2062,7 @@ impl<'a> Codegen<'a> {
                 target,
             } => {
                 self.lower_cmp(left, right, out);
-                out.push(AsmInst::Beq(target.clone()));
+                out.push(AsmInst::Bne(target.clone()));
             }
 
             IRInst::Equal {
@@ -2071,7 +2071,7 @@ impl<'a> Codegen<'a> {
                 target,
             } => {
                 self.lower_cmp(left, right, out);
-                out.push(AsmInst::Bne(target.clone()));
+                out.push(AsmInst::Beq(target.clone()));
             }
 
             IRInst::AntiMore {

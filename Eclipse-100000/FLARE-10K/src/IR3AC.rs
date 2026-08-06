@@ -896,7 +896,8 @@ impl IR {
 
                 self.loop_exit_stack.pop();
 
-                self.emit(IRInst::JMP(start_label));
+                self.emit(IRInst::JMP(start_label.clone()));
+                println!("Jumping to loop start: {}", start_label);
                 self.emit(IRInst::Label(end_label));
             }
             Stmt::IfElse {
@@ -931,8 +932,9 @@ impl IR {
                 self.emit(IRInst::Label(end_label));
             }
             Stmt::Break => {
-                if let Some(target) = self.loop_exit_stack.last() {
+                if let Some(target) = self.loop_exit_stack.last().cloned() {
                     self.emit(IRInst::JMP(target.clone()));
+                    println!("Jumping to loop end: {}", target);
                 } else {
                     panic!("Break outside valid scope");
                 }

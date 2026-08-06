@@ -3,48 +3,33 @@
 	XOR [rx30, rx30]
 
 ~main:
-	SPRLEA rx30 <- [LR 0]
-	PUSH <- rx30
-	LOAD rx1 <- 4096
-	PUSH <- rx1
-	CALL init_cube
-	POP -> rx1
+	LOAD ry30 <- 0
+	LOAD ry31 <- 1024
+	LOAD ry10 <- 0
 
 ~Lab_while_start_0:
 	LOAD rx30 <- 1
-	LOAD rx30 <- 1
+	LOAD rx30 <- 0
 	CMP rx30 <-> rx30
 	XOR [rx30, rx30 0]
-	BEQ -> ~Lab_while_start_0
-	MOV rx0 <- ry290 0
-	LOAD rx30 <- 4
-	MUL rx0 <- [rx0, rx30 0]
-	STR rx0 -> [rx1 0]
-	MOV rx0 <- ry291 0
-	LOAD rx30 <- 4
-	MUL rx2 <- [rx0, rx30 0]
-	LOAD rx30 <- 4
-	SUB rx0 <- [rx1, rx30 0]
+	BNE -> ~Lab_while_end_1
+	STR ry10 -> [rx3 0]
+	MOV rx2 <- ry10 0
+	NOT rx2
+	SUB rx0 <- [rx3, rx31 2]
 	STR rx2 -> [rx0 0]
-	LOAD rx30 <- 8
-	SUB rx0 <- [rx0, rx30 0]
-	MOV rx1 <- rx0 0
-	LOAD rx30 <- 4000
-	CMP rx1 <-> rx30
+	ADD rx0 <- [rx3, rx31 2]
+	MOV rx3 <- rx0 0
+	ADD rx0 <- [ry10, rx31 2]
+	MOV ry10 <- rx0 0
+	LOAD rx30 <- 65535
+	CMP ry10 <-> rx30
 	XOR [rx30, rx30 0]
 	BSU -> ~Lab_endif_3
-	JMP -> ~Lab_while_start_0
+	LOAD ry10 <- 0
 
 ~Lab_endif_3:
-	JMP -> ~Lab_while_end_1
+	JMP -> ~Lab_while_start_0
 
 ~Lab_while_end_1:
-	POP -> rx31
-	SPRSET rx31 -> LR
-	JMP ~End
-
-~init_cube:
-	LOAD ry290 <- 1
-	LOAD ry291 <- 2
 	RET
-~End:
