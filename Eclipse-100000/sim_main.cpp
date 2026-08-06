@@ -19,7 +19,7 @@ constexpr uint32_t VRAM_SIZE = INTERNAL_WIDTH * INTERNAL_HEIGHT * 2; // RGBA4444
 constexpr int WINDOW_WIDTH = 1920;
 constexpr int WINDOW_HEIGHT = 1080;
 
-constexpr double TARGET_CPU_HZ = 10000.0;
+constexpr double TARGET_CPU_HZ = 10000000.0; // 10 MHz seems pretty fast
 
 static std::vector<uint8_t> vram_buffer(1024 * 1024, 0);
 
