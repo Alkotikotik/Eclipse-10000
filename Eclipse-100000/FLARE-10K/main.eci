@@ -3,12 +3,14 @@
 	XOR [rx30, rx30]
 
 ~main:
-	SPRLEA rx30 <- [LR 0]
-	PUSH <- rx30
-	LOAD rx2 <- 4096
-	PUSH <- rx2
-	CALL init_cube
-	POP -> rx2
+	LOAD ry30 <- 0
+	LOAD ry31 <- 1024
+	LOAD rx29 <- 0
+	LOAD rz290 <- 15
+	LOAD rz291 <- 0
+	LOAD rz292 <- 0
+	LOAD rz293 <- 15
+	LOAD rz20 <- 0
 
 ~Lab_while_start_0:
 	LOAD rx30 <- 1
@@ -16,34 +18,88 @@
 	CMP rx30 <-> rx30
 	XOR [rx30, rx30 0]
 	BNE -> ~Lab_while_end_1
-	LOAD rx30 <- 4000
-	CMP rx2 <-> rx30
+	MOV rx0 <- rz290 0
+	MOV rx1 <- rx0 0
+	SHL [rx1, rx31 12]
+	MOV rx0 <- rz291 0
+	SHL [rx0, rx31 8]
+	OR  [rx1, rx0 0]
+	MOV rx0 <- rz292 0
+	SHL [rx0, rx31 4]
+	OR  [rx1, rx0 0]
+	MOV rx0 <- rz293 0
+	MOV rx0 <- rx1 0
+	OR  [rx0, rx0 0]
+	STR rx0 -> [rx3 0]
+	ADD rx0 <- [rx3, rx31 2]
+	MOV rx3 <- rx0 0
+	LOAD rx30 <- 0
+	CMP rz20 <-> rx30
 	XOR [rx30, rx30 0]
-	BGU -> ~Lab_endif_3
-	JMP -> ~Lab_while_end_1
+	BNE -> ~Lab_else_2
+	MOV rx0 <- rz290 0
+	SUB rx0 <- [rx0, rx31 1]
+	MOV rz290 <- rx0 0
+	MOV rx0 <- rz291 0
+	ADD rx0 <- [rx0, rx31 1]
+	MOV rz291 <- rx0 0
+	MOV rx0 <- rz291 0
+	LOAD rx30 <- 15
+	CMP rx0 <-> rx30
+	XOR [rx30, rx30 0]
+	BNE -> ~Lab_endif_5
+	LOAD rz20 <- 1
+
+~Lab_endif_5:
+	JMP -> ~Lab_endif_3
+
+~Lab_else_2:
+	LOAD rx30 <- 1
+	CMP rz20 <-> rx30
+	XOR [rx30, rx30 0]
+	BNE -> ~Lab_else_6
+	MOV rx0 <- rz291 0
+	SUB rx0 <- [rx0, rx31 1]
+	MOV rz291 <- rx0 0
+	MOV rx0 <- rz292 0
+	ADD rx0 <- [rx0, rx31 1]
+	MOV rz292 <- rx0 0
+	MOV rx0 <- rz292 0
+	LOAD rx30 <- 15
+	CMP rx0 <-> rx30
+	XOR [rx30, rx30 0]
+	BNE -> ~Lab_endif_9
+	LOAD rz20 <- 2
+
+~Lab_endif_9:
+	JMP -> ~Lab_endif_7
+
+~Lab_else_6:
+	LOAD rx30 <- 2
+	CMP rz20 <-> rx30
+	XOR [rx30, rx30 0]
+	BNE -> ~Lab_endif_11
+	MOV rx0 <- rz292 0
+	SUB rx0 <- [rx0, rx31 1]
+	MOV rz292 <- rx0 0
+	MOV rx0 <- rz290 0
+	ADD rx0 <- [rx0, rx31 1]
+	MOV rz290 <- rx0 0
+	MOV rx0 <- rz290 0
+	LOAD rx30 <- 15
+	CMP rx0 <-> rx30
+	XOR [rx30, rx30 0]
+	BNE -> ~Lab_endif_13
+	LOAD rz20 <- 0
+
+~Lab_endif_13:
+
+~Lab_endif_11:
+
+~Lab_endif_7:
 
 ~Lab_endif_3:
-	MOV rx0 <- ry290 0
-	LOAD rx30 <- 4
-	MUL rx0 <- [rx0, rx30 0]
-	STR rx0 -> [rx2 0]
-	MOV rx0 <- ry291 0
-	LOAD rx30 <- 4
-	MUL rx1 <- [rx0, rx30 0]
-	LOAD rx30 <- 4
-	SUB rx0 <- [rx2, rx30 0]
-	STR rx1 -> [rx0 0]
-	LOAD rx30 <- 8
-	SUB rx0 <- [rx2, rx30 0]
-	MOV rx2 <- rx0 0
 	JMP -> ~Lab_while_start_0
 
 ~Lab_while_end_1:
-	POP -> rx31
-	SPRSET rx31 -> LR
-	RET
-
-~init_cube:
-	LOAD ry290 <- 1
-	LOAD ry291 <- 2
 	RET
