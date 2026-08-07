@@ -133,12 +133,14 @@ pub enum IRInst {
         right: IROperand,
         target: String,
         signed: bool,
+        isEq: bool,
     }, //Branch if not equal
     AntiLess {
         left: IROperand,
         right: IROperand,
         target: String,
         signed: bool,
+        isEq: bool,
     }, //Branch if more becomes branch
     //If less
     Label(String),
@@ -1071,17 +1073,19 @@ impl IR {
                         right: r_op,
                         target: false_label,
                     },
-                    MoreLess::More => IRInst::AntiMore {
+                    MoreLess::More(is_eq) => IRInst::AntiMore {
                         left: l_op,
                         right: r_op,
                         target: false_label,
                         signed: is_signed,
+                        isEq: *is_eq,
                     },
-                    MoreLess::Less => IRInst::AntiLess {
+                    MoreLess::Less(is_eq) => IRInst::AntiLess {
                         left: l_op,
                         right: r_op,
                         target: false_label,
                         signed: is_signed,
+                        isEq: *is_eq,
                     },
                 };
                 self.emit(inst);

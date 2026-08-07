@@ -496,21 +496,29 @@ impl<'a> Parser<'a> {
             match token {
                 Token::More => {
                     self.advance();
+                    let isEq = matches!(self.tokens.peek(), Some(&(Token::Equal, _, _)));
+                    if isEq {
+                        self.advance();
+                    }
                     let right = self.parse_bitwises();
 
                     expr = Expr::MoreLessEq {
                         left: Box::new(expr),
-                        op: MoreLess::More,
+                        op: MoreLess::More(isEq),
                         right: Box::new(right),
                     };
                 }
                 Token::Less => {
                     self.advance();
-                    let right = self.parse_term();
+                    let isEq = matches!(self.tokens.peek(), Some(&(Token::Equal, _, _)));
+                    if isEq {
+                        self.advance();
+                    }
+                    let right = self.parse_bitwises();
 
                     expr = Expr::MoreLessEq {
                         left: Box::new(expr),
-                        op: MoreLess::Less,
+                        op: MoreLess::Less(isEq),
                         right: Box::new(right),
                     };
                 }

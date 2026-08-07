@@ -851,22 +851,26 @@ fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst 
             right,
             target,
             signed,
+            isEq,
         } => IRInst::AntiMore {
             left: sub(left),
             right: sub(right),
             target,
             signed,
+            isEq,
         },
         IRInst::AntiLess {
             left,
             right,
             target,
             signed,
+            isEq,
         } => IRInst::AntiLess {
             left: sub(left),
             right: sub(right),
             target,
             signed,
+            isEq,
         },
         IRInst::Call {
             dest,
@@ -2104,13 +2108,16 @@ impl<'a> Codegen<'a> {
                 right,
                 target,
                 signed,
+                isEq
             } => {
                 self.lower_cmp(left, right, out);
-                //out.push(AsmInst::Beq(target.clone()));
                 if *signed {
                     out.push(AsmInst::Bss(target.clone()));
                 } else {
                     out.push(AsmInst::Bsu(target.clone()));
+                }
+                if !*isEq {
+                    out.push(AsmInst::Beq(target.clone()));
                 }
             }
 
@@ -2119,13 +2126,16 @@ impl<'a> Codegen<'a> {
                 right,
                 target,
                 signed,
+                isEq,
             } => {
                 self.lower_cmp(left, right, out);
-                //out.push(AsmInst::Beq(target.clone()));
                 if *signed {
                     out.push(AsmInst::Bgs(target.clone()));
                 } else {
                     out.push(AsmInst::Bgu(target.clone()));
+                }
+                if !*isEq {
+                    out.push(AsmInst::Beq(target.clone())); // Branch Equal (==)
                 }
             }
 
