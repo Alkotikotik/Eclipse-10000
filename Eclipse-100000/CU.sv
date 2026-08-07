@@ -4,7 +4,7 @@ module CU(
 
     input logic [5:0] opcode,
 
-    input logic [3:0] flags, //3 flags(C, N, V, Z) compacted into 3bit variable
+    input logic [3:0] flags, //4 flags(C, N, V, Z) compacted into 4bit variable
     input logic [15:0] mmio_timer_reg,
 
     input logic current_kernel_mode,

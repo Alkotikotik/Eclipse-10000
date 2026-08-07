@@ -1513,13 +1513,8 @@ impl<'a> Codegen<'a> {
         }
 
         if self.frame_size > 0 {
-            compiled.push(AsmInst::SprLea(
-                reg_op(rx30_reg()),
-                Spr::SP,
-                AsmOperand::Imm16(0),
-            ));
             compiled.push(AsmInst::SprSub(
-                reg_op(rx30_reg()),
+                rx31(),
                 Spr::SP,
                 AsmOperand::Imm16(self.frame_size as i16),
             ));
@@ -1638,13 +1633,8 @@ impl<'a> Codegen<'a> {
         let mut out = Vec::new();
 
         if layout.total_size > 0 {
-            out.push(AsmInst::SprLea(
-                reg_op(rx30_reg()),
-                Spr::SP,
-                AsmOperand::Imm16(0),
-            ));
             out.push(AsmInst::SprSub(
-                reg_op(rx30_reg()),
+                rx31(),
                 Spr::SP,
                 AsmOperand::Imm16(layout.total_size as i16),
             ));
@@ -2219,13 +2209,8 @@ impl<'a> Codegen<'a> {
                 out.push(AsmInst::Call(name.clone()));
 
                 if !stack_args.is_empty() {
-                    out.push(AsmInst::SprLea(
-                        reg_op(rx30_reg()),
-                        Spr::SP,
-                        AsmOperand::Imm16(0),
-                    ));
                     out.push(AsmInst::SprAdd(
-                        reg_op(rx30_reg()),
+                        rx31(),
                         Spr::SP,
                         AsmOperand::Imm16((stack_args.len() * 4) as i16),
                     ));
@@ -2260,16 +2245,12 @@ impl<'a> Codegen<'a> {
                 if !self.is_leaf() {
                     out.push(AsmInst::Pop(reg_op(rx31_reg())));
                     out.push(AsmInst::SprSet(reg_op(rx31_reg()), Spr::LR));
+                    out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
                 }
 
                 if self.frame_size > 0 {
-                    out.push(AsmInst::SprLea(
-                        reg_op(rx31_reg()),
-                        Spr::SP,
-                        AsmOperand::Imm16(0),
-                    ));
                     out.push(AsmInst::SprAdd(
-                        reg_op(rx31_reg()),
+                        rx31(),
                         Spr::SP,
                         AsmOperand::Imm16(self.frame_size as i16),
                     ));

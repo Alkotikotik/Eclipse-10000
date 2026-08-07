@@ -27,7 +27,6 @@ func main(){
     [4008] = 15;
     u32 c = bootstrap_os(4, 8, &z);
     [4000] = c;
-    [4004] = 12;
 }
 
 func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => #rx29 u32 c { >_ c acts as a regular var in that func

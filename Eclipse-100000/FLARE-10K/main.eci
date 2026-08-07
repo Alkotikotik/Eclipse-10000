@@ -1,18 +1,246 @@
 ~Init_000:
 	XOR [rx31, rx31]
 	XOR [rx30, rx30]
+	SPRSUB rx31 ->SP<- 8
+	SPRLEA rx30 <- [SP 0]
+	SPRSET rx30 -> GP
+	LOAD rx30 <- 360
+	SPRSTR rx30 -> [GP 0]
+	LOAD rx30 <- 240
+	SPRSTR rx30 -> [GP 4]
 
 ~main:
-	LOAD rz00 <- 11
+	SPRSUB rx31 ->SP<- 8
+	SPRLEA rx30 <- [LR 0]
+	PUSH <- rx30
+	SPRLEA rx0 <- [SP 0]
+	ADD rx0 <- [rx0, rx31 0]
 	LOAD rx30 <- 10
-	CMP rz00 <-> rx30
+	STR rx30 -> [rx0 0]
 	XOR [rx30, rx30 0]
-	BGU -> ~Lab_endif_1
-	LOAD rx30 <- 4000
-	LOAD rx31 <- 11
+	SPRLEA rx0 <- [SP 0]
+	LOAD rx30 <- 4
+	ADD rx0 <- [rx0, rx30 0]
+	LOAD rx30 <- 11
+	STR rx30 -> [rx0 0]
+	XOR [rx30, rx30 0]
+	LOAD rx30 <- 4008
+	LOAD rx31 <- 15
 	STR rx31 -> [rx30 0]
 	XOR [rx30, rx30 0]
 	XOR [rx31, rx31 0]
+	SPRLEA rx0 <- [SP 0]
+	LOAD rx0 <- 4
+	LOAD rx1 <- 8
+	MOV rx2 <- rx0 0
+	CALL bootstrap_os
+	MOV rx0 <- rx30 0
+	LOAD rx30 <- 4000
+	STR rx0 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	POP -> rx31
+	SPRSET rx31 -> LR
+	XOR [rx31, rx31 0]
+	SPRADD rx31 ->SP<- 8
+	RET
 
-~Lab_endif_1:
+~bootstrap_os:
+	SPRSUB rx31 ->SP<- 24
+	SPRLEA rx30 <- [LR 0]
+	PUSH <- rx30
+	MOV rx4 <- rx0 0
+	MOV rx5 <- rx1 0
+	MOV rx6 <- rx2 0
+	LOAD rx29 <- 0
+	LOAD rx30 <- 4012
+	STR rx4 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	LOAD rx30 <- 4016
+	STR rx5 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	LOAD ry30 <- 256
+	LOAD rz70 <- 2
+	MOV rx3 <- ry30 0
+	SHL [rx3, rx31 3]
+	MOV ry30 <- rx3 0
+	MOV rx3 <- ry30 0
+	SHR [rx3, rx31 2]
+	MOV ry30 <- rx3 0
+	MOV rx3 <- ry30 0
+	AND [rx3, rz70 0]
+	MOV ry30 <- rx3 0
+	MOV rx3 <- ry30 0
+	OR  [rx3, rz70 0]
+	MOV ry30 <- rx3 0
+	MOV rx3 <- ry30 0
+	XOR [rx3, rz70 0]
+	MOV ry30 <- rx3 0
+	MOV rx3 <- ry30 0
+	ADD rx3 <- [rx29, rx3 0]
+	MOV rx29 <- rx3 0
+	LOAD rx30 <- 18
+	STR rx30 -> [rx6 0]
+	XOR [rx30, rx30 0]
+	SPRLEA rx3 <- [SP 0]
+	ADD rx3 <- [rx3, rx31 0]
+	LOAD rx30 <- 20
+	STR rx30 -> [rx3 0]
+	XOR [rx30, rx30 0]
+	SPRLEA rx3 <- [SP 0]
+	LOAD rx30 <- 4
+	ADD rx3 <- [rx3, rx30 0]
+	LOAD rx30 <- 1
+	STR rx30 -> [rx3 0]
+	XOR [rx30, rx30 0]
+	LDR rx3 <- [rx6 0]
+	ADD rx3 <- [rx29, rx3 0]
+	MOV rx29 <- rx3 0
+	SPRLEA rx3 <- [SP 8]
+	LOAD rx30 <- 0
+	STR rx30 -> [rx3 0]
+	XOR [rx30, rx30 0]
+	LOAD rx30 <- 4
+	ADD rx6 <- [rx3, rx30 0]
+	LOAD rx30 <- 0
+	STR rx30 -> [rx6 0]
+	XOR [rx30, rx30 0]
+	LOAD rx30 <- 8
+	ADD rx6 <- [rx3, rx30 0]
+	LOAD rx30 <- 0
+	STR rx30 -> [rx6 0]
+	XOR [rx30, rx30 0]
+	LOAD rx30 <- 12
+	ADD rx3 <- [rx3, rx30 0]
+	LOAD rx30 <- 0
+	STR rx30 -> [rx3 0]
+	XOR [rx30, rx30 0]
+	LOAD rx30 <- -248
+	LOAD rx31 <- 4096
+	STR rx31 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	XOR [rx31, rx31 0]
+	LOAD rx30 <- -244
+	LOAD rx31 <- 16384
+	STR rx31 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	XOR [rx31, rx31 0]
+	LOAD rx30 <- -248
+	LDR rx3 <- [rx30 0]
+	XOR [rx30, rx30 0]
+	LOAD rx3 <- -248
+	LOAD rx30 <- 512
+	STR rx30 -> [rx3 0]
+	XOR [rx30, rx30 0]
+	LDR rx3 <- [rx3 0]
+	ADD rx3 <- [rx29, rx3 0]
+	MOV rx29 <- rx3 0
+	LOAD rx30 <- 4012
+	STR rx4 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	LOAD rx30 <- 4016
+	STR rx5 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	PUSH <- rx4
+	PUSH <- rx5
+	CALL get_color
+	MOV rx3 <- rx30 0
+	POP -> rx5
+	POP -> rx4
+	MOV rx11 <- rx3 0
+	LOAD rx30 <- 4020
+	STR rx4 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	LOAD rx30 <- 4024
+	STR rx5 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	LOAD rx6 <- 0
+
+~Lab_for_start_0:
+	CMP rx6 <-> rx4
+	BGU -> ~Lab_for_end_1
+	BEQ -> ~Lab_for_end_1
+	SPRLEA rx3 <- [SP 8]
+	LOAD rx30 <- 4
+	MUL rx7 <- [rx6, rx30 0]
+	ADD rx3 <- [rx3, rx7 0]
+	STR rx6 -> [rx3 0]
+	SPRLEA rx7 <- [SP 8]
+	LOAD rx30 <- 4
+	MUL rx3 <- [rx6, rx30 0]
+	ADD rx3 <- [rx7, rx3 0]
+	LDR rx3 <- [rx3 0]
+	ADD rx3 <- [rx29, rx3 0]
+	MOV rx29 <- rx3 0
+	ADD rx3 <- [rx6, rx31 1]
+	MOV rx6 <- rx3 0
+	JMP -> ~Lab_for_start_0
+
+~Lab_for_end_1:
+	LOAD rz30 <- 1
+	LOAD rz31 <- 0
+
+~Lab_while_start_2:
+	LOAD rx30 <- 0
+	CMP rz30 <-> rx30
+	XOR [rx30, rx30 0]
+	BEQ -> ~Lab_while_end_3
+	LOAD rx30 <- 0
+	CMP rz31 <-> rx30
+	XOR [rx30, rx30 0]
+	BEQ -> ~Lab_else_4
+	MOV rx3 <- rz110 0
+	ADD rx3 <- [rx29, rx3 0]
+	MOV rx29 <- rx3 0
+	JMP -> ~Lab_while_end_3
+	JMP -> ~Lab_endif_5
+
+~Lab_else_4:
+	MOV rx3 <- rz111 0
+	ADD rx3 <- [rx29, rx3 0]
+	MOV rx29 <- rx3 0
+	JMP -> ~Lab_while_end_3
+
+~Lab_endif_5:
+	JMP -> ~Lab_while_end_3
+	JMP -> ~Lab_while_start_2
+
+~Lab_while_end_3:
+	CMP rx29 <-> rx29
+	BNE -> ~Lab_endif_7
+	LOAD rx3 <- 2
+
+~Lab_for_start_8:
+	CMP rx3 <-> rx5
+	BGU -> ~Lab_for_end_9
+	BEQ -> ~Lab_for_end_9
+	SUB rx4 <- [rx29, rx31 2]
+	MOV rx29 <- rx4 0
+	ADD rx3 <- [rx3, rx31 2]
+	JMP -> ~Lab_for_start_8
+
+~Lab_for_end_9:
+
+~Lab_endif_7:
+	ADD rx29 <- [rx29, rx31 + 2]
+	XOR [rx31, rx31]
+	SPRLDR rx3 <- [GP 0]
+	ADD rx3 <- [rx29, rx3 0]
+	MOV rx29 <- rx3 0
+	SPRLDR rx3 <- [GP 4]
+	SUB rx3 <- [rx29, rx3 0]
+	MOV rx29 <- rx3 0
+	MOV rx30 <- rx29 0
+	POP -> rx31
+	SPRSET rx31 -> LR
+	XOR [rx31, rx31 0]
+	SPRADD rx31 ->SP<- 24
+	RET
+
+~get_color:
+	LOAD rx11 <- 0
+	LOAD rz110 <- 255
+	LOAD rz111 <- 255
+	LOAD rz112 <- 0
+	LOAD rz113 <- 1
+	MOV rx30 <- rx11 0
 	RET
