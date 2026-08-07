@@ -49,7 +49,7 @@ impl Semantic {
 impl Semantic {
     fn is_integer(&self, ty: &Type) -> bool {
         match ty {
-            Type::U32 | Type::I32 | Type::U16 | Type::I16 | Type::U8 | Type::I8 => true,
+            Type::U32 | Type::I32 | Type::U16 | Type::I16 | Type::U8 | Type::I8 | Type::Bool => true,
             _ => false,
         }
     }

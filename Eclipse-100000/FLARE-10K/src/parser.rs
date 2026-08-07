@@ -102,8 +102,8 @@ pub enum BinaryOpKind {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MoreLess {
-    More,
-    Less,
+    More(bool), //For moreEq, LessEq true/false
+    Less(bool),
     Eq,
     NotEq,
 }

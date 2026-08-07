@@ -217,7 +217,7 @@ module CORE(
             RegX <= 32'd0;
             RegY <= 32'd0;
             EA <= 32'd0;
-            KernelMode <= 1;
+            KernelMode <= 0;
             SP <= 32'h03FFFFF0;
             KSP <= 32'h00000FFC;
             LR  <= 32'd0;

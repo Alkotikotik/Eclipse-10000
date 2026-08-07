@@ -19,17 +19,32 @@ regarch Rgba {
 >_ Global structs are avaliable, they can kinda be used as OOP
 #def #rx11 Rgba color;
 
-func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c { >_ c acts as a regular var in that func
+func main(){
 
+    PageTableEntry z;
+    z.Entry = 10;
+    z.flags = 11;
+    [4008] = 15;
+    u32 c = bootstrap_os(4, 8, &z);
+    [4000] = c;
+    [4004] = 12;
+}
+
+func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => #rx29 u32 c { >_ c acts as a regular var in that func
+
+    [4012] = x;
+    [4016] = y;
 
     >_ bitwises
-    u32 w = 256;
-    u32 r = 2;
-    w = w << r;
-    w = w >> r;
+    u16 w = 256;
+    u8 r = 2;
+    w = w << 3;
+    w = w >> 2;
     w = w & r;
     w = w | r;
     w = w ^ r;
+
+    c = c + (w as u32);
 
     >_ w = w % w; mod and division aren't implemented yet
 
@@ -38,6 +53,8 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c { >_ c acts as a reg
     PageTableEntry sigma;
     sigma.Entry = 20;
     sigma.flags = 1;
+
+    c = c + [z].Entry;
 
     u32 arr[4];
 
@@ -48,47 +65,50 @@ func bootstrap_os(u32 x, u32 y, *PageTableEntry z) => u32 c { >_ c acts as a reg
     u32 value1 = 0xFFFFFF08;
     [value1] = 512; >_ now value = 512
 
+    c = c + [value1];
 
-    #rx0 i32 a = 256; >_ a is stored in rx0 no matter what
+
+    [4012] = x;
+    [4016] = y;
+
     color = get_color(); >_ Same as Rgba
-    i16 b;
-    b = a * -256;
 
-    for [u32 i = 0; i < 5; i = i + 1] {
+    [4020] = x;
+    [4024] = y;
+
+    for [u32 i; i < x; i = i + 1] {
         arr[i] = i;
-        c = arr[i];
+        c = c + arr[i];
     }
-    while [true] {
+    bool isTrue = true;
+    bool isFalse = false;
+    while [isTrue] {
         >_ It works just fine(ignoring subtle fact that it will just be stuck forever)
-        if [true]{ >_ not anymore though
+        if [isFalse]{
+            c = c + color.r;
+            break;
+        } else { >_ not anymore
+            c = c + color.g;
             break;
         }
+        break; >_ jic
     }
 
-    if [c == 128] {
-        for [u32 j = 2; j < 64; j = j + 2] {
+    if [c == c] {
+        for [u32 j = 2; j < y; j = j + 2] {
             c = c - 2;
         }
     }
 
-    c = x * y; >_ Overflow you are cooked buddy
-
     inline [
-        XOR [rx0, rx0]
-        LOAD rx12 <- 0x10
+        ADD rx29 <- [rx29, rx31 + 2]
+        XOR [rx31, rx31]
     outline];
 
+    c = c + X_BOUND;
+    c = c - Y_BOUND;
+
     >_return c; last value of c is automatically returned, tho it can be returned explicetely
-}
-
-func main(){
-
-    PageTableEntry z;
-    z.Entry = 10;
-    z.flags = 11;
-
-    u32 c = bootstrap_os(X_BOUND, Y_BOUND, &z);
-    [4060] = c;
 }
 
 func get_color() => Rgba color {

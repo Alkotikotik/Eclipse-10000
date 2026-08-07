@@ -42,8 +42,9 @@ fn main() {
     });
     let lexer = Lexer::new(&src, 1, 1);
     if args.lex {
-        println!("Lexer:");
-        println!("{:?}", lexer);
+        for token in lexer {
+            println!("[{:?}]", token);
+        }
         return;
     }
     let mut parser = Parser::new(lexer);

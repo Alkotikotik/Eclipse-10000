@@ -6,6 +6,7 @@ use crate::IR3AC::{IRFunction, IRInst, IROperand, align_to, get_type_align, get_
 use crate::parser::{Expr, StructDef, Type};
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::fmt;
 
 pub const REGS_BYTES: usize = 120; //rx31, rx30 is scratchpad/0
@@ -2105,7 +2106,7 @@ impl<'a> Codegen<'a> {
                 signed,
             } => {
                 self.lower_cmp(left, right, out);
-                out.push(AsmInst::Beq(target.clone()));
+                //out.push(AsmInst::Beq(target.clone()));
                 if *signed {
                     out.push(AsmInst::Bss(target.clone()));
                 } else {
@@ -2120,7 +2121,7 @@ impl<'a> Codegen<'a> {
                 signed,
             } => {
                 self.lower_cmp(left, right, out);
-                out.push(AsmInst::Beq(target.clone()));
+                //out.push(AsmInst::Beq(target.clone()));
                 if *signed {
                     out.push(AsmInst::Bgs(target.clone()));
                 } else {

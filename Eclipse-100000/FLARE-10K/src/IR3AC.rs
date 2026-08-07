@@ -6,7 +6,9 @@ use crate::parser::{
 };
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+//Alright so apparetenly HashSet randomizes every time proccess starts, that why my results were
+//kinda random... Ord solves it though
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum IROperand {
     SignedConstant(i32),
     UnsignedConstant(u32),
