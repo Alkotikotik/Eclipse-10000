@@ -1,0 +1,121 @@
+SplineFontDB: 3.2
+FontName: Untitled2
+FullName: Untitled2
+FamilyName: Untitled2
+Weight: Regular
+Copyright: Copyright (c) 2026, Unknown
+UComments: "2026-8-8: Created with FontForge (http://fontforge.org)"
+Version: 001.000
+ItalicAngle: 0
+UnderlinePosition: -100
+UnderlineWidth: 50
+Ascent: 800
+Descent: 200
+InvalidEm: 0
+LayerCount: 2
+Layer: 0 0 "Back" 1
+Layer: 1 0 "Fore" 0
+XUID: [1021 474 -1244151620 14516847]
+OS2Version: 0
+OS2_WeightWidthSlopeOnly: 0
+OS2_UseTypoMetrics: 1
+CreationTime: 1786126237
+ModificationTime: 1786126237
+OS2TypoAscent: 0
+OS2TypoAOffset: 1
+OS2TypoDescent: 0
+OS2TypoDOffset: 1
+OS2TypoLinegap: 0
+OS2WinAscent: 0
+OS2WinAOffset: 1
+OS2WinDescent: 0
+OS2WinDOffset: 1
+HheadAscent: 0
+HheadAOffset: 1
+HheadDescent: 0
+HheadDOffset: 1
+OS2Vendor: 'PfEd'
+DEI: 91125
+Encoding: ISO8859-1
+UnicodeInterp: none
+NameList: AGL For New Fonts
+DisplaySize: 16
+AntiAlias: 1
+FitToEm: 0
+WinInfo: 0 37 25
+OnlyBitmaps: 1
+BeginChars: 256 8
+
+StartChar: zero
+Encoding: 48 48 0
+Width: 1000
+LayerCount: 2
+EndChar
+
+StartChar: uni0017
+Encoding: 23 23 1
+Width: 1000
+LayerCount: 2
+EndChar
+
+StartChar: uni000B
+Encoding: 11 11 2
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: uni000C
+Encoding: 12 12 3
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: uni000D
+Encoding: 13 13 4
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: uni000E
+Encoding: 14 14 5
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: uni000F
+Encoding: 15 15 6
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: uni0010
+Encoding: 16 16 7
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+EndChars
+BitmapFont: 16 8 13 3 1
+BDFChar: 0 48 16 0 0 0 0
+z
+BDFChar: 1 23 16 0 0 0 0
+z
+BDFChar: 2 11 16 0 6 0 12
+3.1/6P.J69P/cp;2uipY
+BDFChar: 3 12 16 0 5 0 12
+&28(m0JG170JG17qu?]s
+BDFChar: 4 13 16 0 6 0 12
+I.#"/"qDV4E8\OirVuou
+BDFChar: 5 14 16 0 6 0 12
+Gl/$U"pTJS"pP9\qu?]s
+BDFChar: 6 15 16 0 6 0 12
+K#YgM`lA",%L*+A"onW'
+BDFChar: 7 16 16 0 6 0 12
+I/`'>_#40A"pPS:qu?]s
+EndBitmapFont
+EndSplineFont

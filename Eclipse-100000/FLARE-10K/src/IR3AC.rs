@@ -718,52 +718,20 @@ impl IR {
                         self.local_frame_size = offset + slot_size;
                         self.local_slots.insert(name.clone(), offset);
 
-                        let base = self.new_temp();
-                        self.emit(IRInst::LocalAddr {
-                            dest: base.clone(),
-                            offset,
-                        });
-
                         if let Some(init_expr) = initial {
                             if let Expr::ArrayLiteral(elems) = &**init_expr {
                                 for (i, elem_expr) in elems.iter().enumerate() {
                                     let val_op = self.reduce_expr(elem_expr);
-                                    let addr = if i == 0 {
-                                        base.clone()
-                                    } else {
-                                        let off_temp = self.new_temp();
-                                        self.emit(IRInst::Add {
-                                            dest: off_temp.clone(),
-                                            left: base.clone(),
-                                            right: IROperand::UnsignedConstant(
-                                                (i * elem_size) as u32,
-                                            ),
-                                        });
-                                        off_temp
-                                    };
                                     self.emit(IRInst::StorePtr {
-                                        ptr_addr: addr,
+                                        ptr_addr: IROperand::FrameSlot(offset + i * elem_size),
                                         src: val_op,
                                     });
                                 }
                             }
                         } else {
                             for i in 0..*count {
-                                let addr = if i == 0 {
-                                    base.clone()
-                                } else {
-                                    let off_temp = self.new_temp();
-                                    self.emit(IRInst::Add {
-                                        dest: off_temp.clone(),
-                                        left: base.clone(),
-                                        right: IROperand::UnsignedConstant(
-                                            (i * elem_size) as u32,
-                                        ),
-                                    });
-                                    off_temp
-                                };
                                 self.emit(IRInst::StorePtr {
-                                    ptr_addr: addr,
+                                    ptr_addr: IROperand::FrameSlot(offset + i * elem_size),
                                     src: IROperand::SignedConstant(0),
                                 });
                             }

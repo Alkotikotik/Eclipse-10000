@@ -1,246 +1,201 @@
 ~Init_000:
 	XOR [rx31, rx31]
 	XOR [rx30, rx30]
-	SPRSUB rx31 ->SP<- 8
-	SPRLEA rx30 <- [SP 0]
-	SPRSET rx30 -> GP
-	LOAD rx30 <- 360
-	SPRSTR rx30 -> [GP 0]
-	LOAD rx30 <- 240
-	SPRSTR rx30 -> [GP 4]
 
 ~main:
-	SPRSUB rx31 ->SP<- 8
-	SPRLEA rx30 <- [LR 0]
-	PUSH <- rx30
-	SPRLEA rx0 <- [SP 0]
-	ADD rx0 <- [rx0, rx31 0]
-	LOAD rx30 <- 10
-	STR rx30 -> [rx0 0]
-	XOR [rx30, rx30 0]
-	SPRLEA rx0 <- [SP 0]
-	LOAD rx30 <- 4
-	ADD rx0 <- [rx0, rx30 0]
-	LOAD rx30 <- 11
-	STR rx30 -> [rx0 0]
-	XOR [rx30, rx30 0]
-	LOAD rx30 <- 4008
-	LOAD rx31 <- 15
-	STR rx31 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	XOR [rx31, rx31 0]
-	SPRLEA rx0 <- [SP 0]
-	LOAD rx0 <- 4
-	LOAD rx1 <- 8
-	MOV rx2 <- rx0 0
-	CALL bootstrap_os
-	MOV rx0 <- rx30 0
-	LOAD rx30 <- 4000
-	STR rx0 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	POP -> rx31
-	SPRSET rx31 -> LR
-	XOR [rx31, rx31 0]
-	SPRADD rx31 ->SP<- 8
-	RET
-
-~bootstrap_os:
-	SPRSUB rx31 ->SP<- 24
-	SPRLEA rx30 <- [LR 0]
-	PUSH <- rx30
-	MOV rx4 <- rx0 0
-	MOV rx5 <- rx1 0
-	MOV rx6 <- rx2 0
-	LOAD rx29 <- 0
-	LOAD rx30 <- 4012
-	STR rx4 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	LOAD rx30 <- 4016
-	STR rx5 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	LOAD ry30 <- 256
-	LOAD rz70 <- 2
-	MOV rx3 <- ry30 0
-	SHL [rx3, rx31 3]
-	MOV ry30 <- rx3 0
-	MOV rx3 <- ry30 0
-	SHR [rx3, rx31 2]
-	MOV ry30 <- rx3 0
-	MOV rx3 <- ry30 0
-	AND [rx3, rz70 0]
-	MOV ry30 <- rx3 0
-	MOV rx3 <- ry30 0
-	OR  [rx3, rz70 0]
-	MOV ry30 <- rx3 0
-	MOV rx3 <- ry30 0
-	XOR [rx3, rz70 0]
-	MOV ry30 <- rx3 0
-	MOV rx3 <- ry30 0
-	ADD rx3 <- [rx29, rx3 0]
-	MOV rx29 <- rx3 0
-	LOAD rx30 <- 18
-	STR rx30 -> [rx6 0]
-	XOR [rx30, rx30 0]
-	SPRLEA rx3 <- [SP 0]
-	ADD rx3 <- [rx3, rx31 0]
-	LOAD rx30 <- 20
-	STR rx30 -> [rx3 0]
-	XOR [rx30, rx30 0]
-	SPRLEA rx3 <- [SP 0]
-	LOAD rx30 <- 4
-	ADD rx3 <- [rx3, rx30 0]
-	LOAD rx30 <- 1
-	STR rx30 -> [rx3 0]
-	XOR [rx30, rx30 0]
-	LDR rx3 <- [rx6 0]
-	ADD rx3 <- [rx29, rx3 0]
-	MOV rx29 <- rx3 0
-	SPRLEA rx3 <- [SP 8]
+	SPRSUB rx31 ->SP<- 96
+	LOAD rx30 <- 56
+	SPRSTR rx30 -> [SP 0]
+	LOAD rx30 <- 124
+	SPRSTR rx30 -> [SP 1]
+	LOAD rx30 <- 238
+	SPRSTR rx30 -> [SP 2]
+	LOAD rx30 <- 198
+	SPRSTR rx30 -> [SP 3]
+	LOAD rx30 <- 146
+	SPRSTR rx30 -> [SP 4]
+	LOAD rx30 <- 186
+	SPRSTR rx30 -> [SP 5]
+	LOAD rx30 <- 186
+	SPRSTR rx30 -> [SP 6]
+	LOAD rx30 <- 186
+	SPRSTR rx30 -> [SP 7]
+	LOAD rx30 <- 146
+	SPRSTR rx30 -> [SP 8]
+	LOAD rx30 <- 198
+	SPRSTR rx30 -> [SP 9]
+	LOAD rx30 <- 238
+	SPRSTR rx30 -> [SP 10]
+	LOAD rx30 <- 124
+	SPRSTR rx30 -> [SP 11]
+	LOAD rx30 <- 56
+	SPRSTR rx30 -> [SP 12]
 	LOAD rx30 <- 0
-	STR rx30 -> [rx3 0]
-	XOR [rx30, rx30 0]
-	LOAD rx30 <- 4
-	ADD rx6 <- [rx3, rx30 0]
+	SPRSTR rx30 -> [SP 13]
 	LOAD rx30 <- 0
-	STR rx30 -> [rx6 0]
-	XOR [rx30, rx30 0]
-	LOAD rx30 <- 8
-	ADD rx6 <- [rx3, rx30 0]
+	SPRSTR rx30 -> [SP 14]
 	LOAD rx30 <- 0
-	STR rx30 -> [rx6 0]
-	XOR [rx30, rx30 0]
-	LOAD rx30 <- 12
-	ADD rx3 <- [rx3, rx30 0]
+	SPRSTR rx30 -> [SP 15]
+	LOAD rx30 <- 16
+	SPRSTR rx30 -> [SP 16]
+	LOAD rx30 <- 48
+	SPRSTR rx30 -> [SP 17]
+	LOAD rx30 <- 112
+	SPRSTR rx30 -> [SP 18]
+	LOAD rx30 <- 240
+	SPRSTR rx30 -> [SP 19]
+	LOAD rx30 <- 48
+	SPRSTR rx30 -> [SP 20]
+	LOAD rx30 <- 48
+	SPRSTR rx30 -> [SP 21]
+	LOAD rx30 <- 48
+	SPRSTR rx30 -> [SP 22]
+	LOAD rx30 <- 48
+	SPRSTR rx30 -> [SP 23]
+	LOAD rx30 <- 48
+	SPRSTR rx30 -> [SP 24]
+	LOAD rx30 <- 48
+	SPRSTR rx30 -> [SP 25]
+	LOAD rx30 <- 48
+	SPRSTR rx30 -> [SP 26]
+	LOAD rx30 <- 48
+	SPRSTR rx30 -> [SP 27]
+	LOAD rx30 <- 252
+	SPRSTR rx30 -> [SP 28]
 	LOAD rx30 <- 0
-	STR rx30 -> [rx3 0]
-	XOR [rx30, rx30 0]
-	LOAD rx30 <- -248
-	LOAD rx31 <- 4096
-	STR rx31 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	XOR [rx31, rx31 0]
-	LOAD rx30 <- -244
-	LOAD rx31 <- 16384
-	STR rx31 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	XOR [rx31, rx31 0]
-	LOAD rx30 <- -248
-	LDR rx3 <- [rx30 0]
-	XOR [rx30, rx30 0]
-	LOAD rx3 <- -248
-	LOAD rx30 <- 512
-	STR rx30 -> [rx3 0]
-	XOR [rx30, rx30 0]
-	LDR rx3 <- [rx3 0]
-	ADD rx3 <- [rx29, rx3 0]
-	MOV rx29 <- rx3 0
-	LOAD rx30 <- 4012
-	STR rx4 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	LOAD rx30 <- 4016
-	STR rx5 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	PUSH <- rx4
-	PUSH <- rx5
-	CALL get_color
-	MOV rx3 <- rx30 0
-	POP -> rx5
-	POP -> rx4
-	MOV rx11 <- rx3 0
-	LOAD rx30 <- 4020
-	STR rx4 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	LOAD rx30 <- 4024
-	STR rx5 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	LOAD rx6 <- 0
-
-~Lab_for_start_0:
-	CMP rx6 <-> rx4
-	BGU -> ~Lab_for_end_1
-	BEQ -> ~Lab_for_end_1
-	SPRLEA rx3 <- [SP 8]
-	LOAD rx30 <- 4
-	MUL rx7 <- [rx6, rx30 0]
-	ADD rx3 <- [rx3, rx7 0]
-	STR rx6 -> [rx3 0]
-	SPRLEA rx7 <- [SP 8]
-	LOAD rx30 <- 4
-	MUL rx3 <- [rx6, rx30 0]
-	ADD rx3 <- [rx7, rx3 0]
-	LDR rx3 <- [rx3 0]
-	ADD rx3 <- [rx29, rx3 0]
-	MOV rx29 <- rx3 0
-	ADD rx3 <- [rx6, rx31 1]
-	MOV rx6 <- rx3 0
-	JMP -> ~Lab_for_start_0
-
-~Lab_for_end_1:
-	LOAD rz30 <- 1
-	LOAD rz31 <- 0
-
-~Lab_while_start_2:
+	SPRSTR rx30 -> [SP 29]
 	LOAD rx30 <- 0
-	CMP rz30 <-> rx30
-	XOR [rx30, rx30 0]
-	BEQ -> ~Lab_while_end_3
+	SPRSTR rx30 -> [SP 30]
 	LOAD rx30 <- 0
-	CMP rz31 <-> rx30
+	SPRSTR rx30 -> [SP 31]
+	LOAD rx30 <- 124
+	SPRSTR rx30 -> [SP 32]
+	LOAD rx30 <- 238
+	SPRSTR rx30 -> [SP 33]
+	LOAD rx30 <- 198
+	SPRSTR rx30 -> [SP 34]
+	LOAD rx30 <- 134
+	SPRSTR rx30 -> [SP 35]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 36]
+	LOAD rx30 <- 14
+	SPRSTR rx30 -> [SP 37]
+	LOAD rx30 <- 28
+	SPRSTR rx30 -> [SP 38]
+	LOAD rx30 <- 56
+	SPRSTR rx30 -> [SP 39]
+	LOAD rx30 <- 112
+	SPRSTR rx30 -> [SP 40]
+	LOAD rx30 <- 224
+	SPRSTR rx30 -> [SP 41]
+	LOAD rx30 <- 192
+	SPRSTR rx30 -> [SP 42]
+	LOAD rx30 <- 224
+	SPRSTR rx30 -> [SP 43]
+	LOAD rx30 <- 254
+	SPRSTR rx30 -> [SP 44]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 45]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 46]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 47]
+	LOAD rx30 <- 120
+	SPRSTR rx30 -> [SP 48]
+	LOAD rx30 <- 252
+	SPRSTR rx30 -> [SP 49]
+	LOAD rx30 <- 14
+	SPRSTR rx30 -> [SP 50]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 51]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 52]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 53]
+	LOAD rx30 <- 124
+	SPRSTR rx30 -> [SP 54]
+	LOAD rx30 <- 254
+	SPRSTR rx30 -> [SP 55]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 56]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 57]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 58]
+	LOAD rx30 <- 126
+	SPRSTR rx30 -> [SP 59]
+	LOAD rx30 <- 252
+	SPRSTR rx30 -> [SP 60]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 61]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 62]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 63]
+	LOAD rx30 <- 130
+	SPRSTR rx30 -> [SP 64]
+	LOAD rx30 <- 198
+	SPRSTR rx30 -> [SP 65]
+	LOAD rx30 <- 198
+	SPRSTR rx30 -> [SP 66]
+	LOAD rx30 <- 198
+	SPRSTR rx30 -> [SP 67]
+	LOAD rx30 <- 198
+	SPRSTR rx30 -> [SP 68]
+	LOAD rx30 <- 198
+	SPRSTR rx30 -> [SP 69]
+	LOAD rx30 <- 254
+	SPRSTR rx30 -> [SP 70]
+	LOAD rx30 <- 126
+	SPRSTR rx30 -> [SP 71]
+	LOAD rx30 <- 14
+	SPRSTR rx30 -> [SP 72]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 73]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 74]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 75]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 76]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 77]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 78]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 79]
+	LOAD rx30 <- 124
+	SPRSTR rx30 -> [SP 80]
+	LOAD rx30 <- 254
+	SPRSTR rx30 -> [SP 81]
+	LOAD rx30 <- 224
+	SPRSTR rx30 -> [SP 82]
+	LOAD rx30 <- 192
+	SPRSTR rx30 -> [SP 83]
+	LOAD rx30 <- 192
+	SPRSTR rx30 -> [SP 84]
+	LOAD rx30 <- 252
+	SPRSTR rx30 -> [SP 85]
+	LOAD rx30 <- 254
+	SPRSTR rx30 -> [SP 86]
+	LOAD rx30 <- 14
+	SPRSTR rx30 -> [SP 87]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 88]
+	LOAD rx30 <- 6
+	SPRSTR rx30 -> [SP 89]
+	LOAD rx30 <- 14
+	SPRSTR rx30 -> [SP 90]
+	LOAD rx30 <- 254
+	SPRSTR rx30 -> [SP 91]
+	LOAD rx30 <- 252
+	SPRSTR rx30 -> [SP 92]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 93]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 94]
+	LOAD rx30 <- 0
+	SPRSTR rx30 -> [SP 95]
 	XOR [rx30, rx30 0]
-	BEQ -> ~Lab_else_4
-	MOV rx3 <- rz110 0
-	ADD rx3 <- [rx29, rx3 0]
-	MOV rx29 <- rx3 0
-	JMP -> ~Lab_while_end_3
-	JMP -> ~Lab_endif_5
-
-~Lab_else_4:
-	MOV rx3 <- rz111 0
-	ADD rx3 <- [rx29, rx3 0]
-	MOV rx29 <- rx3 0
-	JMP -> ~Lab_while_end_3
-
-~Lab_endif_5:
-	JMP -> ~Lab_while_end_3
-	JMP -> ~Lab_while_start_2
-
-~Lab_while_end_3:
-	CMP rx29 <-> rx29
-	BNE -> ~Lab_endif_7
-	LOAD rx3 <- 2
-
-~Lab_for_start_8:
-	CMP rx3 <-> rx5
-	BGU -> ~Lab_for_end_9
-	BEQ -> ~Lab_for_end_9
-	SUB rx4 <- [rx29, rx31 2]
-	MOV rx29 <- rx4 0
-	ADD rx3 <- [rx3, rx31 2]
-	JMP -> ~Lab_for_start_8
-
-~Lab_for_end_9:
-
-~Lab_endif_7:
-	ADD rx29 <- [rx29, rx31 + 2]
-	XOR [rx31, rx31]
-	SPRLDR rx3 <- [GP 0]
-	ADD rx3 <- [rx29, rx3 0]
-	MOV rx29 <- rx3 0
-	SPRLDR rx3 <- [GP 4]
-	SUB rx3 <- [rx29, rx3 0]
-	MOV rx29 <- rx3 0
-	MOV rx30 <- rx29 0
-	POP -> rx31
-	SPRSET rx31 -> LR
-	XOR [rx31, rx31 0]
-	SPRADD rx31 ->SP<- 24
-	RET
-
-~get_color:
-	LOAD rx11 <- 0
-	LOAD rz110 <- 255
-	LOAD rz111 <- 255
-	LOAD rz112 <- 0
-	LOAD rz113 <- 1
-	MOV rx30 <- rx11 0
+	SPRADD rx31 ->SP<- 96
 	RET

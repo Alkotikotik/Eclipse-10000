@@ -183,7 +183,7 @@ Conditionals are simple and use square brackets. Multi-condition checks using `&
 if [true == true] {}
 ```
 
-Supported relational operators are `<`, `>`, and `==`.
+Supported relational operators are `<`, `>`, `<=`, `>=` and `==`, beware though that <= and >= take 1 more instruction
 
 ### For
 The `for` statement is fully implemented (not just sugar) and uses syntax similar to C:

@@ -140,6 +140,11 @@ pub enum AsmInst {
     Ret,
 }
 
+enum ArgSrc {
+    Reg(AsmOperand),
+    Const(i32),
+}
+
 impl RegisterTracker {
     //Account for pinned globals
     pub fn new(reserved: &HashMap<String, Register>) -> Self {
@@ -1917,6 +1922,48 @@ impl<'a> Codegen<'a> {
         }
     }
 
+    //So a little optimization, if next instruction ovverrites rx31 or rx30 we are just not going to
+    //XOR it, only 1 instruction ahead lookup though
+    pub fn strip_useless_xors(insts: Vec<AsmInst>) -> Vec<AsmInst> {
+        let mut out = Vec::with_capacity(insts.len());
+        let mut iter = insts.into_iter().peekable();
+
+        while let Some(inst) = iter.next() {
+            if Self::is_self_xor_scratch(&inst) {
+                if let Some(next) = iter.peek() {
+                    if Self::uses_same_reg(&inst, next) {
+                        continue; // skip emitting this XOR entirely
+                    }
+                }
+            }
+            out.push(inst);
+        }
+        out
+    }
+
+    // Matches XOR [rxN, rxN] where N is 30 or 31
+    fn is_self_xor_scratch(inst: &AsmInst) -> bool {
+        matches!(
+            inst,
+            AsmInst::Xor(AsmOperand::Reg(Reg::TheRealOne(a)), AsmOperand::Reg(Reg::TheRealOne(b)), _)
+                if a == b && (a.id == 30 || a.id == 31) && a.reg_type == RegType::B32
+        )
+    }
+
+    fn uses_same_reg(xor_inst: &AsmInst, next: &AsmInst) -> bool {
+        let target_id = match xor_inst {
+            AsmInst::Xor(AsmOperand::Reg(Reg::TheRealOne(r)), _, _) => r.id,
+            _ => return false,
+        };
+        match next {
+            AsmInst::Load(AsmOperand::Reg(Reg::TheRealOne(r)), _) if r.reg_type == RegType::B32 => {
+                r.id == target_id
+            }
+            AsmInst::Lma(_) => target_id == 31,
+            _ => false,
+        }
+    }
+
     fn lower_inst(&mut self, inst: &IRInst, site: (usize, usize), out: &mut Vec<AsmInst>) {
         match inst {
             IRInst::Label(lab) => out.push(AsmInst::Label(format!("{}", lab))),
@@ -2162,13 +2209,13 @@ impl<'a> Codegen<'a> {
                     out.push(AsmInst::Push(self.operand_to_asm(var)));
                 }
 
-                let mut pending: Vec<(Register, AsmOperand)> = Vec::new();
+                let mut pending: Vec<(Register, ArgSrc)> = Vec::new();
                 for (arg, reg_str) in args {
                     let target_reg = Self::parse_pin_register(reg_str);
                     if is_const(arg) {
-                        load_const(target_reg, const_val(arg), out); // consts have no source-reg conflict
+                        pending.push((target_reg, ArgSrc::Const(const_val(arg))));
                     } else {
-                        pending.push((target_reg, self.operand_to_asm(arg)));
+                        pending.push((target_reg, ArgSrc::Reg(self.operand_to_asm(arg))));
                     }
                 }
 
@@ -2177,21 +2224,31 @@ impl<'a> Codegen<'a> {
                 //Thus fix is making it kinda aware of cycles.
                 while !pending.is_empty() {
                     let is_source = |r: &Register| {
-                        pending.iter().any(|(_, src)| matches!(src, AsmOperand::Reg(Reg::TheRealOne(sr)) if sr == r))
+                        pending.iter().any(|(_, src)| matches!(src,
+                            ArgSrc::Reg(AsmOperand::Reg(Reg::TheRealOne(sr))) if sr == r))
                     };
 
                     if let Some(idx) = pending.iter().position(|(t, _)| !is_source(t)) {
                         let (t, s) = pending.remove(idx);
-                        if AsmOperand::Reg(Reg::TheRealOne(t)) != s {
-                            out.push(AsmInst::Mov(reg_op(t), s, AsmOperand::Imm10(0)));
+                        match s {
+                            ArgSrc::Const(v) => load_const(t, v, out),
+                            ArgSrc::Reg(s) => {
+                                if AsmOperand::Reg(Reg::TheRealOne(t)) != s {
+                                    out.push(AsmInst::Mov(reg_op(t), s, AsmOperand::Imm10(0)));
+                                }
+                            }
                         }
                     } else {
                         let (t, s) = pending.remove(0);
                         out.push(AsmInst::Mov(rx30(), reg_op(t), AsmOperand::Imm10(0)));
-                        out.push(AsmInst::Mov(reg_op(t), s, AsmOperand::Imm10(0)));
+                        if let ArgSrc::Reg(s) = s {
+                            out.push(AsmInst::Mov(reg_op(t), s, AsmOperand::Imm10(0)));
+                        }
                         for (_, src) in pending.iter_mut() {
-                            if matches!(src, AsmOperand::Reg(Reg::TheRealOne(sr)) if *sr == t) {
-                                *src = rx30();
+                            if let ArgSrc::Reg(AsmOperand::Reg(Reg::TheRealOne(sr))) = src {
+                                if *sr == t {
+                                    *src = ArgSrc::Reg(rx30());
+                                }
                             }
                         }
                     }
