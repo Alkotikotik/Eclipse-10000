@@ -674,14 +674,8 @@ impl<'a> Codegen<'a> {
                 .var_types
                 .iter()
                 .map(|(name, ty)| (IROperand::Var(name.clone()), type_to_regtype(ty)))
-                .chain(
-                    ir_func
-                        .temp_types
-                        .iter()
-                        .map(|(id, ty)| (IROperand::Temp(*id), type_to_regtype(ty))),
-                )
                 .collect(),
-            lr_slot: None,
+            lr_slot: Some(0),
             wait_for_the_final_result: Vec::new(),
         };
 

@@ -38,9 +38,12 @@ J-Type (Massive Load / Direct Jumps)
 Registers are fragmented, visual representation is in Fragmentation.svg file.
 Shortly, each 32-bit rx register is fragmented into 2 16-bit ry register and they are fragmented into 2 8-bit rz registers, thus each 32-bit register fragmented into 4 8-bit registers. Though they are the same register but the different parts of it.
 Accessing them:
-rx21 full rx21 register 
+rx21 full rx21 register
 ry211 higher 16bits of rx21
 rz212 mid-high 8 bits of rx21
+
+//VRAM & Screen
+There is dedicated 1MB of VRAM at 04000000 - 0x040FFFFF, the screen resolution is 480p.
 
 //Opcodes
 ALU Instructions (R-Type)

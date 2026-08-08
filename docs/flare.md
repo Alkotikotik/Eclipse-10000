@@ -131,13 +131,13 @@ func <name>(<args>) => <return type> <return variable> {}
 For example:
 
 ```c
-func example(i8: a, i8: b) => bool is_equal {}
+func example(i8 a, i8 b) => bool is_equal {}
 ```
 
 Functions can obviously be `void`. In that case, omit the `=>` arrow and everything after it:
 
 ```c
-func log_event(u32: code) {}
+func log_event(u32 code) {}
 ```
 
 ### Return Variable
