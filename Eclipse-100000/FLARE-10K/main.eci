@@ -1,4 +1,4 @@
-~Init_000:
+~__Init__:
 	XOR [rx31, rx31]
 	XOR [rx30, rx30]
 	SPRSUB rx31 ->SP<- 8
@@ -41,20 +41,20 @@
 	SPRSET rx31 -> LR
 	XOR [rx31, rx31 0]
 	SPRADD rx31 ->SP<- 12
-	RET
+	JMP ~End
 
 ~bootstrap_os:
 	SPRSUB rx31 ->SP<- 28
 	SPRLEA rx30 <- [LR 0]
 	SPRSTR rx30 -> [SP 24]
 	MOV rx7 <- rx0 0
-	MOV rx6 <- rx1 0
+	MOV rx5 <- rx1 0
 	MOV rx4 <- rx2 0
 	LOAD rx29 <- 0
 	LOAD rx30 <- 4012
 	STR rx7 -> [rx30 0]
 	LOAD rx30 <- 4016
-	STR rx6 -> [rx30 0]
+	STR rx5 -> [rx30 0]
 	XOR [rx30, rx30 0]
 	LOAD ry30 <- 256
 	LOAD rz32 <- 2
@@ -114,40 +114,40 @@
 	LOAD rx30 <- 4012
 	STR rx7 -> [rx30 0]
 	LOAD rx30 <- 4016
-	STR rx6 -> [rx30 0]
+	STR rx5 -> [rx30 0]
 	XOR [rx30, rx30 0]
 	PUSH <- rx7
-	PUSH <- rx6
+	PUSH <- rx5
 	CALL get_color
 	MOV rx3 <- rx30 0
-	POP -> rx6
+	POP -> rx5
 	POP -> rx7
 	MOV rx11 <- rx3 0
 	LOAD rx30 <- 4020
 	STR rx7 -> [rx30 0]
 	LOAD rx30 <- 4024
-	STR rx6 -> [rx30 0]
+	STR rx5 -> [rx30 0]
 	XOR [rx30, rx30 0]
-	LOAD rx4 <- 0
+	LOAD rx6 <- 0
 
 ~Lab_for_start_0:
-	CMP rx4 <-> rx7
+	CMP rx6 <-> rx7
 	BGU -> ~Lab_for_end_1
 	BEQ -> ~Lab_for_end_1
 	SPRLEA rx3 <- [SP 8]
 	LOAD rx30 <- 4
-	MUL rx5 <- [rx4, rx30 0]
-	ADD rx3 <- [rx3, rx5 0]
-	STR rx4 -> [rx3 0]
+	MUL rx4 <- [rx6, rx30 0]
+	ADD rx3 <- [rx3, rx4 0]
+	STR rx6 -> [rx3 0]
 	SPRLEA rx3 <- [SP 8]
 	LOAD rx30 <- 4
-	MUL rx5 <- [rx4, rx30 0]
-	ADD rx3 <- [rx3, rx5 0]
+	MUL rx4 <- [rx6, rx30 0]
+	ADD rx3 <- [rx3, rx4 0]
 	LDR rx3 <- [rx3 0]
 	ADD rx3 <- [rx29, rx3 0]
 	MOV rx29 <- rx3 0
-	ADD rx3 <- [rx4, rx31 1]
-	MOV rx4 <- rx3 0
+	ADD rx3 <- [rx6, rx31 1]
+	MOV rx6 <- rx3 0
 	JMP -> ~Lab_for_start_0
 
 ~Lab_for_end_1:
@@ -182,16 +182,15 @@
 ~Lab_while_end_3:
 	CMP rx29 <-> rx29
 	BNE -> ~Lab_endif_7
-	LOAD rx4 <- 2
+	LOAD rx3 <- 2
 
 ~Lab_for_start_8:
-	CMP rx4 <-> rx6
+	CMP rx3 <-> rx5
 	BGU -> ~Lab_for_end_9
 	BEQ -> ~Lab_for_end_9
-	SUB rx3 <- [rx29, rx31 2]
-	MOV rx29 <- rx3 0
-	ADD rx3 <- [rx4, rx31 2]
-	MOV rx4 <- rx3 0
+	SUB rx4 <- [rx29, rx31 2]
+	MOV rx29 <- rx4 0
+	ADD rx3 <- [rx3, rx31 2]
 	JMP -> ~Lab_for_start_8
 
 ~Lab_for_end_9:
@@ -220,3 +219,4 @@
 	LOAD rz113 <- 1
 	MOV rx30 <- rx11 0
 	RET
+~End:

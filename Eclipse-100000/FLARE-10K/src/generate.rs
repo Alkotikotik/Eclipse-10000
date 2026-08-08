@@ -4,8 +4,8 @@ use std::fmt::Write;
 
 pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error> {
     let mut assembly = String::new();
-    
-    writeln!(assembly, "~Init_000:")?;
+
+    writeln!(assembly, "~__Init__:")?;
     writeln!(assembly, "\tXOR [rx31, rx31]")?;
     writeln!(assembly, "\tXOR [rx30, rx30]")?;
 
