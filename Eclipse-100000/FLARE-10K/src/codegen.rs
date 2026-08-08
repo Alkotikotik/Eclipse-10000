@@ -35,6 +35,7 @@ pub struct GlobalLayout {
     pub total_size: usize,               // bytes to reserve on the stack
     pub pins: HashMap<String, Register>, // pinned globals
     pub init_values: HashMap<String, GlobalInit>,
+    pub array_elem_sizes: HashMap<String, usize>, // globals that are arrays, and their element size
 }
 
 enum AddrBase {
@@ -44,6 +45,7 @@ enum AddrBase {
 
 pub enum GlobalInit {
     Scalar(i32),
+    Array(Vec<i32>),
     None,
 }
 
@@ -170,7 +172,7 @@ impl RegisterTracker {
 
     //First fit find free algorithm
     pub fn find_free(&mut self, reg_type: RegType) -> Option<(u8, u8)> {
-        for reg_id in 0..30 {
+        for reg_id in (0..30).rev() {
             match reg_type {
                 RegType::B8 => {
                     for sub_idx in 0..4 {
@@ -360,7 +362,8 @@ impl IRInst {
             | IRInst::Cpy { dest, .. }
             | IRInst::Cast { dest, .. }
             | IRInst::LoadPtr { dest, .. }
-            | IRInst::LocalAddr { dest, .. } => {
+            | IRInst::LocalAddr { dest, .. }
+            | IRInst::GlobalAddr { dest, .. } => {
                 if dest.is_var() {
                     ls.push(dest.clone());
                 }
@@ -393,6 +396,7 @@ impl GlobalLayout {
         let mut offsets = HashMap::new();
         let mut pins = HashMap::new();
         let mut init_values = HashMap::new();
+        let mut array_elem_sizes = HashMap::new();
         let mut total_size = 0usize;
 
         for decl in globals {
@@ -406,8 +410,11 @@ impl GlobalLayout {
                 _ => panic!("Codegen Error: bad global declaration"),
             };
 
-            if matches!(ty, Type::Array(_, _)) {
-                panic!("Codegen Error: global arrays are not allowed ('{}')", name);
+            if let Type::Array(elem_ty, _) = ty {
+                if pin.is_some() {
+                    panic!("Codegen Error: global array {} cannot be pinned", name);
+                }
+                array_elem_sizes.insert(name.clone(), get_type_size(elem_ty, structs));
             }
 
             let size = get_type_size(ty, structs);
@@ -417,6 +424,20 @@ impl GlobalLayout {
                 Some(expr) => match **expr {
                     Expr::IntLiteral(v) => GlobalInit::Scalar(v),
                     Expr::HexLiteral(v) => GlobalInit::Scalar(v as i32),
+                    Expr::ArrayLiteral(ref elems) => {
+                        let vals: Vec<i32> = elems
+                            .iter()
+                            .map(|e| match e {
+                                Expr::IntLiteral(v) => *v,
+                                Expr::HexLiteral(v) => *v as i32,
+                                _ => panic!(
+                                    "Codegen Error: global array {} needs literal elements, no compile time evaluation",
+                                    name
+                                ),
+                            })
+                            .collect();
+                        GlobalInit::Array(vals)
+                    }
                     _ => panic!(
                         "Codegen Error: global {} needs a literal initializer, no compile time evaluation",
                         name
@@ -450,6 +471,7 @@ impl GlobalLayout {
             total_size,
             pins,
             init_values,
+            array_elem_sizes,
         }
     }
 }
@@ -627,6 +649,7 @@ pub struct Codegen<'a> {
     next_temp: usize,
     call_saves: HashMap<(usize, usize), Vec<IROperand>>,
     operand_sizes: HashMap<IROperand, RegType>,
+    lr_slot: Option<usize>,
     wait_for_the_final_result: Vec<AsmInst>,
 }
 
@@ -673,7 +696,14 @@ impl<'a> Codegen<'a> {
                 .var_types
                 .iter()
                 .map(|(name, ty)| (IROperand::Var(name.clone()), type_to_regtype(ty)))
+                .chain(
+                    ir_func
+                        .temp_types
+                        .iter()
+                        .map(|(id, ty)| (IROperand::Temp(*id), type_to_regtype(ty))),
+                )
                 .collect(),
+            lr_slot: Some(0),
             wait_for_the_final_result: Vec::new(),
         };
 
@@ -890,6 +920,10 @@ fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst 
         },
         IRInst::Return(val) => IRInst::Return(val.map(sub)),
         IRInst::LocalAddr { dest, offset } => IRInst::LocalAddr {
+            dest: sub(dest),
+            offset,
+        },
+        IRInst::GlobalAddr { dest, offset } => IRInst::GlobalAddr {
             dest: sub(dest),
             offset,
         },
@@ -1517,6 +1551,12 @@ impl<'a> Codegen<'a> {
             }
         }
 
+        //It wasn't accounting that PUSH additionally decreases SP by 4, so I fixed it
+        if !leaf {
+            self.lr_slot = Some(self.frame_size);
+            self.frame_size += 4;
+        }
+
         if self.frame_size > 0 {
             compiled.push(AsmInst::SprSub(
                 rx31(),
@@ -1531,7 +1571,11 @@ impl<'a> Codegen<'a> {
                 Spr::LR,
                 AsmOperand::Imm16(0),
             ));
-            compiled.push(AsmInst::Push(reg_op(rx30_reg())));
+            compiled.push(AsmInst::SprStr(
+                reg_op(rx30_reg()),
+                Spr::SP,
+                AsmOperand::Imm16(self.lr_slot.unwrap() as i16),
+            ));
         }
 
         self.call_saves = self.compute_call_save_sets();
@@ -1570,10 +1614,17 @@ impl<'a> Codegen<'a> {
                     if let Some(&off) = layout.offsets.get(name) {
                         let tmp = IROperand::Temp(next_temp);
                         next_temp += 1;
-                        new_body.push(IRInst::LoadPtr {
-                            dest: tmp.clone(),
-                            ptr_addr: IROperand::GlobalSlot(off),
-                        });
+                        if layout.array_elem_sizes.contains_key(name) {
+                            new_body.push(IRInst::GlobalAddr {
+                                dest: tmp.clone(),
+                                offset: off,
+                            });
+                        } else {
+                            new_body.push(IRInst::LoadPtr {
+                                dest: tmp.clone(),
+                                ptr_addr: IROperand::GlobalSlot(off),
+                            });
+                        }
                         inst = substitute_operand(inst, &used, &tmp);
                     }
                 }
@@ -1652,17 +1703,44 @@ impl<'a> Codegen<'a> {
         }
 
         for (name, init) in &layout.init_values {
-            if let GlobalInit::Scalar(v) = init {
-                if let Some(reg) = layout.pins.get(name) {
-                    load_const(*reg, *v, &mut out);
-                } else if let Some(&off) = layout.offsets.get(name) {
-                    load_const(rx30_reg(), *v, &mut out);
-                    out.push(AsmInst::SprStr(
-                        reg_op(rx30_reg()),
-                        Spr::GP,
-                        AsmOperand::Imm16(off as i16),
-                    ));
+            match init {
+                GlobalInit::Scalar(v) => {
+                    if let Some(reg) = layout.pins.get(name) {
+                        load_const(*reg, *v, &mut out);
+                    } else if let Some(&off) = layout.offsets.get(name) {
+                        load_const(rx30_reg(), *v, &mut out);
+                        out.push(AsmInst::SprStr(
+                            reg_op(rx30_reg()),
+                            Spr::GP,
+                            AsmOperand::Imm16(off as i16),
+                        ));
+                    }
                 }
+                GlobalInit::Array(vals) => {
+                    if let Some(&base_off) = layout.offsets.get(name) {
+                        let elem_size = *layout.array_elem_sizes.get(name).unwrap_or(&4);
+                        let elem_reg_type = match elem_size {
+                            1 => RegType::B8,
+                            2 => RegType::B16,
+                            _ => RegType::B32,
+                        };
+                        let elem_reg = Register {
+                            id: 30,
+                            reg_type: elem_reg_type,
+                            sub_index: 0,
+                        };
+                        for (i, v) in vals.iter().enumerate() {
+                            let elem_off = base_off + i * elem_size;
+                            load_const(elem_reg, *v, &mut out);
+                            out.push(AsmInst::SprStr(
+                                reg_op(elem_reg),
+                                Spr::GP,
+                                AsmOperand::Imm16(elem_off as i16),
+                            ));
+                        }
+                    }
+                }
+                GlobalInit::None => {}
             }
         }
 
@@ -1728,6 +1806,25 @@ impl<'a> Codegen<'a> {
         let dest_asm = self.operand_to_asm(dest);
         let left_asm = self.operand_to_asm(left);
 
+        let mut used_rx31 = false;
+        let (rx1, imm10) = if is_const(right) && fits(const_val(right) as i64, 10, false) {
+            (rx31(), AsmOperand::Imm10(const_val(right) as i16)) //As long as fits into imm10, we
+        //are good
+        } else if is_const(right) {
+            load_const(rx31_reg(), const_val(right), out); //Load and read the same register
+            used_rx31 = true;
+            (rx31(), AsmOperand::Imm10(0))
+        } else {
+            let right_asm = self.operand_to_asm(right);
+            if dest_asm != left_asm && right_asm == dest_asm {
+                out.push(AsmInst::Mov(rx31(), right_asm, AsmOperand::Imm10(0)));
+                used_rx31 = true;
+                (rx31(), AsmOperand::Imm10(0))
+            } else {
+                (right_asm, AsmOperand::Imm10(0))
+            }
+        };
+
         if dest_asm != left_asm {
             out.push(AsmInst::Mov(
                 dest_asm.clone(),
@@ -1735,18 +1832,6 @@ impl<'a> Codegen<'a> {
                 AsmOperand::Imm10(0),
             ));
         }
-
-        let mut used_rx31 = false;
-        let (rx1, imm10) = if is_const(right) && fits(const_val(right) as i64, 10, false) {
-            (rx31(), AsmOperand::Imm10(const_val(right) as i16)) //As long as fits into imm10, we
-        //are good
-        } else if is_const(right) {
-            load_const(rx30_reg(), const_val(right), out); //But if it doesn't use rx30
-            used_rx31 = true;
-            (rx31(), AsmOperand::Imm10(0))
-        } else {
-            (self.operand_to_asm(right), AsmOperand::Imm10(0))
-        };
 
         out.push(make(dest_asm, rx1, imm10));
 
@@ -2196,6 +2281,14 @@ impl<'a> Codegen<'a> {
                     AsmOperand::Imm16(*offset as i16),
                 ));
             }
+            IRInst::GlobalAddr { dest, offset } => {
+                let dest_asm = self.operand_to_asm(dest);
+                out.push(AsmInst::SprLea(
+                    dest_asm,
+                    Spr::GP,
+                    AsmOperand::Imm16(*offset as i16),
+                ));
+            }
             //So first 4 arguments go into 4 first registers depending on their size, rest are
             //spilled on the stack
             IRInst::Call {
@@ -2300,7 +2393,12 @@ impl<'a> Codegen<'a> {
                 }
 
                 if !self.is_leaf() {
-                    out.push(AsmInst::Pop(reg_op(rx31_reg())));
+                    let lr_off = self.lr_slot.expect("lr_slot reserved for non-leaf functions");
+                    out.push(AsmInst::SprLdr(
+                        reg_op(rx31_reg()),
+                        Spr::SP,
+                        AsmOperand::Imm16(lr_off as i16),
+                    ));
                     out.push(AsmInst::SprSet(reg_op(rx31_reg()), Spr::LR));
                     out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
                 }

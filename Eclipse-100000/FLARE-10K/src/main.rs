@@ -77,7 +77,7 @@ fn main() {
         let func_instructions = cg.lower_func();
         all_instructions.extend(func_instructions);
     }
-    //let all_instructions = Codegen::strip_useless_xors(all_instructions);
+    let all_instructions = Codegen::strip_useless_xors(all_instructions);
     let asm_text = generate_assembly(all_instructions).expect("Codegen error: failed to compile");
     if args.asm {
         println!("Assembly:");

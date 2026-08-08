@@ -162,6 +162,10 @@ pub enum IRInst {
         dest: IROperand,
         offset: usize,
     },
+    GlobalAddr {
+        dest: IROperand,
+        offset: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -169,6 +173,7 @@ pub struct IRFunction {
     pub name: String,
     pub params: Vec<(String, Type)>,
     pub var_types: HashMap<String, Type>,
+    pub temp_types: HashMap<usize, Type>,
     pub body: Vec<IRInst>,
     pub local_frame_size: usize,
 }
@@ -182,9 +187,11 @@ pub struct IRProgram {
 pub struct IR {
     insts_buffer: Vec<IRInst>,
     temp_counter: usize,
+    temp_types: HashMap<usize, Type>,
     label_counter: usize,
 
     structs: HashMap<String, StructDef>,
+    functions: HashMap<String, FunctionSignature>,
     var_types: HashMap<String, Type>,
     loop_exit_stack: Vec<String>,
     current_return_var: Option<String>,
@@ -332,11 +339,18 @@ impl IR {
             structs.insert(s.name.clone(), s.clone());
         }
 
+        let mut functions = HashMap::new();
+        for f in &program.functions {
+            functions.insert(f.name.clone(), f.clone());
+        }
+
         Self {
             insts_buffer: Vec::new(),
             temp_counter: 0,
+            temp_types: HashMap::new(),
             label_counter: 0,
             structs,
+            functions,
             var_types: HashMap::new(),
             loop_exit_stack: Vec::new(),
             current_return_var: None,
@@ -347,6 +361,13 @@ impl IR {
     pub fn new_temp(&mut self) -> IROperand {
         let buff = IROperand::Temp(self.temp_counter);
         self.temp_counter += 1;
+        buff
+    }
+    fn new_temp_typed(&mut self, ty: Type) -> IROperand {
+        let buff = self.new_temp();
+        if let IROperand::Temp(id) = &buff {
+            self.temp_types.insert(*id, ty);
+        }
         buff
     }
     pub fn reset_temp(&mut self) {
@@ -447,6 +468,13 @@ impl IR {
                 let inner_ty = self.infer_type(inner);
                 Type::Ptr(Box::new(inner_ty))
             }
+            Expr::FunctionCall { name, .. } => self
+                .functions
+                .get(name)
+                .unwrap_or_else(|| panic!("Unknown function {}", name))
+                .to_return
+                .clone()
+                .unwrap_or(Type::U32),
             _ => panic!("Error expression in infer_type: {:?}", expr),
         }
     }
@@ -492,8 +520,9 @@ impl IR {
             Expr::Identifier(name) => IROperand::Var(name.clone()),
 
             Expr::Deref(mem) => {
+                let result_ty = self.infer_type(expr);
                 let ptr_addr = self.reduce_expr(mem);
-                let dest = self.new_temp();
+                let dest = self.new_temp_typed(result_ty);
                 self.emit(IRInst::LoadPtr {
                     dest: dest.clone(),
                     ptr_addr,
@@ -504,8 +533,9 @@ impl IR {
             Expr::Ref(mem) => self.lower_lvalue(mem),
 
             Expr::Index {array, index} => {
+                let result_ty = self.infer_type(expr);
                 let addr = self.compute_index_addr(array, index);
-                let dest = self.new_temp();
+                let dest = self.new_temp_typed(result_ty);
                 self.emit(IRInst::LoadPtr {
                     dest: dest.clone(),
                     ptr_addr: addr,
@@ -514,7 +544,8 @@ impl IR {
             }
 
             Expr::FunctionCall {name, args} => {
-                let dest = self.new_temp();
+                let result_ty = self.infer_type(expr);
+                let dest = self.new_temp_typed(result_ty);
                 let (reg_args, stack_args) = self.reduce_call_args(args);
 
                 self.emit(IRInst::Call {
@@ -529,7 +560,7 @@ impl IR {
 
             Expr::Cast {expr, target_type} => {
                 let src_type = self.infer_type(expr);
-                let dest = self.new_temp();
+                let dest = self.new_temp_typed(target_type.clone());
                 let src = self.reduce_expr(expr);
                 self.emit(IRInst::Cast {
                     dest: dest.clone(),
@@ -541,7 +572,8 @@ impl IR {
             }
 
             Expr::Unary {op, expr} => {
-                let dest = self.new_temp();
+                let result_ty = self.infer_type(expr);
+                let dest = self.new_temp_typed(result_ty);
                 let src = self.reduce_expr(expr);
                 let inst = match op {
                     UnaryOpKind::Not => IRInst::Not {
@@ -567,7 +599,7 @@ impl IR {
 
                     let l_op = self.reduce_expr(left);
                     let r_op = self.reduce_expr(right);
-                    let dest = self.new_temp();
+                    let dest = self.new_temp_typed(left_ty.clone());
 
                     let inst = if matches!(op, BinaryOpKind::Div) {
                         IRInst::Div {
@@ -587,9 +619,10 @@ impl IR {
                     self.emit(inst);
                     dest
                 } else {
+                    let left_ty = self.infer_type(left);
                     let l_op = self.reduce_expr(left);
                     let r_op = self.reduce_expr(right);
-                    let dest = self.new_temp();
+                    let dest = self.new_temp_typed(left_ty);
 
                     let inst = match op {
                         BinaryOpKind::Add => IRInst::Add {
@@ -772,7 +805,7 @@ impl IR {
                             .clone();
                         let size = self.get_type_size(&field_ty);
                         let struct_var = self.lower_lvalue(base);
-                        let dest = self.new_temp();
+                        let dest = self.new_temp_typed(field_ty);
                         self.emit(IRInst::RegFieldRead {
                             dest: dest.clone(),
                             struct_var,
@@ -782,8 +815,9 @@ impl IR {
                         return dest;
                     }
                 }
+                let result_ty = self.infer_type(expr);
                 let addr = self.lower_lvalue(expr);
-                let dest = self.new_temp();
+                let dest = self.new_temp_typed(result_ty);
                 self.emit(IRInst::LoadPtr {
                     dest: dest.clone(),
                     ptr_addr: addr,
@@ -855,9 +889,15 @@ impl IR {
                 let start_label = self.new_label("while_start");
                 let end_label = self.new_label("while_end");
 
+                let always_true = matches!(cond, Expr::IntLiteral(n) if *n != 0)
+                    || matches!(cond, Expr::HexLiteral(n) if *n != 0);
+
                 self.emit(IRInst::Label(start_label.clone()));
-                //Jump past if false
-                self.reduce_cond(cond, end_label.clone());
+
+                if !always_true {
+                    //Jump past if false
+                    self.reduce_cond(cond, end_label.clone());
+                }
 
                 //For breaks
                 self.loop_exit_stack.push(end_label.clone());
@@ -940,6 +980,7 @@ impl IR {
     fn reduce_func(&mut self, func: &FunctionSignature) -> IRFunction {
         self.insts_buffer.clear();
         self.reset_temp();
+        self.temp_types.clear();
         self.local_slots.clear();
         self.local_frame_size = 0;
         self.current_return_var = func.return_name.clone();
@@ -1015,6 +1056,7 @@ impl IR {
                 .zip(param_types.into_iter())
                 .collect(),
             var_types: self.var_types.clone(),
+            temp_types: self.temp_types.clone(),
             body: self.insts_buffer.clone(),
             local_frame_size: self.local_frame_size,
         }

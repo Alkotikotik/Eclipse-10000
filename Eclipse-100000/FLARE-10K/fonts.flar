@@ -23,16 +23,9 @@
 };
 
 func main(){
-    [0x400000F] = 0x0000;
     while [true] {
         draw_char(1, 1, 0xFFFF, 0x000F, 0);
     }
-}
-
->_ Draw a single pixel
-func draw_pixel(u32 x, u32 y, u16 color) {
-    u32 addr = VRAM_BASE + ((y * SCREEN_WIDTH + x) << 1 );
-    [addr] = color;
 }
 
 func draw_char(u32 cell_x, u32 cell_y, u16 fg, u16 bg, u8 char_idx) {
@@ -42,11 +35,15 @@ func draw_char(u32 cell_x, u32 cell_y, u16 fg, u16 bg, u8 char_idx) {
         u8 bits = font_data[offset + row];
         u8 mask = 0x80;
 
+        u32 row_addr = VRAM_BASE + (((cell_y + row) * SCREEN_WIDTH + cell_x) << 1);
+
         for [u32 col; col < 8; col = col + 1] {
+            u32 addr = row_addr + (col << 1);
+
             if [(bits & mask) == mask] {
-                draw_pixel(cell_x + col, cell_y + row, fg);
+                [addr] = fg;
             } else {
-                draw_pixel(cell_x + col, cell_y + row, bg);
+                [addr] = bg;
             }
             mask = mask >> 1;
         }

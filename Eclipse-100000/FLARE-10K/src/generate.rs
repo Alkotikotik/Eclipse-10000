@@ -5,7 +5,7 @@ use std::fmt::Write;
 pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error> {
     let mut assembly = String::new();
 
-    writeln!(assembly, "~__Init__:")?;
+    writeln!(assembly, "~Init_000:")?;
     writeln!(assembly, "\tXOR [rx31, rx31]")?;
     writeln!(assembly, "\tXOR [rx30, rx30]")?;
 
@@ -72,15 +72,15 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error
             AsmInst::Pop(rx0) => writeln!(assembly, "\tPOP -> {}", rx0)?,
 
             AsmInst::Cmp(rx0, rx1) => writeln!(assembly, "\tCMP {} <-> {}", rx0, rx1)?,
-            AsmInst::Beq(lbl) => writeln!(assembly, "\tBEQ -> {}", lbl)?,
-            AsmInst::Bne(lbl) => writeln!(assembly, "\tBNE -> {}", lbl)?,
-            AsmInst::Bgu(lbl) => writeln!(assembly, "\tBGU -> {}", lbl)?,
-            AsmInst::Bsu(lbl) => writeln!(assembly, "\tBSU -> {}", lbl)?,
-            AsmInst::Bgs(lbl) => writeln!(assembly, "\tBGS -> {}", lbl)?,
-            AsmInst::Bss(lbl) => writeln!(assembly, "\tBSS -> {}", lbl)?,
-            AsmInst::Jmp(lbl) => writeln!(assembly, "\tJMP -> {}", lbl)?,
+            AsmInst::Beq(lbl) => writeln!(assembly, "\tBEQ -> {}\n", lbl)?,
+            AsmInst::Bne(lbl) => writeln!(assembly, "\tBNE -> {}\n", lbl)?,
+            AsmInst::Bgu(lbl) => writeln!(assembly, "\tBGU -> {}\n", lbl)?,
+            AsmInst::Bsu(lbl) => writeln!(assembly, "\tBSU -> {}\n", lbl)?,
+            AsmInst::Bgs(lbl) => writeln!(assembly, "\tBGS -> {}\n", lbl)?,
+            AsmInst::Bss(lbl) => writeln!(assembly, "\tBSS -> {}\n", lbl)?,
+            AsmInst::Jmp(lbl) => writeln!(assembly, "\tJMP -> {}\n", lbl)?,
             AsmInst::Jr(rx0) => writeln!(assembly, "\tJR  -> {}", rx0)?,
-            AsmInst::Call(lbl) => writeln!(assembly, "\tCALL {}", lbl)?,
+            AsmInst::Call(lbl) => writeln!(assembly, "\tCALL {}\n", lbl)?,
             AsmInst::Inline(asm) => writeln!(assembly, "\t{}", asm)?,
             AsmInst::Label(lbl) => writeln!(assembly, "\n{}:", lbl)?,
             AsmInst::Ret => writeln!(assembly, "\tRET")?,
