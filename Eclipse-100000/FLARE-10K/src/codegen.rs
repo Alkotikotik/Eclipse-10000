@@ -627,6 +627,7 @@ pub struct Codegen<'a> {
     next_temp: usize,
     call_saves: HashMap<(usize, usize), Vec<IROperand>>,
     operand_sizes: HashMap<IROperand, RegType>,
+    lr_slot: Option<usize>,
     wait_for_the_final_result: Vec<AsmInst>,
 }
 
@@ -673,7 +674,14 @@ impl<'a> Codegen<'a> {
                 .var_types
                 .iter()
                 .map(|(name, ty)| (IROperand::Var(name.clone()), type_to_regtype(ty)))
+                .chain(
+                    ir_func
+                        .temp_types
+                        .iter()
+                        .map(|(id, ty)| (IROperand::Temp(*id), type_to_regtype(ty))),
+                )
                 .collect(),
+            lr_slot: None,
             wait_for_the_final_result: Vec::new(),
         };
 
@@ -1517,6 +1525,12 @@ impl<'a> Codegen<'a> {
             }
         }
 
+        //It wasn't accounting that PUSH additionally decreases SP by 4, so I fixed it
+        if !leaf {
+            self.lr_slot = Some(self.frame_size);
+            self.frame_size += 4;
+        }
+
         if self.frame_size > 0 {
             compiled.push(AsmInst::SprSub(
                 rx31(),
@@ -1531,7 +1545,11 @@ impl<'a> Codegen<'a> {
                 Spr::LR,
                 AsmOperand::Imm16(0),
             ));
-            compiled.push(AsmInst::Push(reg_op(rx30_reg())));
+            compiled.push(AsmInst::SprStr(
+                reg_op(rx30_reg()),
+                Spr::SP,
+                AsmOperand::Imm16(self.lr_slot.unwrap() as i16),
+            ));
         }
 
         self.call_saves = self.compute_call_save_sets();
@@ -2300,7 +2318,12 @@ impl<'a> Codegen<'a> {
                 }
 
                 if !self.is_leaf() {
-                    out.push(AsmInst::Pop(reg_op(rx31_reg())));
+                    let lr_off = self.lr_slot.expect("lr_slot reserved for non-leaf functions");
+                    out.push(AsmInst::SprLdr(
+                        reg_op(rx31_reg()),
+                        Spr::SP,
+                        AsmOperand::Imm16(lr_off as i16),
+                    ));
                     out.push(AsmInst::SprSet(reg_op(rx31_reg()), Spr::LR));
                     out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
                 }
