@@ -56,48 +56,45 @@ Currently, the user interface is under active development, so a full CLI wrapper
 ### Prerequisites
 
 To run and experiment with the full stack, you will need:
-* **Logisim-evolution** (for the 16-bit `Eclipse-10000` CPU)
-* **Verilator** & **SDL2** (for 32-bit `Eclipse-100000` simulation and display output)
-* **Rust** & **C++** (for compiling the compiler)
+
+- **Logisim-evolution** (for the 16-bit `Eclipse-10000` CPU)
+- **Verilator** & **SDL2** (for 32-bit `Eclipse-100000` simulation and display output)
+- **Rust** & **C++** (for compiling the compiler)
 
 ### Running the Rainbow Demo (32-bit CPU + FLARE-10K)
 
 1. **Clone the repository:**
-    ```bash
-    ```bash
+
+   ```bash
    git clone https://github.com/Alkotikotik/Eclipse-10000.git
    cd Eclipse-10000
    ```
-   ```
 
 2. **Navigate to the compiler directory:**
-    ```bash
+
+   ```bash
    cd Eclipse-100000/FLARE-10K
    ```
-   ```
 
-3. **Compile and assemble `render.flar`:**
-    ```bash
-    ```
+3. **Compile and assemble** **`render.flar`****:**
+
+   ```bash
    cargo run -- render.flar -o main.eci
    cd ../asm100000
    cargo run ../FLARE-10K/main.eci ../program.hex
    cd ..
    ```
-   ```
 
 4. **Compile with Verilator:**
-    ```bash
-    ```
-   verilator --cc --exe -O3 -Wall -I. --build sim_main.cpp CORE.sv -CFLAGS "-O3 -march=native -std=c++20 $(sdl2-config --cflags)" -LDFLAGS "$(sdl2-config --libs)"
-   ```
+
+   ```bash
+   verilator --cc --exe -O3 -Wall -I. --build sim\_main.cpp CORE.sv -CFLAGS "-O3 -march=native -std=c++20 $(sdl2-config --cflags)" -LDFLAGS "$(sdl2-config --libs)"
    ```
 
 5. **Run the simulation:**
-    ```bash
-    ```
-   ./obj_dir/VCORE
-   ```
+
+   ```bash
+   ./obj\_dir/VCORE
    ```
 
 To run Eclipse-10000 in Logisim-evolution simply open Eclipse-10000.circ file in logisim evolution, that's it.
