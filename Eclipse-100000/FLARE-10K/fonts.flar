@@ -26,7 +26,7 @@
 func main(){
     while [true] {
         [4000] = 10;
-        draw_char(1, 1, 0xFFFF, 0x000F, 0);
+        draw_char(1, 1, 0xFFFF, 0x0000, 0);
         [4004] = 11;
     }
 }
@@ -37,7 +37,7 @@ func draw_char(u32 cell_x, u32 cell_y, u16 fg, u16 bg, u8 char_idx) { >_ fg - co
     u32 offset = char_idx << 4;
     [4032] = 18;
 
-    for [u32 row; row < 16; row = row + 1] {
+    for [u32 row = 0; row < 16; row = row + 1] {
         [4028] = 17;
         u8 bits = font_data[offset + row];
         u8 mask = 0x80;

@@ -94,7 +94,7 @@ To run and experiment with the full stack, you will need:
 5. **Run the simulation:**
 
    ```bash
-   ./obj\_dir/VCORE
+   ./obj_dir/VCORE
    ```
 
 To run Eclipse-10000 in Logisim-evolution simply open Eclipse-10000.circ file in logisim evolution, that's it.

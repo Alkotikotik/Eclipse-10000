@@ -215,8 +215,8 @@ module CU(
                     6'b110001: PCWrite = Z; //BEQ
                     6'b111100: PCWrite = !Z; //BNE
 
-                    6'b110011: PCWrite = (!C && !Z); // BGU
-                    6'b110100: PCWrite = C; //BSU
+                    6'b110011: PCWrite = (C && !Z);  // BGU
+                    6'b110100: PCWrite = !C;         // BSU
 
                     6'b110101: PCWrite = ((N == V) && !Z); //BGS
                     6'b110110: PCWrite = (N != V); //BSS

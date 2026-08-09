@@ -2254,7 +2254,7 @@ impl<'a> Codegen<'a> {
                 } else {
                     out.push(AsmInst::Bsu(target.clone()));
                 }
-                if !*isEq {
+                if *isEq {
                     out.push(AsmInst::Beq(target.clone()));
                 }
             }
@@ -2272,7 +2272,7 @@ impl<'a> Codegen<'a> {
                 } else {
                     out.push(AsmInst::Bgu(target.clone()));
                 }
-                if !*isEq {
+                if *isEq {
                     out.push(AsmInst::Beq(target.clone())); // Branch Equal (==)
                 }
             }
