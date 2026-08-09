@@ -1,13 +1,13 @@
 # Eclipse-10000 & 100000 Stack [WIP]
 A complete computer system built from the ground up: from raw logic gates CPU and custom 32-bit SystemVerilog CPUs to an assembler, compiler, and relatively high-level programming language.
 
-![Rainbow Renderer Showcase](RGBAShowcase.png)
+![Rainbow Renderer Showcase](RGBShowcase.png)
 *Figure 1: The Eclipse-100000 running a rainbow renderer program, obviously written in my language (`render.flar`) at 23MHz / 60FPS.*
 
 > **Deep Dive Documentation:**
 > Detailed technical specifications, diagrams, and architectural decisions of all project are documented in [`Eclipse_10000.pdf`](./Eclipse_10000.pdf), I recommend reading it first. Language documentation can be found in [`docs/flare.md`](./docs/flare.md).
 
-many of the CPU and Compiler files do not contain much of a comments, its because only when finishing compiler I realized how good comments are. This project is NOT vibecoded or anything like that, there is just no point of me doing that.
+Many of the CPU and Compiler files do not contain much of a comments, its because only when finishing compiler I realized how good comments are. This project is NOT vibecoded or anything like that, there is just no point of me doing that.
 
 ## Status & Roadmap
 
@@ -19,23 +19,23 @@ many of the CPU and Compiler files do not contain much of a comments, its becaus
 ---
 
 # Eclipse-10000
-Eclipse-10000 is a fully custom 16-bit multi-cycle CPU made in Logisim-evolution using exclusively logic gates and other lowest-level components. It has everything a basic CPU needs, and it can even run Fibonacci. The ISA can be found in the ISA16.txt file.
+Eclipse-10000 is a fully custom 16-bit multi-cycle CPU made in Logisim-evolution using exclusively logic gates and other lowest-level components. It has everything a basic CPU needs, and it can even run Fibonacci.
 
 # Eclipse-100000
-Eclipse-100000 (one more zero) is a 32-bit multi-cycle CPU as well, but it is much more advanced and written in SystemVerilog. The ISA can be found in the ISA32.txt file.
+Eclipse-100000 (one more zero) is a 32-bit multi-cycle CPU as well, but it is much more advanced and written in SystemVerilog.
 
 # FLARE-10K
-FLARE-10K is a fully custom systems programming language/compiler. Full documentation is available in the docs/flare.md file.
+FLARE-10K is a fully custom systems programming language/compiler.
 
 ---
 
 # My Journey
-Because I explained all the technical aspects in the paper, as well as how to use the stack in the documentation, I feel like this is a good place to share my personal journey through this project. 
+Because I explained all the technical aspects in the paper, as well as how to use the language in the documentation, I feel like this is a good place to share my personal journey through this project. 
 
-First of all, I had a lot of fun building all of this—so much fun that I was averaging about 8 hours of development per day. This importantly included debugging, especially troubleshooting my CPU in GTKWave and using memory stores as a sort of "print" statement for debugging. Now, I can proudly say that I really do know how computers work, because I actually built one.
+First of all, I had a lot of fun building all of this - so much fun that I was averaging about 8 hours of development per day. This importantly included debugging, especially troubleshooting my CPU in GTKWave and using memory stores as a sort of "print" statement for debugging. Now, I can proudly say that I really do know how computers work, because I actually built one.
 
 ## Eclipse-10000
-I really liked building that CPU—assembling it block by block, circuit by circuit, connecting individual wires, coming up with solutions to problems, and researching how CPUs work under the hood. I truly enjoyed doing it.
+I really liked building that CPU - assembling it block by block, circuit by circuit, connecting individual wires, coming up with solutions to problems, and researching how CPUs work under the hood. I truly enjoyed doing it.
 
 ## Eclipse-100000
 Now this is the real CPU, theoretically capable of running an OS. For now, though, it can render a rainbow effect at 23MHz and 60FPS. This was a very fun project as well. It involved a lot of decision-making and had me inventing a lot of concepts from scratch (even though they might have already been invented, I just don't know about them).
