@@ -22,7 +22,7 @@ Many of the CPU and Compiler files do not contain much of a comments, its becaus
 Eclipse-10000 is a fully custom 16-bit multi-cycle CPU made in Logisim-evolution using exclusively logic gates and other lowest-level components. It has everything a basic CPU needs, and it can even run Fibonacci.
 
 # Eclipse-100000
-Eclipse-100000 (one more zero) is a 32-bit multi-cycle CPU as well, but it is much more advanced and written in SystemVerilog.
+Eclipse-100000 (one more zero) is a 32-bit multi-cycle CPU as well, but it is much more advanced and written in SystemVerilog. The screen is simulated using verilator's C++ wrapper with SDL2.
 
 # FLARE-10K
 FLARE-10K is a fully custom systems programming language/compiler.
@@ -48,4 +48,57 @@ That is the biggest part of the project so far. It involved a lot of research, i
 When I first read about parsers, I was honestly confused and didn't understand much. However, after a lot of research, I understood how they work and realized the concept is actually pretty straightforward. Then, after actually coding one, I came to really love the parser - it flows just like a waterfall.
 
 I also really like the codegen; hands down, it is the most complicated part of the compiler, which is exactly why I like it. The graph-coloring algorithm is beautiful, the code generation itself is beautiful, and overall the whole process is just very beautiful. There isn't much else to say about the other compiler parts, as they were somewhat easier to implement.
+
+# Getting Started
+
+Currently, the user interface is under active development, so a full CLI wrapper for the FLARE-10K compiler and Assembler is not available yet, and the directory structure is still evolving(kinda messy atm).
+
+### Prerequisites
+
+To run and experiment with the full stack, you will need:
+* **Logisim-evolution** (for the 16-bit `Eclipse-10000` CPU)
+* **Verilator** & **SDL2** (for 32-bit `Eclipse-100000` simulation and display output)
+* **Rust** & **C++** (for compiling the compiler)
+
+### Running the Rainbow Demo (32-bit CPU + FLARE-10K)
+
+1. **Clone the repository:**
+    ```bash
+    ```bash
+   git clone https://github.com/Alkotikotik/Eclipse-10000.git
+   cd Eclipse-10000
+   ```
+   ```
+
+2. **Navigate to the compiler directory:**
+    ```bash
+   cd Eclipse-100000/FLARE-10K
+   ```
+   ```
+
+3. **Compile and assemble `render.flar`:**
+    ```bash
+    ```
+   cargo run -- render.flar -o main.eci
+   cd ../asm100000
+   cargo run ../FLARE-10K/main.eci ../program.hex
+   cd ..
+   ```
+   ```
+
+4. **Compile with Verilator:**
+    ```bash
+    ```
+   verilator --cc --exe -O3 -Wall -I. --build sim_main.cpp CORE.sv -CFLAGS "-O3 -march=native -std=c++20 $(sdl2-config --cflags)" -LDFLAGS "$(sdl2-config --libs)"
+   ```
+   ```
+
+5. **Run the simulation:**
+    ```bash
+    ```
+   ./obj_dir/VCORE
+   ```
+   ```
+
+To run Eclipse-10000 in Logisim-evolution simply open Eclipse-10000.circ file in logisim evolution, that's it.
 

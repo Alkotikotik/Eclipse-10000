@@ -229,6 +229,9 @@ typedef enum logic [3:0] {
     \item \textbf{STORE:} Stores data in memory; also used for \texttt{PUSH}.
 \end{itemize}
 
+\subsection{Memory & VRAM}
+Since the CPU is 32-bits it is capable of using up to 4GB of RAM, however it is too much at the moment. So currently the main RAM is 64MB (0x00000000 - 0x03FFFFFF), sebsequent 1MB is dedicated for VRAM (0x04000000 - 0x040FFFFF), and everything after is reserved for I/O and expansion. The SP defaults to 0x03FFFFF0, on startup, just for safety. The simulated screen in 640x480p, using RGBA4444 for every pixel, hence every pixel takes up exactly 2 bytes in memory.
+
 \section{FLARE-10K}
 FLARE-10K is a statically and strongly typed, AOT-compiled imperative systems language. It is designed to write an OS on; it is generally a C-like language, but considerably different. The documentation is in the \texttt{docs/flare.md} file; therefore, this chapter will focus on explaining implementation specifics. I encourage readers to review the documentation (\texttt{docs/flare.md}) first. The following sections will outline and explain each part of the compiler.
 

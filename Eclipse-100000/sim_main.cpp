@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
     SDL_DestroyWindow(window);
     SDL_Quit();
 
-    std::cout << "\n--- VRAM DUMP (First 5 Words) ---" << std::endl;
+    std::cout << "\n--- VRAM DUMP ---" << std::endl;
     for (uint32_t vram_offset = 0; vram_offset <= 0xF00; vram_offset += 4) {
         uint32_t bus_addr = 0x04000000 + vram_offset;
         uint32_t word = vram_buffer[vram_offset + 0] | (vram_buffer[vram_offset + 1] << 8) |
@@ -137,7 +137,7 @@ int main(int argc, char **argv) {
                   << std::dec << word << ")" << std::endl;
     }
 
-    std::cout << "\n--- SYSTEM RAM DUMP ---" << std::endl;
+    std::cout << "\n--- SYSTEM RAM DUMP HIGHER---" << std::endl;
     for (int addr = 0x03FFFFF0; addr >= 0x03FFFF00; addr -= 4) {
         uint32_t word = top->rootp->CORE__DOT__system_ram__DOT__ramm[addr] |
                         (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 8) |
