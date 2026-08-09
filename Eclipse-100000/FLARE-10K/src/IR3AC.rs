@@ -331,6 +331,54 @@ fn find_arg_reg_slot(slots: &mut [[bool; 4]; 4], size: usize) -> Option<String> 
     None
 }
 
+fn expr_calls_function(expr: &Expr) -> bool {
+    match expr {
+        Expr::FunctionCall { .. } => true,
+        Expr::Deref(inner) | Expr::Ref(inner) => expr_calls_function(inner),
+        Expr::Unary { expr, .. } => expr_calls_function(expr),
+        Expr::Cast { expr, .. } => expr_calls_function(expr),
+        Expr::FieldAccess { expr, .. } => expr_calls_function(expr),
+        Expr::Index { array, index } => expr_calls_function(array) || expr_calls_function(index),
+        Expr::ArrayLiteral(elems) => elems.iter().any(expr_calls_function),
+        Expr::Binary { left, right, .. } => expr_calls_function(left) || expr_calls_function(right),
+        Expr::MoreLessEq { left, right, .. } => expr_calls_function(left) || expr_calls_function(right),
+        Expr::Assign { lhs, rhs } => expr_calls_function(lhs) || expr_calls_function(rhs),
+        Expr::VarDecl { initial, .. } => {
+            initial.as_ref().map(|e| expr_calls_function(e)).unwrap_or(false)
+        }
+        _ => false,
+    }
+}
+
+fn stmt_calls_function(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Expr(expr) => expr_calls_function(expr),
+        Stmt::Return(Some(expr)) => expr_calls_function(expr),
+        Stmt::For { init, cond, inc, body } => {
+            expr_calls_function(init)
+                || expr_calls_function(cond)
+                || expr_calls_function(inc)
+                || body.iter().any(stmt_calls_function)
+        }
+        Stmt::While { cond, body } => {
+            expr_calls_function(cond) || body.iter().any(stmt_calls_function)
+        }
+        Stmt::IfElse { cond, main_branch, else_branch } => {
+            expr_calls_function(cond)
+                || main_branch.iter().any(stmt_calls_function)
+                || else_branch
+                    .as_ref()
+                    .map(|b| b.iter().any(stmt_calls_function))
+                    .unwrap_or(false)
+        }
+        _ => false,
+    }
+}
+
+fn func_body_is_leaf(body: &[Stmt]) -> bool {
+    !body.iter().any(stmt_calls_function)
+}
+
 //Helpers
 impl IR {
     pub fn new(program: &Program) -> Self {
@@ -490,17 +538,26 @@ impl IR {
 }
 
 impl IR {
-    fn reduce_call_args(&mut self, args: &[Expr]) -> (Vec<(IROperand, String)>, Vec<IROperand>) {
-        let arg_types: Vec<Type> = args.iter().map(|a| self.infer_type(a)).collect();
+    fn reduce_call_args(&mut self, name: &str, args: &[Expr]) -> (Vec<(IROperand, String)>, Vec<IROperand>) {
+        let func_sig = self
+            .functions
+            .get(name)
+            .unwrap_or_else(|| panic!("Unknown function {}", name))
+            .clone();
+        let arg_types: Vec<Type> = func_sig.params.iter().map(|p| p.ty.clone()).collect();
         let placements = classify_params(&arg_types, &self.structs);
 
         let mut reg_args = Vec::new();
         let mut stack_words: Vec<(usize, IROperand)> = Vec::new();
 
-        for (arg_expr, placement) in args.iter().zip(placements.iter()) {
-            let by_reference = match self.infer_type(arg_expr) {
+        for ((arg_expr, placement), param) in args
+            .iter()
+            .zip(placements.iter())
+            .zip(func_sig.params.iter())
+        {
+            let by_reference = match &param.ty {
                 Type::Array(_, _) => true,
-                Type::Struct(name) => !self.structs.get(&name).map(|s| s.is_reg).unwrap_or(false),
+                Type::Struct(sname) => !self.structs.get(sname).map(|s| s.is_reg).unwrap_or(false),
                 _ => false,
             };
             match placement {
@@ -555,7 +612,7 @@ impl IR {
             Expr::FunctionCall {name, args} => {
                 let result_ty = self.infer_type(expr);
                 let dest = self.new_temp_typed(result_ty);
-                let (reg_args, stack_args) = self.reduce_call_args(args);
+                let (reg_args, stack_args) = self.reduce_call_args(name, args);
 
                 self.emit(IRInst::Call {
                     dest: Some(dest.clone()),
@@ -851,7 +908,7 @@ impl IR {
                 match expr {
                     //Function with no dest
                     Expr::FunctionCall { name, args } => {
-                        let (reg_args, stack_args) = self.reduce_call_args(args);
+                        let (reg_args, stack_args) = self.reduce_call_args(name, args);
 
                         self.emit(IRInst::Call {
                             dest: None,
@@ -1012,19 +1069,28 @@ impl IR {
             param_types.push(param.ty.clone());
         }
 
+        let leaf = func_body_is_leaf(&func.body);
+
         let placements = classify_params(&param_types, &self.structs);
         for (param, placement) in func.params.iter().zip(placements.iter()) {
             match placement {
                 ArgPlacement::Reg(reg_str) => {
-                    let arg_name = format!("__arg_{}", reg_str);
-                    self.emit(IRInst::Pin {
-                        var: arg_name.clone(),
-                        register: reg_str.clone(),
-                    });
-                    self.emit(IRInst::Cpy {
-                        dest: IROperand::Var(param.name.clone()),
-                        src: IROperand::Var(arg_name),
-                    });
+                    if leaf {
+                        self.emit(IRInst::Pin {
+                            var: param.name.clone(),
+                            register: reg_str.clone(),
+                        });
+                    } else {
+                        let arg_name = format!("__arg_{}", reg_str);
+                        self.emit(IRInst::Pin {
+                            var: arg_name.clone(),
+                            register: reg_str.clone(),
+                        });
+                        self.emit(IRInst::Cpy {
+                            dest: IROperand::Var(param.name.clone()),
+                            src: IROperand::Var(arg_name),
+                        });
+                    }
                 }
                 ArgPlacement::Stack(slot) => {
                     self.emit(IRInst::LoadPtr {

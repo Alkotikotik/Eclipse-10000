@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 fn main() -> std::io::Result<()> {
-    let file = File::open("END-10K-16.bdf")?;
+    let file = File::open("ENC-10K-16.bdf")?;
     let reader = BufReader::new(file);
 
     let mut glyphs: HashMap<usize, Vec<u8>> = HashMap::new();
@@ -39,13 +39,13 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    let max_index = *glyphs.keys().max().unwrap_or(&0);
+    let max_index = 55;
 
     println!("u8 font_data[] = {{");
-
-    for idx in 11..=max_index {
+    let mut indexx = 0;
+    for idx in 45..=max_index {
         if let Some(bytes) = glyphs.get(&idx) {
-            println!("    >_ Index {} (0x{:02X})", idx, idx);
+            println!("    >_ Index {} (real: {})", indexx, idx);
             print!("    ");
             for (i, b) in bytes.iter().enumerate() {
                 print!("0x{:02X}, ", b);
@@ -54,10 +54,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
             println!();
-        } else {
-            println!("    >_ Index {} (Empty)", idx);
-            println!("    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,");
-            println!("    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,");
+            indexx += 1;
         }
     }
 
