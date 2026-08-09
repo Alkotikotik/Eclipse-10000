@@ -582,6 +582,16 @@ fn half_op(reg: Register, sub_index: u8) -> AsmOperand {
         sub_index,
     })
 }
+fn regs_overlap(a: Register, b: Register) -> bool {
+    if a.id != b.id {
+        return false;
+    }
+    let a_start = a.sub_index as i32;
+    let a_end = a_start + a.reg_type.get_size() as i32;
+    let b_start = b.sub_index as i32;
+    let b_end = b_start + b.reg_type.get_size() as i32;
+    a_start < b_end && b_start < a_end
+}
 
 fn is_const(op: &IROperand) -> bool {
     matches!(
@@ -1816,7 +1826,13 @@ impl<'a> Codegen<'a> {
             (rx31(), AsmOperand::Imm10(0))
         } else {
             let right_asm = self.operand_to_asm(right);
-            if dest_asm != left_asm && right_asm == dest_asm {
+            let collides = match (&dest_asm, &right_asm) {
+                (AsmOperand::Reg(Reg::TheRealOne(d)), AsmOperand::Reg(Reg::TheRealOne(r))) => {
+                    regs_overlap(*d, *r)
+                }
+                _ => false,
+            };
+            if dest_asm != left_asm && collides {
                 out.push(AsmInst::Mov(rx31(), right_asm, AsmOperand::Imm10(0)));
                 used_rx31 = true;
                 (rx31(), AsmOperand::Imm10(0))

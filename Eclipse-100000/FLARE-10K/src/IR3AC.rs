@@ -461,7 +461,16 @@ impl IR {
                     //unreachable but who knows
                 }
             }
-            Expr::Binary { left, .. } => self.infer_type(left),
+            Expr::Binary { left, op, .. } => {
+                if matches!(op, BinaryOpKind::Shl) {
+                    match self.infer_type(left) {
+                        Type::I8 | Type::I16 | Type::I32 => Type::I32,
+                        _ => Type::U32,
+                    }
+                } else {
+                    self.infer_type(left)
+                }
+            }
             Expr::Unary { expr, .. } => self.infer_type(expr),
             Expr::Cast { target_type, .. } => target_type.clone(),
             Expr::Ref(inner) => {
@@ -622,7 +631,15 @@ impl IR {
                     let left_ty = self.infer_type(left);
                     let l_op = self.reduce_expr(left);
                     let r_op = self.reduce_expr(right);
-                    let dest = self.new_temp_typed(left_ty);
+                    let dest_ty = if matches!(op, BinaryOpKind::Shl) {
+                        match left_ty {
+                            Type::I8 | Type::I16 | Type::I32 => Type::I32,
+                            _ => Type::U32,
+                        }
+                    } else {
+                        left_ty
+                    };
+                    let dest = self.new_temp_typed(dest_ty);
 
                     let inst = match op {
                         BinaryOpKind::Add => IRInst::Add {

@@ -1,3 +1,5 @@
+% This paper was written on overleaf.com or whatever website and pretty convinient
+
 \documentclass{article}
 \usepackage{graphicx} % Required for inserting images
 \usepackage{subcaption}
@@ -336,7 +338,7 @@ There are currently several limitations of the compiler that I am planning to fi
     \item no callee-saved registers exist at all - everything is caller-saved, though I would hardy call it a trade-off, its just a design decision
     \item Global array's elements must be known literals at compile time
     \item No compile time global evaluation, for example $\#$def u32 a = 5+10; is not valid.
-    \item Currently, there are no dedicated optimization passes. (Though register allocation itself yields significant speedups.)
+    \item Currently, there are minimal dedicated optimization passes. (Though register allocation itself yields significant speedups.) There are also other optimizatinos, such as no conditions checking for while [true] loops, or stripping useless xors, which I wouldn't call a "dedicated optimization pass", nontheless they do increase execution speed.
     \item FLARE-10K lacks syntactic sugar such as \texttt{+=} and \texttt{-=}.
     \item Functions cannot return arrays, nor can they accept structs or arrays by value (non-reference).
     \item No hardware division or modulo instructions, as I refuse to add them to the ALU without implementing them using purely primitive logic gates in Logisim first.

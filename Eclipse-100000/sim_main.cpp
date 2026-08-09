@@ -32,9 +32,9 @@ int main(int argc, char **argv) {
 
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
-    SDL_Window *window = SDL_CreateWindow("Custom ISA - High Speed Monitor", SDL_WINDOWPOS_CENTERED,
-                                          SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT,
-                                          SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    SDL_Window *window =
+        SDL_CreateWindow("Eclipse-10000 Monitor", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                         WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     SDL_Texture *texture =

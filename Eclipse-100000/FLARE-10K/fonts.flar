@@ -1,6 +1,7 @@
 #def u32 VRAM_BASE = 0x04000000;
 #def u32 SCREEN_WIDTH = 640;
 
+>_ 16x8 font with 4px down and 1px left being empty for proper spacing, though I might change it later and just draw spacing manuually
 #def u8 font_data[96] = {
     >_ Index 0
     0x38, 0x7C, 0xEE, 0xC6, 0x92, 0xBA, 0xBA, 0xBA,
@@ -24,28 +25,39 @@
 
 func main(){
     while [true] {
+        [4000] = 10;
         draw_char(1, 1, 0xFFFF, 0x000F, 0);
+        [4004] = 11;
     }
 }
 
-func draw_char(u32 cell_x, u32 cell_y, u16 fg, u16 bg, u8 char_idx) {
+>_ Drawing char pixel my pixel
+func draw_char(u32 cell_x, u32 cell_y, u16 fg, u16 bg, u8 char_idx) { >_ fg - color of char, bg - well bg
+    [4008] = 12;
     u32 offset = char_idx << 4;
+    [4032] = 18;
 
     for [u32 row; row < 16; row = row + 1] {
+        [4028] = 17;
         u8 bits = font_data[offset + row];
         u8 mask = 0x80;
-
+        >_ Calculing it now to save instructions
         u32 row_addr = VRAM_BASE + (((cell_y + row) * SCREEN_WIDTH + cell_x) << 1);
 
         for [u32 col; col < 8; col = col + 1] {
+            [4016] = 14;
+            >_ Finishing address calculation
             u32 addr = row_addr + (col << 1);
 
-            if [(bits & mask) == mask] {
+            if [(bits & mask) == mask] { >_ If pixel lands on pixel that needs to be draw - well draw it
+                [4020] = 15;
                 [addr] = fg;
-            } else {
+            } else { >_ if not, draw bg instead
+                [4024] = 16;
                 [addr] = bg;
             }
             mask = mask >> 1;
         }
     }
+    [4012] = 13;
 }
