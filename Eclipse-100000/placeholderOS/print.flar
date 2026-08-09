@@ -28,17 +28,15 @@
 
 func main(){
     while [true] {
-        draw_char(8, 8,  0xFFFF, 0x0000, 0);
-        draw_char(8, 16, 0xFFFF, 0x0000, 1);
-        draw_char(8, 24, 0xFFFF, 0x0000, 2);
-        draw_char(8, 32, 0xFFFF, 0x0000, 3);
-        draw_char(8, 40, 0xFFFF, 0x0000, 4);
+        draw_char(8,  8, 0xFFFF, 0x0000, 0);
+        draw_char(24, 8, 0xFFFF, 0x0000, 1);
+        draw_char(40, 8, 0xFFFF, 0x0000, 2);
     }
 }
 
 >_ Drawing char pixel my pixel
 func draw_char(u16 cell_x, u16 cell_y, u16 fg, u16 bg, u8 char_idx) { >_ fg - color of char, bg - well bg
-    [4004] = char_idx;
+    [4000 + char_idx * 4] = char_idx + cell_y + cell_x;
 
     u32 offset = char_idx << 4;
 
