@@ -28,11 +28,11 @@
 
 func main(){
     while [true] {
-        draw_char(0,  0, 0xFFFF, 0x0000, 0);
-        draw_char(18, 0, 0xFFFF, 0x0000, 1);
-        draw_char(36, 0, 0xFFFF, 0x0000, 2);
-        draw_char(54, 0, 0xFFFF, 0x0000, 3);
-        draw_char(72, 0, 0xFFFF, 0x0000, 4);
+        draw_char(8, 8,  0xFFFF, 0x0000, 0);
+        draw_char(8, 16, 0xFFFF, 0x0000, 1);
+        draw_char(8, 24, 0xFFFF, 0x0000, 2);
+        draw_char(8, 32, 0xFFFF, 0x0000, 3);
+        draw_char(8, 40, 0xFFFF, 0x0000, 4);
     }
 }
 

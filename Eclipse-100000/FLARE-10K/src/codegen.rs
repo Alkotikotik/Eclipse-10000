@@ -36,6 +36,7 @@ pub struct GlobalLayout {
     pub pins: HashMap<String, Register>, // pinned globals
     pub init_values: HashMap<String, GlobalInit>,
     pub array_elem_sizes: HashMap<String, usize>, // globals that are arrays, and their element size
+    pub order: Vec<String>,
 }
 
 enum AddrBase {
@@ -397,6 +398,7 @@ impl GlobalLayout {
         let mut pins = HashMap::new();
         let mut init_values = HashMap::new();
         let mut array_elem_sizes = HashMap::new();
+        let mut order = Vec::new();
         let mut total_size = 0usize;
 
         for decl in globals {
@@ -464,6 +466,7 @@ impl GlobalLayout {
             }
 
             init_values.insert(name.clone(), init);
+            order.push(name.clone());
         }
 
         GlobalLayout {
@@ -472,6 +475,7 @@ impl GlobalLayout {
             pins,
             init_values,
             array_elem_sizes,
+            order,
         }
     }
 }
@@ -533,7 +537,7 @@ impl InterferenceGraph {
     pub fn get_weighted_degree(
         &self,
         node: &IROperand,
-        active_nodes: &HashSet<IROperand>,
+        active_nodes: &BTreeSet<IROperand>,
         sizes: &HashMap<IROperand, RegType>,
     ) -> usize {
         self.adjacent
@@ -1215,7 +1219,7 @@ impl<'a> Codegen<'a> {
     pub fn color(&mut self, graph: InterferenceGraph) -> Vec<IROperand> {
         let spill_costs = self.compute_spill_costs();
 
-        let mut active_nodes: HashSet<IROperand> = graph
+        let mut active_nodes: BTreeSet<IROperand> = graph
             .adjacent
             .keys()
             .filter(|a| !self.allocations.contains_key(a))
@@ -1712,7 +1716,8 @@ impl<'a> Codegen<'a> {
             out.push(AsmInst::SprSet(reg_op(rx30_reg()), Spr::GP));
         }
 
-        for (name, init) in &layout.init_values {
+        for name in &layout.order {
+            let init = &layout.init_values[name];
             match init {
                 GlobalInit::Scalar(v) => {
                     if let Some(reg) = layout.pins.get(name) {
