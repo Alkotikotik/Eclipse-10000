@@ -1,7 +1,7 @@
 ~Init_000:
 	XOR [rx31, rx31]
 	XOR [rx30, rx30]
-	SPRSUB rx31 ->SP<- 600
+	SPRSUB rx31 ->SP<- 872
 	SPRLEA rx30 <- [SP 0]
 	SPRSET rx30 -> GP
 	LOAD ry300 <- 0
@@ -1193,21 +1193,579 @@
 	SPRSTR rz300 -> [GP 598]
 	LOAD rz300 <- 255
 	SPRSTR rz300 -> [GP 599]
+	LOAD rz300 <- 3
+	SPRSTR rz300 -> [GP 600]
+	LOAD rz300 <- 126
+	SPRSTR rz300 -> [GP 601]
+	LOAD rz300 <- 254
+	SPRSTR rz300 -> [GP 602]
+	LOAD rz300 <- 6
+	SPRSTR rz300 -> [GP 603]
+	LOAD rz300 <- 126
+	SPRSTR rz300 -> [GP 604]
+	LOAD rz300 <- 254
+	SPRSTR rz300 -> [GP 605]
+	LOAD rz300 <- 198
+	SPRSTR rz300 -> [GP 606]
+	LOAD rz300 <- 254
+	SPRSTR rz300 -> [GP 607]
+	LOAD rz300 <- 123
+	SPRSTR rz300 -> [GP 608]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 609]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 610]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 611]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 612]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 613]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 614]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 615]
+	LOAD rz300 <- 224
+	SPRSTR rz300 -> [GP 616]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 617]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 618]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 619]
+	LOAD rz300 <- 112
+	SPRSTR rz300 -> [GP 620]
+	LOAD rz300 <- 126
+	SPRSTR rz300 -> [GP 621]
+	LOAD rz300 <- 127
+	SPRSTR rz300 -> [GP 622]
+	LOAD rz300 <- 123
+	SPRSTR rz300 -> [GP 623]
+	LOAD rz300 <- 115
+	SPRSTR rz300 -> [GP 624]
+	LOAD rz300 <- 103
+	SPRSTR rz300 -> [GP 625]
+	LOAD rz300 <- 111
+	SPRSTR rz300 -> [GP 626]
+	LOAD rz300 <- 126
+	SPRSTR rz300 -> [GP 627]
+	LOAD rz300 <- 124
+	SPRSTR rz300 -> [GP 628]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 629]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 630]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 631]
+	LOAD rz300 <- 62
+	SPRSTR rz300 -> [GP 632]
+	LOAD rz300 <- 127
+	SPRSTR rz300 -> [GP 633]
+	LOAD rz300 <- 227
+	SPRSTR rz300 -> [GP 634]
+	LOAD rz300 <- 192
+	SPRSTR rz300 -> [GP 635]
+	LOAD rz300 <- 192
+	SPRSTR rz300 -> [GP 636]
+	LOAD rz300 <- 192
+	SPRSTR rz300 -> [GP 637]
+	LOAD rz300 <- 227
+	SPRSTR rz300 -> [GP 638]
+	LOAD rz300 <- 127
+	SPRSTR rz300 -> [GP 639]
+	LOAD rz300 <- 62
+	SPRSTR rz300 -> [GP 640]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 641]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 642]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 643]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 644]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 645]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 646]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 647]
+	LOAD rz300 <- 7
+	SPRSTR rz300 -> [GP 648]
+	LOAD rz300 <- 3
+	SPRSTR rz300 -> [GP 649]
+	LOAD rz300 <- 3
+	SPRSTR rz300 -> [GP 650]
+	LOAD rz300 <- 3
+	SPRSTR rz300 -> [GP 651]
+	LOAD rz300 <- 3
+	SPRSTR rz300 -> [GP 652]
+	LOAD rz300 <- 63
+	SPRSTR rz300 -> [GP 653]
+	LOAD rz300 <- 127
+	SPRSTR rz300 -> [GP 654]
+	LOAD rz300 <- 247
+	SPRSTR rz300 -> [GP 655]
+	LOAD rz300 <- 227
+	SPRSTR rz300 -> [GP 656]
+	LOAD rz300 <- 199
+	SPRSTR rz300 -> [GP 657]
+	LOAD rz300 <- 239
+	SPRSTR rz300 -> [GP 658]
+	LOAD rz300 <- 127
+	SPRSTR rz300 -> [GP 659]
+	LOAD rz300 <- 62
+	SPRSTR rz300 -> [GP 660]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 661]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 662]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 663]
+	LOAD rz300 <- 124
+	SPRSTR rz300 -> [GP 664]
+	LOAD rz300 <- 254
+	SPRSTR rz300 -> [GP 665]
+	LOAD rz300 <- 230
+	SPRSTR rz300 -> [GP 666]
+	LOAD rz300 <- 198
+	SPRSTR rz300 -> [GP 667]
+	LOAD rz300 <- 206
+	SPRSTR rz300 -> [GP 668]
+	LOAD rz300 <- 252
+	SPRSTR rz300 -> [GP 669]
+	LOAD rz300 <- 192
+	SPRSTR rz300 -> [GP 670]
+	LOAD rz300 <- 252
+	SPRSTR rz300 -> [GP 671]
+	LOAD rz300 <- 126
+	SPRSTR rz300 -> [GP 672]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 673]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 674]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 675]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 676]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 677]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 678]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 679]
+	LOAD rz300 <- 14
+	SPRSTR rz300 -> [GP 680]
+	LOAD rz300 <- 31
+	SPRSTR rz300 -> [GP 681]
+	LOAD rz300 <- 27
+	SPRSTR rz300 -> [GP 682]
+	LOAD rz300 <- 27
+	SPRSTR rz300 -> [GP 683]
+	LOAD rz300 <- 25
+	SPRSTR rz300 -> [GP 684]
+	LOAD rz300 <- 24
+	SPRSTR rz300 -> [GP 685]
+	LOAD rz300 <- 24
+	SPRSTR rz300 -> [GP 686]
+	LOAD rz300 <- 62
+	SPRSTR rz300 -> [GP 687]
+	LOAD rz300 <- 124
+	SPRSTR rz300 -> [GP 688]
+	LOAD rz300 <- 24
+	SPRSTR rz300 -> [GP 689]
+	LOAD rz300 <- 24
+	SPRSTR rz300 -> [GP 690]
+	LOAD rz300 <- 126
+	SPRSTR rz300 -> [GP 691]
+	LOAD rz300 <- 255
+	SPRSTR rz300 -> [GP 692]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 693]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 694]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 695]
+	LOAD rz300 <- 119
+	SPRSTR rz300 -> [GP 696]
+	LOAD rz300 <- 254
+	SPRSTR rz300 -> [GP 697]
+	LOAD rz300 <- 238
+	SPRSTR rz300 -> [GP 698]
+	LOAD rz300 <- 222
+	SPRSTR rz300 -> [GP 699]
+	LOAD rz300 <- 254
+	SPRSTR rz300 -> [GP 700]
+	LOAD rz300 <- 126
+	SPRSTR rz300 -> [GP 701]
+	LOAD rz300 <- 6
+	SPRSTR rz300 -> [GP 702]
+	LOAD rz300 <- 6
+	SPRSTR rz300 -> [GP 703]
+	LOAD rz300 <- 134
+	SPRSTR rz300 -> [GP 704]
+	LOAD rz300 <- 198
+	SPRSTR rz300 -> [GP 705]
+	LOAD rz300 <- 254
+	SPRSTR rz300 -> [GP 706]
+	LOAD rz300 <- 124
+	SPRSTR rz300 -> [GP 707]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 708]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 709]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 710]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 711]
+	LOAD rz300 <- 224
+	SPRSTR rz300 -> [GP 712]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 713]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 714]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 715]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 716]
+	LOAD rz300 <- 120
+	SPRSTR rz300 -> [GP 717]
+	LOAD rz300 <- 124
+	SPRSTR rz300 -> [GP 718]
+	LOAD rz300 <- 110
+	SPRSTR rz300 -> [GP 719]
+	LOAD rz300 <- 102
+	SPRSTR rz300 -> [GP 720]
+	LOAD rz300 <- 102
+	SPRSTR rz300 -> [GP 721]
+	LOAD rz300 <- 102
+	SPRSTR rz300 -> [GP 722]
+	LOAD rz300 <- 102
+	SPRSTR rz300 -> [GP 723]
+	LOAD rz300 <- 230
+	SPRSTR rz300 -> [GP 724]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 725]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 726]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 727]
+	LOAD rz300 <- 48
+	SPRSTR rz300 -> [GP 728]
+	LOAD rz300 <- 48
+	SPRSTR rz300 -> [GP 729]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 730]
+	LOAD rz300 <- 112
+	SPRSTR rz300 -> [GP 731]
+	LOAD rz300 <- 48
+	SPRSTR rz300 -> [GP 732]
+	LOAD rz300 <- 48
+	SPRSTR rz300 -> [GP 733]
+	LOAD rz300 <- 48
+	SPRSTR rz300 -> [GP 734]
+	LOAD rz300 <- 48
+	SPRSTR rz300 -> [GP 735]
+	LOAD rz300 <- 48
+	SPRSTR rz300 -> [GP 736]
+	LOAD rz300 <- 48
+	SPRSTR rz300 -> [GP 737]
+	LOAD rz300 <- 48
+	SPRSTR rz300 -> [GP 738]
+	LOAD rz300 <- 48
+	SPRSTR rz300 -> [GP 739]
+	LOAD rz300 <- 252
+	SPRSTR rz300 -> [GP 740]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 741]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 742]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 743]
+	LOAD rz300 <- 192
+	SPRSTR rz300 -> [GP 744]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 745]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 746]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 747]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 748]
+	LOAD rz300 <- 102
+	SPRSTR rz300 -> [GP 749]
+	LOAD rz300 <- 110
+	SPRSTR rz300 -> [GP 750]
+	LOAD rz300 <- 124
+	SPRSTR rz300 -> [GP 751]
+	LOAD rz300 <- 120
+	SPRSTR rz300 -> [GP 752]
+	LOAD rz300 <- 120
+	SPRSTR rz300 -> [GP 753]
+	LOAD rz300 <- 124
+	SPRSTR rz300 -> [GP 754]
+	LOAD rz300 <- 110
+	SPRSTR rz300 -> [GP 755]
+	LOAD rz300 <- 230
+	SPRSTR rz300 -> [GP 756]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 757]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 758]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 759]
+	LOAD rz300 <- 224
+	SPRSTR rz300 -> [GP 760]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 761]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 762]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 763]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 764]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 765]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 766]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 767]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 768]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 769]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 770]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 771]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 772]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 773]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 774]
+	LOAD rz300 <- 240
+	SPRSTR rz300 -> [GP 775]
+	LOAD rz300 <- 246
+	SPRSTR rz300 -> [GP 776]
+	LOAD rz300 <- 255
+	SPRSTR rz300 -> [GP 777]
+	LOAD rz300 <- 219
+	SPRSTR rz300 -> [GP 778]
+	LOAD rz300 <- 219
+	SPRSTR rz300 -> [GP 779]
+	LOAD rz300 <- 219
+	SPRSTR rz300 -> [GP 780]
+	LOAD rz300 <- 203
+	SPRSTR rz300 -> [GP 781]
+	LOAD rz300 <- 195
+	SPRSTR rz300 -> [GP 782]
+	LOAD rz300 <- 195
+	SPRSTR rz300 -> [GP 783]
+	LOAD rz300 <- 129
+	SPRSTR rz300 -> [GP 784]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 785]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 786]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 787]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 788]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 789]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 790]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 791]
+	LOAD rz300 <- 220
+	SPRSTR rz300 -> [GP 792]
+	LOAD rz300 <- 126
+	SPRSTR rz300 -> [GP 793]
+	LOAD rz300 <- 115
+	SPRSTR rz300 -> [GP 794]
+	LOAD rz300 <- 99
+	SPRSTR rz300 -> [GP 795]
+	LOAD rz300 <- 99
+	SPRSTR rz300 -> [GP 796]
+	LOAD rz300 <- 99
+	SPRSTR rz300 -> [GP 797]
+	LOAD rz300 <- 99
+	SPRSTR rz300 -> [GP 798]
+	LOAD rz300 <- 99
+	SPRSTR rz300 -> [GP 799]
+	LOAD rz300 <- 65
+	SPRSTR rz300 -> [GP 800]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 801]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 802]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 803]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 804]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 805]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 806]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 807]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 808]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 809]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 810]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 811]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 812]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 813]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 814]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 815]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 816]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 817]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 818]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 819]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 820]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 821]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 822]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 823]
+	LOAD rz300 <- 254
+	SPRSTR rz300 -> [GP 824]
+	LOAD rz300 <- 127
+	SPRSTR rz300 -> [GP 825]
+	LOAD rz300 <- 115
+	SPRSTR rz300 -> [GP 826]
+	LOAD rz300 <- 99
+	SPRSTR rz300 -> [GP 827]
+	LOAD rz300 <- 103
+	SPRSTR rz300 -> [GP 828]
+	LOAD rz300 <- 127
+	SPRSTR rz300 -> [GP 829]
+	LOAD rz300 <- 126
+	SPRSTR rz300 -> [GP 830]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 831]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 832]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 833]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 834]
+	LOAD rz300 <- 240
+	SPRSTR rz300 -> [GP 835]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 836]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 837]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 838]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 839]
+	LOAD rz300 <- 192
+	SPRSTR rz300 -> [GP 840]
+	LOAD rz300 <- 254
+	SPRSTR rz300 -> [GP 841]
+	LOAD rz300 <- 127
+	SPRSTR rz300 -> [GP 842]
+	LOAD rz300 <- 115
+	SPRSTR rz300 -> [GP 843]
+	LOAD rz300 <- 97
+	SPRSTR rz300 -> [GP 844]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 845]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 846]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 847]
+	LOAD rz300 <- 96
+	SPRSTR rz300 -> [GP 848]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 849]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 850]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 851]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 852]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 853]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 854]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 855]
+	LOAD rz300 <- 32
+	SPRSTR rz300 -> [GP 856]
+	LOAD rz300 <- 112
+	SPRSTR rz300 -> [GP 857]
+	LOAD rz300 <- 248
+	SPRSTR rz300 -> [GP 858]
+	LOAD rz300 <- 248
+	SPRSTR rz300 -> [GP 859]
+	LOAD rz300 <- 248
+	SPRSTR rz300 -> [GP 860]
+	LOAD rz300 <- 112
+	SPRSTR rz300 -> [GP 861]
+	LOAD rz300 <- 112
+	SPRSTR rz300 -> [GP 862]
+	LOAD rz300 <- 112
+	SPRSTR rz300 -> [GP 863]
+	LOAD rz300 <- 32
+	SPRSTR rz300 -> [GP 864]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 865]
+	LOAD rz300 <- 32
+	SPRSTR rz300 -> [GP 866]
+	LOAD rz300 <- 112
+	SPRSTR rz300 -> [GP 867]
+	LOAD rz300 <- 32
+	SPRSTR rz300 -> [GP 868]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 869]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 870]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [GP 871]
 
 ~main:
-	SPRSUB rx31 ->SP<- 9
+	SPRSUB rx31 ->SP<- 16
 	SPRLEA rx30 <- [LR 0]
-	SPRSTR rx30 -> [SP 5]
+	SPRSTR rx30 -> [SP 12]
 	LOAD rx30 <- 18
 	SPRSTR rx30 -> [SP 0]
-	LOAD rx30 <- 19
+	LOAD rx30 <- 41
 	SPRSTR rx30 -> [SP 1]
-	LOAD rx30 <- 10
+	LOAD rx30 <- 47
 	SPRSTR rx30 -> [SP 2]
-	LOAD rx30 <- 11
+	LOAD rx30 <- 47
 	SPRSTR rx30 -> [SP 3]
-	LOAD rx30 <- 27
+	LOAD rx30 <- 25
 	SPRSTR rx30 -> [SP 4]
+	LOAD rx30 <- 10
+	SPRSTR rx30 -> [SP 5]
+	LOAD rx30 <- 33
+	SPRSTR rx30 -> [SP 6]
+	LOAD rx30 <- 25
+	SPRSTR rx30 -> [SP 7]
+	LOAD rx30 <- 52
+	SPRSTR rx30 -> [SP 8]
+	LOAD rx30 <- 47
+	SPRSTR rx30 -> [SP 9]
+	LOAD rx30 <- 40
+	SPRSTR rx30 -> [SP 10]
+	LOAD rx30 <- 53
+	SPRSTR rx30 -> [SP 11]
 	XOR [rx30, rx30 0]
 	SPRLEA rx29 <- [SP 0]
 	LOAD ry00 <- 8
@@ -1215,7 +1773,7 @@
 	LOAD ry10 <- 65535
 	LOAD ry11 <- 0
 	MOV rx2 <- rx29 0
-	LOAD rz30 <- 5
+	LOAD rz30 <- 12
 	CALL kpritf
 
 
@@ -1224,10 +1782,10 @@
 
 
 ~Lab_while_end_1:
-	SPRLDR rx31 <- [SP 5]
+	SPRLDR rx31 <- [SP 12]
 	SPRSET rx31 -> LR
 	XOR [rx31, rx31 0]
-	SPRADD rx31 ->SP<- 9
+	SPRADD rx31 ->SP<- 16
 	RET
 
 ~kpritf:
