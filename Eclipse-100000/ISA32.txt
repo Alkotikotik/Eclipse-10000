@@ -43,8 +43,10 @@ ry211 higher 16bits of rx21
 rz212 mid-high 8 bits of rx21
 
 //VRAM & Screen
-There is dedicated 1MB of VRAM at 04000000 - 0x040FFFFF, the screen resolution is 480p.
+There is dedicated 1MB of VRAM at 04000000 - 0x040FFFFF, the screen resolution is 480p. The pixel format is standard RGBA4444, taking up exactly 2bytes or u16
 
+// 
+By default stack lives at 03FFFFF0
 //Opcodes
 ALU Instructions (R-Type)
 000100 : MOV    rx0, rx1

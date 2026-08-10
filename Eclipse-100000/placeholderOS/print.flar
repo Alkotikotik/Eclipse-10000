@@ -28,10 +28,13 @@
 
 func main(){
     u8 string[6] = {0, 1, 2, 3, 4, 5};
-    kpritf(8, 8, 0xFFFF, 0x0000, &string, 6);
     while [true] {
-        kpritf(8, 8, 0xF00F, 0x0000, &string, 6);
+        [4028] = 11;
+        [VRAM_BASE + 0x4FFC] = 0x0F00;
+        kpritf(8, 8, 0xFFFF, 0x0000, &string, 6);
+        [VRAM_BASE + 0x5000] = 0xF000;
     }
+    [4032] = 12;
 }
 
 func kpritf(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len) {
@@ -39,7 +42,6 @@ func kpritf(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len) {
     for [u32 char; char < len; char = char + 1] {
         u32 char_idx = [string + char];
         [4000 + char * 4] = [string + char];
-        [4024] = cell_x;
 
         u32 offset = char_idx << 4;
 
@@ -59,6 +61,8 @@ func kpritf(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len) {
                 mask = mask >> 1;
             }
         }
+        [VRAM_BASE + 0x4FF8] = cell_x;
         cell_x = cell_x + 18;
     }
+    [VRAM_BASE + 0x4FF4] = cell_x;
 }

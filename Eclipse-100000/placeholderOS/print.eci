@@ -251,6 +251,19 @@
 	LOAD rx30 <- 5
 	SPRSTR rx30 -> [SP 5]
 	XOR [rx30, rx30 0]
+
+~Lab_while_start_0:
+	LOAD rx30 <- 4028
+	LOAD rx31 <- 11
+	STR rx31 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	XOR [rx31, rx31 0]
+	SPRLDR rx29 <- [GP 0]
+	LOAD rx30 <- 20476
+	ADD rx29 <- [rx29, rx30 0]
+	LOAD rx30 <- 3840
+	STR rx30 -> [rx29 0]
+	XOR [rx30, rx30 0]
 	SPRLEA rx29 <- [SP 0]
 	LOAD ry00 <- 8
 	LOAD ry01 <- 8
@@ -260,21 +273,21 @@
 	LOAD rz30 <- 6
 	CALL kpritf
 
-
-~Lab_while_start_0:
-	SPRLEA rx29 <- [SP 0]
-	LOAD ry00 <- 8
-	LOAD ry01 <- 8
-	LOAD ry10 <- 61455
-	LOAD ry11 <- 0
-	MOV rx2 <- rx29 0
-	LOAD rz30 <- 6
-	CALL kpritf
-
+	SPRLDR rx29 <- [GP 0]
+	LOAD rx30 <- 20480
+	ADD rx29 <- [rx29, rx30 0]
+	LOAD rx30 <- 61440
+	STR rx30 -> [rx29 0]
+	XOR [rx30, rx30 0]
 	JMP -> ~Lab_while_start_0
 
 
 ~Lab_while_end_1:
+	LOAD rx30 <- 4032
+	LOAD rx31 <- 12
+	STR rx31 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	XOR [rx31, rx31 0]
 	SPRLDR rx31 <- [SP 6]
 	SPRSET rx31 -> LR
 	XOR [rx31, rx31 0]
@@ -300,9 +313,6 @@
 	LOAD rx30 <- 4000
 	ADD rx29 <- [rx30, rx29 0]
 	STR rz280 -> [rx29 0]
-	LOAD rx30 <- 4024
-	STR ry00 -> [rx30 0]
-	XOR [rx30, rx30 0]
 	MOV rx29 <- rx27 0
 	SHL [rx29, rx31 4]
 	MOV rx26 <- rx29 0
@@ -373,6 +383,10 @@
 
 
 ~Lab_for_end_5:
+	SPRLDR rx29 <- [GP 0]
+	LOAD rx30 <- 20472
+	ADD rx29 <- [rx29, rx30 0]
+	STR ry00 -> [rx29 0]
 	LOAD rx30 <- 18
 	ADD ry290 <- [ry00, rx30 0]
 	MOV ry00 <- ry290 0
@@ -382,4 +396,8 @@
 
 
 ~Lab_for_end_3:
+	SPRLDR rx29 <- [GP 0]
+	LOAD rx30 <- 20468
+	ADD rx29 <- [rx29, rx30 0]
+	STR ry00 -> [rx29 0]
 	RET

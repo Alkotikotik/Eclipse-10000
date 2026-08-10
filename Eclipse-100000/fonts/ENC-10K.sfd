@@ -42,9 +42,9 @@ NameList: AGL For New Fonts
 DisplaySize: 16
 AntiAlias: 1
 FitToEm: 0
-WinInfo: 0 75 18
+WinInfo: 0 37 18
 OnlyBitmaps: 1
-BeginChars: 256 22
+BeginChars: 256 33
 
 StartChar: zero
 Encoding: 48 48 0
@@ -197,8 +197,85 @@ Width: 1000
 Flags: W
 LayerCount: 2
 EndChar
+
+StartChar: seven
+Encoding: 55 55 22
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: eight
+Encoding: 56 56 23
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: nine
+Encoding: 57 57 24
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: H
+Encoding: 72 72 25
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: e
+Encoding: 101 101 26
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: l
+Encoding: 108 108 27
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: o
+Encoding: 111 111 28
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: W
+Encoding: 87 87 29
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: r
+Encoding: 114 114 30
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: d
+Encoding: 100 100 31
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
+
+StartChar: C
+Encoding: 67 67 32
+Width: 1000
+Flags: W
+LayerCount: 2
+EndChar
 EndChars
-BitmapFont: 16 23 13 3 1
+BitmapFont: 16 33 13 3 1
 BDFChar: 0 48 16 0 7 -3 12
 IfJTK_qWr#gY:K#_rq&K
 BDFChar: 1 23 16 0 0 0 0
@@ -227,21 +304,43 @@ BDFChar: 12 33 16 1 5 0 12
 +E7,Npi(1k+93O'+92BA
 BDFChar: 13 32 16 0 0 0 0
 z
-BDFChar: 14 65 16 0 6 0 12
-&3,(*`e(f$`e&eoJcGcN
-BDFChar: 15 66 16 0 7 0 12
-J:N0#J:N3%JUi9$J,fQL
+BDFChar: 14 65 16 0 7 -4 12
+(d*91_o'CTs4bH/_o'C0k5YJ^
+BDFChar: 15 66 16 0 7 -3 12
+r-j!6@qT_/IX?-GB5`7s
 BDFChar: 16 49 16 0 7 -3 12
 (cZd8(`4),(`4),(`5C8
 BDFChar: 17 50 16 0 7 -3 12
 IfJTK!s8W-#7__5E8^`q
 BDFChar: 18 51 16 0 7 -3 12
-IfBWT!s8XTrW`N-!s=&P
+I/XW]!s8dXrXT59!sa>T
 BDFChar: 19 52 16 0 7 -3 12
-_o'C0_o'C0kPp#:!s8W-
+_o'C0_o'CTs*m6<!s8W+
 BDFChar: 20 53 16 0 7 -3 12
-IfJ?A^qdb$rdP.T!sa>T
-BDFChar: 21 54 16 8 8 0 0
-z
+IfJBB^qdbDIQn&>!sa>T
+BDFChar: 21 54 16 0 7 -3 12
+IfJ?A^qdbbs6%:N_rq&K
+BDFChar: 22 55 16 0 7 -3 12
+IfBKP#7g`_3,mfk^qelI
+BDFChar: 23 56 16 0 7 -3 12
+4D)LK_o(YdIcnVd_o$(K
+BDFChar: 24 57 16 0 7 -3 12
+IfJTK_rq&L!s8W-#7l:]
+BDFChar: 25 72 16 0 6 -3 12
+m`*8d`l@HGrpIeG`l?$d
+BDFChar: 26 101 16 0 6 -3 6
+I/_-;`r>nOr-eVG
+BDFChar: 27 108 16 2 5 -3 12
+i*]r#?smAM?smAM?smC3
+BDFChar: 28 111 16 0 7 -3 5
+4FZn^_oL)P49,?]
+BDFChar: 29 87 16 0 7 -3 12
+_o'C0_o'CHgY:K_IXZ`.
+BDFChar: 30 114 16 0 7 -3 5
+_#Ah)@:3JN?iU0,
+BDFChar: 31 100 16 0 7 -3 12
+#6P&1!s8WiJ+r!@a7"LA
+BDFChar: 32 67 16 0 8 -3 12
+HiX-Gk5`C"_#V:O^];.M^];.M_#V:O_Z8g!rW%<G
 EndBitmapFont
 EndSplineFont

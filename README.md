@@ -76,7 +76,7 @@ To run and experiment with the full stack, you will need:
    cd Eclipse-100000/FLARE-10K
    ```
 
-3. **Compile and assemble** **`render.flar`****:**
+3. **Compile and assemble `render.flar`**
 
    ```bash
    cargo run -- render.flar -o main.eci

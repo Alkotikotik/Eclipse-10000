@@ -273,9 +273,9 @@ module CU(
 
         //Jump straight to exeption
         if (next_state == FETCH && timer_interrupt_pending && !current_kernel_mode && current_state != EXCEPTION)
-            next_state = TIMER_INTERRUPT;
+            next_state = FETCH; //TIMER_INTERRUPT
         if((current_state == LOAD || current_state == READ_DATA || current_state == STORE) && memViolation) begin
-            next_state = MEM_FAULT;
+            next_state = FETCH; //MEM_FAULT
         end
     end
 

@@ -142,7 +142,7 @@ module CORE(
     end
 
     assign memViolation = (!KernelMode && (memRead || memWrite) &&
-                          ((active_address < memBase) ||
+                         ((active_address < memBase) ||
                           (33'(active_address) >= (33'(memBase) + 33'(memLimit)))));
 
     assign spr_target_sel =
@@ -219,7 +219,7 @@ module CORE(
             EA <= 32'd0;
             KernelMode <= 0;
             SP <= 32'h03FFFFF0;
-            KSP <= 32'h00000FFC;
+            KSP <= 32'h000000FC;
             LR  <= 32'd0;
             KScratch <= 32'd0;
             GP  <= 32'd0;
