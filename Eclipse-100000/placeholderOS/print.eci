@@ -1,7 +1,7 @@
 ~Init_000:
 	XOR [rx31, rx31]
 	XOR [rx30, rx30]
-	SPRSUB rx31 ->SP<- 296
+	SPRSUB rx31 ->SP<- 600
 	SPRLEA rx30 <- [SP 0]
 	SPRSET rx30 -> GP
 	LOAD ry300 <- 0
@@ -1195,17 +1195,19 @@
 	SPRSTR rz300 -> [GP 599]
 
 ~main:
-	SPRSUB rx31 ->SP<- 8
+	SPRSUB rx31 ->SP<- 9
 	SPRLEA rx30 <- [LR 0]
-	SPRSTR rx30 -> [SP 4]
+	SPRSTR rx30 -> [SP 5]
 	LOAD rx30 <- 18
 	SPRSTR rx30 -> [SP 0]
 	LOAD rx30 <- 19
 	SPRSTR rx30 -> [SP 1]
-	LOAD rx30 <- 11
-	SPRSTR rx30 -> [SP 2]
 	LOAD rx30 <- 10
+	SPRSTR rx30 -> [SP 2]
+	LOAD rx30 <- 11
 	SPRSTR rx30 -> [SP 3]
+	LOAD rx30 <- 27
+	SPRSTR rx30 -> [SP 4]
 	XOR [rx30, rx30 0]
 	SPRLEA rx29 <- [SP 0]
 	LOAD ry00 <- 8
@@ -1213,7 +1215,7 @@
 	LOAD ry10 <- 65535
 	LOAD ry11 <- 0
 	MOV rx2 <- rx29 0
-	LOAD rz30 <- 4
+	LOAD rz30 <- 5
 	CALL kpritf
 
 
@@ -1222,10 +1224,10 @@
 
 
 ~Lab_while_end_1:
-	SPRLDR rx31 <- [SP 4]
+	SPRLDR rx31 <- [SP 5]
 	SPRSET rx31 -> LR
 	XOR [rx31, rx31 0]
-	SPRADD rx31 ->SP<- 8
+	SPRADD rx31 ->SP<- 9
 	RET
 
 ~kpritf:

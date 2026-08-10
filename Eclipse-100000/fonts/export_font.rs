@@ -59,6 +59,6 @@ fn main() -> std::io::Result<()> {
     }
 
     println!("}};");
-    println!("Size: {}", indexx * 8);
+    println!("Size: {}", indexx * 16);
     Ok(())
 }

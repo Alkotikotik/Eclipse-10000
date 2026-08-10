@@ -42,9 +42,9 @@ NameList: AGL For New Fonts
 DisplaySize: 16
 AntiAlias: 1
 FitToEm: 0
-WinInfo: 0 75 18
+WinInfo: 0 37 18
 OnlyBitmaps: 1
-BeginChars: 256 54
+BeginChars: 256 55
 
 StartChar: zero
 Encoding: 48 48 0
@@ -421,6 +421,12 @@ Width: 1000
 Flags: W
 LayerCount: 2
 EndChar
+
+StartChar: f
+Encoding: 102 102 54
+Width: 1000
+LayerCount: 2
+EndChar
 EndChars
 BitmapFont: 16 55 13 3 1
 BDFChar: 0 48 16 0 7 -3 12
@@ -531,5 +537,7 @@ BDFChar: 52 89 16 0 7 -3 12
 J]#CC_o([;IQSGa(`5Aa
 BDFChar: 53 90 16 0 7 -3 12
 J,]`U!s];U3,mfk^u54l
+BDFChar: 54 102 16 0 0 0 0
+z
 EndBitmapFont
 EndSplineFont

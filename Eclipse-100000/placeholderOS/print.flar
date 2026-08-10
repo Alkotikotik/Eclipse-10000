@@ -2,7 +2,7 @@
 #def u32 SCREEN_WIDTH = 640;
 
 >_ 16x8 font
-#def u8 font_data[288] = {
+#def u8 font_data[592] = { >_ 288
     >_ Index 0 (real: 48)
     0x7E, 0xFF, 0xE7, 0xC3, 0xC3, 0xDB, 0xDB, 0xDB,
     0xDB, 0xDB, 0xDB, 0xC3, 0xC3, 0xE7, 0xFF, 0x7E,
@@ -118,8 +118,8 @@
 
 func main(){
     >_u8 string[6] = {0, 1, 2, 3, 4, 5};
-    u8 string[4] = {18, 19, 10, 10};
-    kpritf(8, 8, 0xFFFF, 0x0000, &string, 4);
+    u8 string[5] = {18, 19, 10, 11, 27};
+    kpritf(8, 8, 0xFFFF, 0x0000, &string, 5);
     >_kpritf(8, 40, 0xF000, 0x0000, &string, 2);
     >_kpritf(8, 72, 0xC81F, 0x0000, &string, 4);
     while[true]{}
