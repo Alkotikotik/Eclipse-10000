@@ -523,7 +523,10 @@ impl IR {
             Expr::Cast { target_type, .. } => target_type.clone(),
             Expr::Ref(inner) => {
                 let inner_ty = self.infer_type(inner);
-                Type::Ptr(Box::new(inner_ty))
+                match inner_ty {
+                    Type::Array(elem_ty, _) => Type::Ptr(elem_ty),
+                    other => Type::Ptr(Box::new(other)),
+                }
             }
             Expr::FunctionCall { name, .. } => self
                 .functions

@@ -49,7 +49,7 @@ impl Semantic {
 impl Semantic {
     fn is_integer(&self, ty: &Type) -> bool {
         match ty {
-            Type::U32 | Type::I32 | Type::U16 | Type::I16 | Type::U8 | Type::I8 | Type::Bool => true,
+            Type::U32 | Type::I32 | Type::U16 | Type::I16 | Type::U8 | Type::I8 => true,
             _ => false,
         }
     }
@@ -151,7 +151,10 @@ impl Semantic {
 
             Expr::Ref(inner_expr) => {
                 let inner_type = self.check_expr(inner_expr, line, character);
-                Type::Ptr(Box::new(inner_type))
+                match inner_type {
+                    Type::Array(elem_ty, _) => Type::Ptr(elem_ty),
+                    other => Type::Ptr(Box::new(other)),
+                }
             }
 
             Expr::Index { array, index } => {
@@ -191,7 +194,12 @@ impl Semantic {
                 let left_ty = self.check_expr(left, line, character);
                 let right_ty = self.check_expr(right, line, character);
 
-                if left_ty != right_ty && !(self.is_integer(&left_ty) && self.is_integer(&right_ty))
+                let ptr_arith = (matches!(left_ty, Type::Ptr(_)) && self.is_integer(&right_ty))
+                    || (matches!(right_ty, Type::Ptr(_)) && self.is_integer(&left_ty));
+
+                if left_ty != right_ty
+                    && !(self.is_integer(&left_ty) && self.is_integer(&right_ty))
+                    && !ptr_arith
                 {
                     self.sem_panic(
                         &format!(
@@ -202,7 +210,11 @@ impl Semantic {
                         character,
                     );
                 }
-                left_ty
+                if matches!(right_ty, Type::Ptr(_)) {
+                    right_ty
+                } else {
+                    left_ty
+                }
             }
 
             Expr::MoreLessEq { left, op: _, right } => {

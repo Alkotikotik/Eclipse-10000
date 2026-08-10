@@ -27,35 +27,38 @@
 };
 
 func main(){
+    u8 string[6] = {0, 1, 2, 3, 4, 5};
+    kpritf(8, 8, 0xFFFF, 0x0000, &string, 6);
     while [true] {
-        draw_char(8,  8, 0xFFFF, 0x0000, 0);
-        draw_char(24, 8, 0xFFFF, 0x0000, 1);
-        draw_char(40, 8, 0xFFFF, 0x0000, 2);
+        kpritf(8, 8, 0xF00F, 0x0000, &string, 6);
     }
 }
 
->_ Drawing char pixel my pixel
-func draw_char(u16 cell_x, u16 cell_y, u16 fg, u16 bg, u8 char_idx) { >_ fg - color of char, bg - well bg
-    [4000 + char_idx * 4] = char_idx + cell_y + cell_x;
+func kpritf(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len) {
 
-    u32 offset = char_idx << 4;
+    for [u32 char; char < len; char = char + 1] {
+        u32 char_idx = [string + char];
+        [4000 + char * 4] = [string + char];
+        [4024] = cell_x;
 
-    for [u32 row; row < 16; row = row + 1] {
-        u8 bits = font_data[offset + row];
-        u8 mask = 0x80;
-        >_ Calculing it now to save instructions
-        u32 row_addr = VRAM_BASE + (((cell_y + row) * SCREEN_WIDTH + cell_x) << 1);
+        u32 offset = char_idx << 4;
 
-        for [u32 col; col < 8; col = col + 1] {
-            >_ Finishing address calculation
-            u32 addr = row_addr + (col << 1);
+        for [u32 row; row < 16; row = row + 1] {
+            u8 bits = font_data[offset + row];
+            u8 mask = 0x80;
+            u32 row_addr = VRAM_BASE + (((cell_y + row) * SCREEN_WIDTH + cell_x) << 1);
 
-            if [(bits & mask) == mask] { >_ If pixel lands on pixel that needs to be draw - well draw it
-                [addr] = fg;
-            } else { >_ if not, draw bg instead
-                [addr] = bg;
+            for [u32 col; col < 8; col = col + 1] {
+                u32 addr = row_addr + (col << 1);
+
+                if [(bits & mask) == mask] {
+                    [addr] = fg;
+                } else {
+                    [addr] = bg;
+                }
+                mask = mask >> 1;
             }
-            mask = mask >> 1;
         }
+        cell_x = cell_x + 18;
     }
 }
