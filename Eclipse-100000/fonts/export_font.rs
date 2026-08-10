@@ -39,7 +39,7 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    let max_index = 55;
+    let max_index = 95;
 
     println!("u8 font_data[] = {{");
     let mut indexx = 0;
@@ -59,5 +59,6 @@ fn main() -> std::io::Result<()> {
     }
 
     println!("}};");
+    println!("Size: {}", indexx * 8);
     Ok(())
 }
