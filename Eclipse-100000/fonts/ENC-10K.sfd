@@ -559,7 +559,7 @@ Flags: W
 LayerCount: 2
 EndChar
 EndChars
-BitmapFont: 16 75 13 3 1
+BitmapFont: 16 76 13 3 1
 BDFChar: 0 48 16 0 7 0 12
 IfJTK_qWr#_o([;IK0?J
 BDFChar: 1 23 16 0 0 0 0
@@ -614,7 +614,7 @@ BDFChar: 25 72 16 0 6 0 12
 m`*8d`pWio`l?$<mJm4e
 BDFChar: 26 101 16 0 6 0 8
 I/`9JcMYKUIK0?J
-BDFChar: 27 108 16 2 5 0 12
+BDFChar: 27 108 16 2 6 0 12
 i*]r#?smAM?smAMn,NFg
 BDFChar: 28 111 16 -4 14 0 12
 zzz"2FmAhuF9A!"L[_$nqYiDu^=9!!hE^"2Fm:
@@ -677,7 +677,7 @@ i*]r#E.3:`F(]E?HiO-H
 BDFChar: 57 99 16 0 7 0 8
 5(DV.^qeu[4obQ_
 BDFChar: 58 103 16 0 7 -3 8
-GQ.$erdG%UL;s4?
+GQ-aEc@,s%L;s4?
 BDFChar: 59 104 16 0 6 0 12
 i*]r#@!I':AnGXeiW&rY
 BDFChar: 60 105 16 1 6 0 12
@@ -691,8 +691,7 @@ pA`n%gWRLPJH,ZM
 BDFChar: 64 110 16 0 7 0 8
 gjX<S@q0"Y5l^lb
 BDFChar: 65 112 16 0 7 -3 8
-rVuouzIfKHKzErZ1?z@fQK/zB)ho3zIfKHKzIK0?Jz?iU0,z?iU0,z?iU0,z?iU0,zn,NFg
-z
+rVuouzIfKHK
 BDFChar: 66 113 16 0 7 -3 8
 J,[a5k5Kf6"pP8B
 BDFChar: 67 115 16 0 6 0 8
