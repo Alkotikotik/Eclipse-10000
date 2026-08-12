@@ -68,8 +68,16 @@ fn main() {
     }
     let global_layout = GlobalLayout::build(&ir_program.globals, &ast_structs);
     let mut all_instructions = Vec::new();
+
+    let mut top_level_iter = ir_program.top_level.iter();
+    let mut leading_inline: Option<&Vec<String>> = None;
+    if let Some(IR3AC::TopLevelIR::InlineAsm(lines)) = ir_program.top_level.first() {
+        leading_inline = Some(lines);
+        top_level_iter.next();
+    }
+
     all_instructions.extend(Codegen::emit_global_preamble(&global_layout));
-    for item in &ir_program.top_level {
+    for item in top_level_iter {
         match item {
             IR3AC::TopLevelIR::Global(name) => {
                 all_instructions.extend(Codegen::emit_single_global_init(name, &global_layout));
@@ -91,7 +99,18 @@ fn main() {
             }
         }
     }
-    let asm_text = generate_assembly(all_instructions).expect("Codegen error: failed to compile");
+    let mut asm_text = generate_assembly(all_instructions).expect("Codegen error: failed to compile");
+    if let Some(lines) = leading_inline {
+        let mut prefix = String::new();
+        for line in lines {
+            if !line.starts_with(['~', '#']) {
+                prefix.push('\t');
+            }
+            prefix.push_str(line);
+            prefix.push('\n');
+        }
+        asm_text = prefix + &asm_text;
+    }
     if args.asm {
         println!("Assembly:");
         println!("{}", asm_text);

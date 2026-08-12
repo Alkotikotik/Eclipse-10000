@@ -345,7 +345,7 @@ module CORE(
                 32'h0410001C: cpu_mem_data_out = KScratch;
                 32'h04100020: cpu_mem_data_out = ActiveSP;
                 32'h04100024: cpu_mem_data_out = LR;
-                default:      cpu_mem_data_out = 32'd0; 
+                default:      cpu_mem_data_out = 32'd0;
             endcase
         end else begin
             cpu_mem_data_out = 32'd0; //fallback to unmapped space

@@ -1,6 +1,25 @@
+inline[
+    ~JmpBoot:
+        JMP ~boot
+
+    #ORG 60
+    ~SyscallVector:
+        RETU
+
+    ~TimerVector:
+        RETU
+
+    ~KeyVector:
+        JMP ~HandleKey
+
+    ~MemFaultVector:
+        RETU
+
+    ~boot:
+outline];
 #def u32 VRAM_BASE = 0x04000000;
 #def u32 SCREEN_WIDTH = 640;
-#def u8 last_key = 0xFF;
+#def #rz293 u8 last_key = 0xFF;
 
 >_ 16x8 font
 #def u8 font_data[1024] = { >_ 288
@@ -206,13 +225,13 @@ func main(){
     44, 45, 55, 10, 13, 26, 31, 10, 45, 55, 10, 54, 57, 50, 50, 45, 50, 43,
     10, 37, 56, 10, 2, 3, 23, 18, 62, 10, 6, 0, 16, 26, 29};
 
-    >_kprintr(8, 8,  0xFFFF, 0x0000, &string, 47);
+    kprintr(8, 8,  0xFFFF, 0x0000, &string, 47);
     >_kprintr(8, 32, 0xF0FF, 0x0000, &string, 47);
     >_kprintr(8, 56, 0x1F9F, 0x0000, &string, 47);
     >_kprintr(8, 80, 0xC92F, 0x0000, &string, 47);
     while[true]{
         u8 char[1] = {last_key};
-        kprintr(8, 8, 0xFFFF, 0x0000, &char, 1);
+        kprintr(8, 32, 0xFFFF, 0x0000, &char, 1);
     }
 }
 
