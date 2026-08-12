@@ -68,6 +68,7 @@ int main(int argc, char **argv) {
     while (!g_stop && !Verilated::gotFinish()) {
 
         for (int b = 0; b < SIM_BATCH_CYCLES; ++b) {
+            top->ENC_10K_KeyIn = 0xFF;
             top->clk = 0;
             top->eval();
 
@@ -82,10 +83,6 @@ int main(int argc, char **argv) {
                     *reinterpret_cast<uint32_t *>(&vram_buffer[addr]) = data;
                     vram_dirty = true;
                 }
-            } else if (event.type == SDL_KEYDOWN) {
-                top->ENC_10K_KeyIn = sdl_scancode_to_charset(event.key.keysym.scancode);
-            } else if (event.type == SDL_KEYUP) {
-                top->ENC_10K_KeyIn = 0xFF; // back to idle
             }
             cycles_last_second++;
         }
@@ -100,6 +97,10 @@ int main(int argc, char **argv) {
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_QUIT) {
                     g_stop = 1;
+                } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
+                    top->ENC_10K_KeyIn = sdl_scancode_to_charset(event.key.keysym.scancode);
+                } else if (event.type == SDL_KEYUP) {
+                    top->ENC_10K_KeyIn = 0xFF;
                 }
             }
 
