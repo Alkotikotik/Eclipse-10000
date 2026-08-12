@@ -2,7 +2,7 @@
 //I ocacsionally use "reduce" instead of "lower" because I think it sounds better, though sometimes
 //still stick to lower
 use crate::parser::{
-    BinaryOpKind, Expr, FunctionSignature, MoreLess, Program, Stmt, StructDef, Type, UnaryOpKind,
+    BinaryOpKind, Expr, FunctionSignature, MoreLess, Program, Stmt, StructDef, TopLevelItem, Type, UnaryOpKind,
 };
 use std::collections::HashMap;
 
@@ -179,9 +179,17 @@ pub struct IRFunction {
 }
 
 #[derive(Debug, Clone)]
+pub enum TopLevelIR {
+    Global(String),
+    Function(String),
+    InlineAsm(Vec<String>),
+}
+
+#[derive(Debug, Clone)]
 pub struct IRProgram {
     pub globals: Vec<Expr>,
     pub functions: Vec<IRFunction>,
+    pub top_level: Vec<TopLevelIR>,
 }
 
 pub struct IR {
@@ -1048,9 +1056,30 @@ impl IR {
             ir_funcs.push(ir_func);
         }
 
+        let mut top_level = Vec::new();
+        for item in &program.top_level {
+            match item {
+                TopLevelItem::Global(idx) => {
+                    let name = match &program.globals[*idx].decl {
+                        Expr::VarDecl { name, .. } => name.clone(),
+                        _ => panic!("Codegen Error: bad global declaration"),
+                    };
+                    top_level.push(TopLevelIR::Global(name));
+                }
+                TopLevelItem::Function(idx) => {
+                    top_level.push(TopLevelIR::Function(program.functions[*idx].name.clone()));
+                }
+                TopLevelItem::InlineAsm(raw) => {
+                    let lines = raw.lines().map(|s| s.trim().to_string()).collect();
+                    top_level.push(TopLevelIR::InlineAsm(lines));
+                }
+            }
+        }
+
         IRProgram {
             globals: ir_globals,
             functions: ir_funcs,
+            top_level,
         }
     }
 

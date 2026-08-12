@@ -36,10 +36,18 @@ pub struct GlobalDef {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum TopLevelItem {
+    Global(usize),
+    Function(usize),
+    InlineAsm(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub structs: Vec<StructDef>,
     pub globals: Vec<GlobalDef>,
     pub functions: Vec<FunctionSignature>,
+    pub top_level: Vec<TopLevelItem>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -842,7 +850,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_inline_asm(&mut self) -> Stmt {
+    fn parse_inline_asm_raw(&mut self) -> String {
         self.expect(Token::LBracket);
 
         let (next_tok, line, col) = self.tokens.next().expect("Unexpected End of File");
@@ -858,7 +866,11 @@ impl<'a> Parser<'a> {
         self.expect(Token::RBracket);
         self.expect(Token::Semicolon);
 
-        Stmt::InlineAsm(inline_string)
+        inline_string
+    }
+
+    fn parse_inline_asm(&mut self) -> Stmt {
+        Stmt::InlineAsm(self.parse_inline_asm_raw())
     }
 
     fn parse_call_args(&mut self) -> Vec<Expr> {
@@ -900,6 +912,7 @@ impl<'a> Parser<'a> {
             structs: Vec::new(),
             globals: Vec::new(),
             functions: Vec::new(),
+            top_level: Vec::new(),
         };
 
         while let Some(&(ref token, line, col)) = self.tokens.peek() {
@@ -923,14 +936,21 @@ impl<'a> Parser<'a> {
                     };
                     let var_expr = self.parse_var_decl(pin);
                     self.expect(Token::Semicolon);
+                    program.top_level.push(TopLevelItem::Global(program.globals.len()));
                     program.globals.push(GlobalDef { decl: var_expr });
                 }
                 Token::Func => {
                     self.advance();
+                    program.top_level.push(TopLevelItem::Function(program.functions.len()));
                     program.functions.push(self.parse_function());
                 }
+                Token::Inline => {
+                    self.advance();
+                    let raw = self.parse_inline_asm_raw();
+                    program.top_level.push(TopLevelItem::InlineAsm(raw));
+                }
                 other => panic!(
-                    "Parser Error: Expected global declaration (arch, #def, or func), but found {:?} at line {}, character {}",
+                    "Parser Error: Expected global declaration (arch, #def, func, or inline), but found {:?} at line {}, character {}",
                     other, line, col
                 ),
             }

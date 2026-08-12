@@ -4,6 +4,9 @@
 	SPRSUB rx31 ->SP<- 1032
 	SPRLEA rx30 <- [SP 0]
 	SPRSET rx30 -> GP
+	#ORG 40
+	~Handle:
+	RETU
 	LOAD ry300 <- 0
 	LOAD ry301 <- 1024
 	SPRSTR rx30 -> [GP 0]
@@ -2064,96 +2067,142 @@
 	SPRSTR rx30 -> [SP 47]
 	LOAD rx30 <- 18
 	SPRSTR rx30 -> [SP 0]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 41
 	SPRSTR rx30 -> [SP 1]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 48
 	SPRSTR rx30 -> [SP 2]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 48
 	SPRSTR rx30 -> [SP 3]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 51
 	SPRSTR rx30 -> [SP 4]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 10
 	SPRSTR rx30 -> [SP 5]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 33
 	SPRSTR rx30 -> [SP 6]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 51
 	SPRSTR rx30 -> [SP 7]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 54
 	SPRSTR rx30 -> [SP 8]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 48
 	SPRSTR rx30 -> [SP 9]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 40
 	SPRSTR rx30 -> [SP 10]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 63
 	SPRSTR rx30 -> [SP 11]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 10
 	SPRSTR rx30 -> [SP 12]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 30
 	SPRSTR rx30 -> [SP 13]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 44
 	SPRSTR rx30 -> [SP 14]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 45
 	SPRSTR rx30 -> [SP 15]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 55
 	SPRSTR rx30 -> [SP 16]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 10
 	SPRSTR rx30 -> [SP 17]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 13
 	SPRSTR rx30 -> [SP 18]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 26
 	SPRSTR rx30 -> [SP 19]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 31
 	SPRSTR rx30 -> [SP 20]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 10
 	SPRSTR rx30 -> [SP 21]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 45
 	SPRSTR rx30 -> [SP 22]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 55
 	SPRSTR rx30 -> [SP 23]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 10
 	SPRSTR rx30 -> [SP 24]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 54
 	SPRSTR rx30 -> [SP 25]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 57
 	SPRSTR rx30 -> [SP 26]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 50
 	SPRSTR rx30 -> [SP 27]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 50
 	SPRSTR rx30 -> [SP 28]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 45
 	SPRSTR rx30 -> [SP 29]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 50
 	SPRSTR rx30 -> [SP 30]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 43
 	SPRSTR rx30 -> [SP 31]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 10
 	SPRSTR rx30 -> [SP 32]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 37
 	SPRSTR rx30 -> [SP 33]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 56
 	SPRSTR rx30 -> [SP 34]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 10
 	SPRSTR rx30 -> [SP 35]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 2
 	SPRSTR rx30 -> [SP 36]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 3
 	SPRSTR rx30 -> [SP 37]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 23
 	SPRSTR rx30 -> [SP 38]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 18
 	SPRSTR rx30 -> [SP 39]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 62
 	SPRSTR rx30 -> [SP 40]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 10
 	SPRSTR rx30 -> [SP 41]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 6
 	SPRSTR rx30 -> [SP 42]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 0
 	SPRSTR rx30 -> [SP 43]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 16
 	SPRSTR rx30 -> [SP 44]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 26
 	SPRSTR rx30 -> [SP 45]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 29
 	SPRSTR rx30 -> [SP 46]
 	XOR [rx30, rx30 0]
@@ -2164,7 +2213,34 @@
 	LOAD ry11 <- 0
 	MOV rx2 <- rx29 0
 	LOAD rz30 <- 47
-	CALL kpritf
+	CALL kprintr
+
+	SPRLEA rx29 <- [SP 0]
+	LOAD ry00 <- 8
+	LOAD ry01 <- 32
+	LOAD ry10 <- 61695
+	LOAD ry11 <- 0
+	MOV rx2 <- rx29 0
+	LOAD rz30 <- 47
+	CALL kprintr
+
+	SPRLEA rx29 <- [SP 0]
+	LOAD ry00 <- 8
+	LOAD ry01 <- 56
+	LOAD ry10 <- 8095
+	LOAD ry11 <- 0
+	MOV rx2 <- rx29 0
+	LOAD rz30 <- 47
+	CALL kprintr
+
+	SPRLEA rx29 <- [SP 0]
+	LOAD ry00 <- 8
+	LOAD ry01 <- 80
+	LOAD ry10 <- 51503
+	LOAD ry11 <- 0
+	MOV rx2 <- rx29 0
+	LOAD rz30 <- 47
+	CALL kprintr
 
 
 ~Lab_while_start_0:
@@ -2178,7 +2254,7 @@
 	SPRADD rx31 ->SP<- 51
 	RET
 
-~kpritf:
+~kprintr:
 	LOAD rx23 <- 0
 
 ~Lab_for_start_2:

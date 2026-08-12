@@ -66,6 +66,8 @@ They can also be pinned:
 
 ```c
 #def #rx0 PINNED = 12;
+
+Arrays or structs can be globals as well
 ```
 
 ### Casting

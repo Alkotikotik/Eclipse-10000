@@ -4,6 +4,7 @@
 #include <SDL2/SDL.h>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -21,6 +22,7 @@ static std::vector<uint8_t> vram_buffer(1024 * 1024, 0);
 
 static volatile std::sig_atomic_t g_stop = 0;
 void handle_sigint(int) { g_stop = 1; }
+uint8_t sdl_scancode_to_charset(SDL_Scancode sc);
 
 int main(int argc, char **argv) {
     std::signal(SIGINT, handle_sigint);
@@ -80,6 +82,10 @@ int main(int argc, char **argv) {
                     *reinterpret_cast<uint32_t *>(&vram_buffer[addr]) = data;
                     vram_dirty = true;
                 }
+            } else if (event.type == SDL_KEYDOWN) {
+                top->ENC_10K_KeyIn = sdl_scancode_to_charset(event.key.keysym.scancode);
+            } else if (event.type == SDL_KEYUP) {
+                top->ENC_10K_KeyIn = 0xFF; // back to idle
             }
             cycles_last_second++;
         }
@@ -160,4 +166,97 @@ int main(int argc, char **argv) {
     }
 
     return 0;
+}
+
+#include <SDL2/SDL.h>
+#include <cstdint>
+
+uint8_t sdl_scancode_to_charset(SDL_Scancode sc) {
+    switch (sc) {
+    // Digits (0 - 9)
+    case SDL_SCANCODE_0:
+        return 0;
+    case SDL_SCANCODE_1:
+        return 1;
+    case SDL_SCANCODE_2:
+        return 2;
+    case SDL_SCANCODE_3:
+        return 3;
+    case SDL_SCANCODE_4:
+        return 4;
+    case SDL_SCANCODE_5:
+        return 5;
+    case SDL_SCANCODE_6:
+        return 6;
+    case SDL_SCANCODE_7:
+        return 7;
+    case SDL_SCANCODE_8:
+        return 8;
+    case SDL_SCANCODE_9:
+        return 9;
+
+    // Space (10)
+    case SDL_SCANCODE_SPACE:
+        return 10;
+
+    // Uppercase Letters (11 - 36)
+    case SDL_SCANCODE_A:
+        return 11;
+    case SDL_SCANCODE_B:
+        return 12;
+    case SDL_SCANCODE_C:
+        return 13;
+    case SDL_SCANCODE_D:
+        return 14;
+    case SDL_SCANCODE_E:
+        return 15;
+    case SDL_SCANCODE_F:
+        return 16;
+    case SDL_SCANCODE_G:
+        return 17;
+    case SDL_SCANCODE_H:
+        return 18;
+    case SDL_SCANCODE_I:
+        return 19;
+    case SDL_SCANCODE_J:
+        return 20;
+    case SDL_SCANCODE_K:
+        return 21;
+    case SDL_SCANCODE_L:
+        return 22;
+    case SDL_SCANCODE_M:
+        return 23;
+    case SDL_SCANCODE_N:
+        return 24;
+    case SDL_SCANCODE_O:
+        return 25;
+    case SDL_SCANCODE_P:
+        return 26;
+    case SDL_SCANCODE_Q:
+        return 27;
+    case SDL_SCANCODE_R:
+        return 28;
+    case SDL_SCANCODE_S:
+        return 29;
+    case SDL_SCANCODE_T:
+        return 30;
+    case SDL_SCANCODE_U:
+        return 31;
+    case SDL_SCANCODE_V:
+        return 32;
+    case SDL_SCANCODE_W:
+        return 33;
+    case SDL_SCANCODE_X:
+        return 34;
+    case SDL_SCANCODE_Y:
+        return 35;
+    case SDL_SCANCODE_Z:
+        return 36;
+    // Exclamation Mark (63)
+    case SDL_SCANCODE_KP_EXCLAM:
+        return 63;
+
+    default:
+        return 0xFF; // Filler
+    }
 }

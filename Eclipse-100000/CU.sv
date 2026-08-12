@@ -13,6 +13,8 @@ module CU(
     output logic XWrite, //Temp registers
     output logic YWrite,
 
+    input logic [7:0] key_in,
+
     output logic IRWrite,
     output logic PCWrite,
     output logic GPRsWrite,
@@ -26,7 +28,7 @@ module CU(
 
     output logic aluSrcX, //X, PC
     output logic [1:0] aluSrcY, //fetch: 4, alu_exe/branch = y, mem_calc = spare
-    output logic [2:0] PCSrc, //pc+4, effective address
+    output logic [3:0] PCSrc, //pc+4, effective address
     output logic [2:0] GPRsSrc, //alu result, memory, spare
 
     output logic [1:0] aluOpSel,
@@ -48,7 +50,8 @@ module CU(
         EXCEPTION,
         TIMER_INTERRUPT,
         MEM_FAULT,
-        STORE
+        STORE,
+        KEY_INTERRUPT
     } fsm_states;
 
     fsm_states current_state, next_state;
@@ -59,12 +62,17 @@ module CU(
     logic C, N, V, Z;
     assign {C, N, V, Z} = flags;
 
+    logic [7:0] prev_key_in;
+    logic key_interrupt_pending;
+
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             current_state <= FETCH;
             counter <= 16'd10000;
             timer_interrupt_pending <= 0;
+            prev_key_in <= 8'hFF;
+            key_interrupt_pending <= 0;
         end else begin
             current_state <= next_state;
 
@@ -77,18 +85,23 @@ module CU(
 
             if (current_state == TIMER_INTERRUPT)
                 timer_interrupt_pending <= 0;
+
+            prev_key_in <= key_in;
+            if (key_in != 8'hFF && key_in != prev_key_in)
+                key_interrupt_pending <= 1;
+            if (current_state == KEY_INTERRUPT)
+                key_interrupt_pending <= 0;
         end
     end
 
     always_comb begin
-
         next_state = FETCH;
         XWrite = 0; YWrite = 0;
         IRWrite = 0; PCWrite = 0; GPRsWrite = 0; EAWrite = 0;
         EPCWrite = 0; isKernelMode = current_kernel_mode;
         memRead = 0; memWrite = 0;
         aluSrcX = 0; aluSrcY = 2'b00;
-        PCSrc = 3'b000; GPRsSrc = 3'b000;
+        PCSrc = 4'b0000; GPRsSrc = 3'b000;
         aluOpSel = 2'b00;
         flagsWrite = 0;
         isCallState = 0;
@@ -101,7 +114,7 @@ module CU(
                 PCWrite = 1;
                 aluSrcX = 1;
                 aluSrcY = 2'b00;
-                PCSrc = 3'b001;
+                PCSrc = 4'b0001;
                 aluOpSel = 2'b00;
                 memRead = 1;
             end
@@ -138,32 +151,32 @@ module CU(
                     6'b111110: next_state = EXCEPTION; //SYS
                     6'b111101: begin //RETU
                         isKernelMode = 0;
-                        PCSrc = 3'b011;
+                        PCSrc = 4'b0011;
                         PCWrite = 1;
                         next_state = FETCH;
                     end
                     6'b111000: begin //CALL
                         next_state = FETCH;
                         aluSrcY = 2'b10;
-                        PCSrc   = 3'b001;
+                        PCSrc   = 4'b0001;
                         PCWrite = 1;
                         isCallState = 1;
                     end
                     6'b110010: begin //RET
                         next_state = FETCH;
-                        PCSrc   = 3'b101;
+                        PCSrc   = 4'b0101;
                         PCWrite = 1;
                     end
                     6'b110111: begin //JR
                         next_state = FETCH;
-                        PCSrc   = 3'b111;
+                        PCSrc   = 4'b0111;
                         PCWrite = 1;
                     end
                     6'b110000: next_state = ALU_EXE;  // CMP
                     6'b111111: begin //JMP
                         next_state = FETCH;
                         aluSrcY = 2'b10;
-                        PCSrc   = 3'b001;
+                        PCSrc   = 4'b0001;
                         PCWrite = 1;
                     end
                     6'b101010: begin // SPRSET
@@ -209,7 +222,7 @@ module CU(
 
             BRANCH: begin
                 next_state = FETCH;
-                PCSrc = 3'b000;
+                PCSrc = 4'b0000;
 
                 unique case (opcode)
                     6'b110001: PCWrite = Z; //BEQ
@@ -227,21 +240,28 @@ module CU(
             EXCEPTION: begin
                 EPCWrite = 1;
                 isKernelMode = 1;
-                PCSrc = 3'b010;
+                PCSrc = 4'b0010;
                 PCWrite = 1;
                 next_state = FETCH;
             end
             TIMER_INTERRUPT: begin
                 EPCWrite = 1;
                 isKernelMode = 1;
-                PCSrc = 3'b100;
+                PCSrc = 4'b0100;
+                PCWrite = 1;
+                next_state = FETCH;
+            end
+            KEY_INTERRUPT: begin
+                EPCWrite = 1;
+                isKernelMode = 1;
+                PCSrc = 4'b1000;
                 PCWrite = 1;
                 next_state = FETCH;
             end
             MEM_FAULT: begin
                 EPCWrite = 1;
                 isKernelMode = 1;
-                PCSrc = 3'b110;
+                PCSrc = 4'b0110;
                 PCWrite = 1;
                 next_state = FETCH;
             end
@@ -273,10 +293,10 @@ module CU(
 
         //Jump straight to exeption
         if (next_state == FETCH && timer_interrupt_pending && !current_kernel_mode && current_state != EXCEPTION)
-            next_state = FETCH; //TIMER_INTERRUPT
-        if((current_state == LOAD || current_state == READ_DATA || current_state == STORE) && memViolation) begin
+            next_state = FETCH; //TIMER INTERRUPTE
+        else if (next_state == FETCH && key_interrupt_pending && !current_kernel_mode && current_state != EXCEPTION)
+           next_state = FETCH; //KEY_INTERRUPT
+        if((current_state == LOAD || current_state == READ_DATA || current_state == STORE) && memViolation)
             next_state = FETCH; //MEM_FAULT
-        end
     end
-
 endmodule

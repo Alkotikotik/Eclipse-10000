@@ -42,7 +42,7 @@ NameList: AGL For New Fonts
 DisplaySize: 16
 AntiAlias: 1
 FitToEm: 0
-WinInfo: 0 37 18
+WinInfo: 0 75 18
 OnlyBitmaps: 1
 BeginChars: 256 75
 
@@ -597,7 +597,7 @@ BDFChar: 16 49 16 0 7 0 12
 BDFChar: 17 50 16 0 7 0 12
 IfJTK!s];U3,mgTrr<$!
 BDFChar: 18 51 16 0 7 0 12
-I/XW]!sa>U#6P3\rVuou
+IfBWT!sa>U#6P3\rVuou
 BDFChar: 19 52 16 0 7 0 12
 J]#CCkPp#r#6P&1!<<*"
 BDFChar: 20 53 16 0 7 0 12

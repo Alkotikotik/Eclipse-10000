@@ -42,7 +42,7 @@ module CORE(
 
     logic aluSrcX;
     logic [1:0] aluSrcY;
-    logic [2:0] PCSrc;
+    logic [3:0] PCSrc;
     logic [2:0] GPRsSrc;
     logic [2:0] SPRSrc;
     logic [31:0] sign_ext_imm10;
@@ -185,14 +185,15 @@ module CORE(
 
     always_comb begin
         unique case (PCSrc)
-            3'b000: PCNext = EA;
-            3'b001: PCNext = AluResult;
-            3'b010: PCNext = 32'h00000064; // Syscall Vector
-            3'b011: PCNext = EPC;          // RETU
-            3'b100: PCNext = 32'h00000068; // Timer Vector
-            3'b101: PCNext = LR;           // RET
-            3'b110: PCNext = 32'h00000070; // Memory Protection Fault Vector
-            3'b111: PCNext = GPRs_data_out0; // JR
+            4'b0000: PCNext = EA;
+            4'b0001: PCNext = AluResult;
+            4'b0011: PCNext = EPC;          // RETU
+            4'b0101: PCNext = LR;           // RET
+            4'b0010: PCNext = 32'h00000064; // Syscall Vector
+            4'b0100: PCNext = 32'h00000068; // Timer Vector
+            4'b1000: PCNext = 32'h0000006C; // Key Interrupt Vector
+            4'b0110: PCNext = 32'h00000070; // Memory Protection Fault Vector
+            4'b0111: PCNext = GPRs_data_out0; // JR
             default: PCNext = AluResult;
         endcase
     end
@@ -367,6 +368,7 @@ module CORE(
         .memViolation(memViolation),
         .XWrite(XWrite),
         .YWrite(YWrite),
+        .key_in(ENC_10K_KeyIn),
         .IRWrite(IRWrite),
         .PCWrite(PCWrite),
         .GPRsWrite(GPRsWrite),

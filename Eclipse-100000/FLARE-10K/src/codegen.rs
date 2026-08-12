@@ -1699,7 +1699,7 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    pub fn emit_global_prologue(layout: &GlobalLayout) -> Vec<AsmInst> {
+    pub fn emit_global_preamble(layout: &GlobalLayout) -> Vec<AsmInst> {
         let mut out = Vec::new();
 
         if layout.total_size > 0 {
@@ -1716,49 +1716,59 @@ impl<'a> Codegen<'a> {
             out.push(AsmInst::SprSet(reg_op(rx30_reg()), Spr::GP));
         }
 
-        for name in &layout.order {
-            let init = &layout.init_values[name];
-            match init {
-                GlobalInit::Scalar(v) => {
-                    if let Some(reg) = layout.pins.get(name) {
-                        load_const(*reg, *v, &mut out);
-                    } else if let Some(&off) = layout.offsets.get(name) {
-                        load_const(rx30_reg(), *v, &mut out);
+        out
+    }
+
+    pub fn emit_single_global_init(name: &str, layout: &GlobalLayout) -> Vec<AsmInst> {
+        let mut out = Vec::new();
+        let init = &layout.init_values[name];
+        match init {
+            GlobalInit::Scalar(v) => {
+                if let Some(reg) = layout.pins.get(name) {
+                    load_const(*reg, *v, &mut out);
+                } else if let Some(&off) = layout.offsets.get(name) {
+                    load_const(rx30_reg(), *v, &mut out);
+                    out.push(AsmInst::SprStr(
+                        reg_op(rx30_reg()),
+                        Spr::GP,
+                        AsmOperand::Imm16(off as i16),
+                    ));
+                }
+            }
+            GlobalInit::Array(vals) => {
+                if let Some(&base_off) = layout.offsets.get(name) {
+                    let elem_size = *layout.array_elem_sizes.get(name).unwrap_or(&4);
+                    let elem_reg_type = match elem_size {
+                        1 => RegType::B8,
+                        2 => RegType::B16,
+                        _ => RegType::B32,
+                    };
+                    let elem_reg = Register {
+                        id: 30,
+                        reg_type: elem_reg_type,
+                        sub_index: 0,
+                    };
+                    for (i, v) in vals.iter().enumerate() {
+                        let elem_off = base_off + i * elem_size;
+                        load_const(elem_reg, *v, &mut out);
                         out.push(AsmInst::SprStr(
-                            reg_op(rx30_reg()),
+                            reg_op(elem_reg),
                             Spr::GP,
-                            AsmOperand::Imm16(off as i16),
+                            AsmOperand::Imm16(elem_off as i16),
                         ));
                     }
                 }
-                GlobalInit::Array(vals) => {
-                    if let Some(&base_off) = layout.offsets.get(name) {
-                        let elem_size = *layout.array_elem_sizes.get(name).unwrap_or(&4);
-                        let elem_reg_type = match elem_size {
-                            1 => RegType::B8,
-                            2 => RegType::B16,
-                            _ => RegType::B32,
-                        };
-                        let elem_reg = Register {
-                            id: 30,
-                            reg_type: elem_reg_type,
-                            sub_index: 0,
-                        };
-                        for (i, v) in vals.iter().enumerate() {
-                            let elem_off = base_off + i * elem_size;
-                            load_const(elem_reg, *v, &mut out);
-                            out.push(AsmInst::SprStr(
-                                reg_op(elem_reg),
-                                Spr::GP,
-                                AsmOperand::Imm16(elem_off as i16),
-                            ));
-                        }
-                    }
-                }
-                GlobalInit::None => {}
             }
+            GlobalInit::None => {}
         }
+        out
+    }
 
+    pub fn emit_global_prologue(layout: &GlobalLayout) -> Vec<AsmInst> {
+        let mut out = Self::emit_global_preamble(layout);
+        for name in &layout.order {
+            out.extend(Self::emit_single_global_init(name, layout));
+        }
         out
     }
 

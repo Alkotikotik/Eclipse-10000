@@ -1,3 +1,14 @@
+inline [
+    #ORG 48
+    ~JmpBoot:
+        JMP ~boot
+    ~InterruptTable:
+         JMP ~handleSyscall
+         JMP ~handleTimer
+         JMP ~HandleKey
+         JMP ~HandleMemfault
+outline];
+
 #def u32 VRAM_BASE = 0x04000000;
 #def u32 SCREEN_WIDTH = 640;
 
@@ -205,11 +216,15 @@ func main(){
     44, 45, 55, 10, 13, 26, 31, 10, 45, 55, 10, 54, 57, 50, 50, 45, 50, 43,
     10, 37, 56, 10, 2, 3, 23, 18, 62, 10, 6, 0, 16, 26, 29};
 
-    kpritf(8, 8, 0xFFFF, 0x0000, &string, 47);
+    kprintr(8, 8,  0xFFFF, 0x0000, &string, 47);
+    kprintr(8, 32, 0xF0FF, 0x0000, &string, 47);
+    kprintr(8, 56, 0x1F9F, 0x0000, &string, 47);
+    kprintr(8, 80, 0xC92F, 0x0000, &string, 47);
     while[true]{}
 }
 
-func kpritf(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len) {
+>_ Kernel print raw
+func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len) {
 
     for [u32 char; char < len; char = char + 1] {
         u32 char_idx = [string + char];

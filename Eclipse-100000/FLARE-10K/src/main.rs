@@ -42,9 +42,8 @@ fn main() {
     });
     let lexer = Lexer::new(&src, 1, 1);
     if args.lex {
-        for token in lexer {
-            println!("[{:?}]", token);
-        }
+        println!("Lexer:");
+        println!("{:?}", lexer);
         return;
     }
     let mut parser = Parser::new(lexer);
@@ -69,15 +68,29 @@ fn main() {
     }
     let global_layout = GlobalLayout::build(&ir_program.globals, &ast_structs);
     let mut all_instructions = Vec::new();
-    let global_prologue = Codegen::emit_global_prologue(&global_layout);
-    all_instructions.extend(global_prologue);
-    for ir_func in &ir_program.functions {
-        let mut cg = Codegen::new(ir_func, &ast_structs, &global_layout);
-        cg.run_allocator();
-        let func_instructions = cg.lower_func();
-        all_instructions.extend(func_instructions);
+    all_instructions.extend(Codegen::emit_global_preamble(&global_layout));
+    for item in &ir_program.top_level {
+        match item {
+            IR3AC::TopLevelIR::Global(name) => {
+                all_instructions.extend(Codegen::emit_single_global_init(name, &global_layout));
+            }
+            IR3AC::TopLevelIR::Function(name) => {
+                let ir_func = ir_program
+                    .functions
+                    .iter()
+                    .find(|f| &f.name == name)
+                    .expect("Codegen error: unknown function in top-level order");
+                let mut cg = Codegen::new(ir_func, &ast_structs, &global_layout);
+                cg.run_allocator();
+                all_instructions.extend(cg.lower_func());
+            }
+            IR3AC::TopLevelIR::InlineAsm(lines) => {
+                for line in lines {
+                    all_instructions.push(codegen::AsmInst::Inline(line.clone()));
+                }
+            }
+        }
     }
-    let all_instructions = Codegen::strip_useless_xors(all_instructions);
     let asm_text = generate_assembly(all_instructions).expect("Codegen error: failed to compile");
     if args.asm {
         println!("Assembly:");
