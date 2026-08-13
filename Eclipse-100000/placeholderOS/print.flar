@@ -22,7 +22,9 @@ outline];
 #def u32 VRAM_BASE = 0x04000000;
 #def u32 SCREEN_WIDTH = 640;
 #def #rz293 u8 last_key = 0xFF;
-#def u16 current_x = 8;
+#def #rz292 u8 key_ready = 0;
+#def u16 current_x = 0;
+#def u16 current_y = 32;
 
 >_ 16x8 font, I drew it in font Forge and formatted using quick rust script it ../fonts/export_font.rs
 #def u8 font_data[1024] = { >_ Character set in ../fonts/ENC-10K.txt
@@ -233,13 +235,13 @@ func main(){
     >_kprintr(8, 32, 0xF0FF, 0x0000, &string, 47);
     >_kprintr(8, 56, 0x1F9F, 0x0000, &string, 47);
     >_kprintr(8, 80, 0xC92F, 0x0000, &string, 47);
-    while[true]{
-        if [char[1] != last_key] {
+    while [true] {
+        if [key_ready == 1] {
             current_x = current_x + 10;
+            char[0] = last_key;
+            key_ready = 0;
+            kprintr(current_x, 32, 0xFFFF, 0x0000, &char, 1);
         }
-        char[1] = last_key;
-        u8 char1[1] = {last_key};
-        kprintr(current_x, 32, 0xFFFF, 0x0000, &char1, 1);
     }
 }
 
@@ -279,22 +281,18 @@ func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len){
 
 func HandleKey() {
     inline [
-        PUSH rx26
-        PUSH rx27
         PUSH rx28
         PUSH rx30
-
         LOAD ry300 <- 0
         LOAD ry301 <- 1040
         LDR rx28 <- [rx30 0]
         XOR [rx30, rx30 0]
-        MOV rz290 <- rx28 0
-        MOV rz293 <- rz290 0
-
+        MOV rz293 <- rx28 0
         POP rx30
         POP rx28
-        POP rx27
-        POP rx26
-        RETU
     outline];
+
+    key_ready = 1;
+
+    inline [ RETU outline];
 }
