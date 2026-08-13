@@ -50,6 +50,7 @@ int main(int argc, char **argv) {
     top->reset = 1;
     top->clk = 0;
     top->eval();
+    top->ENC_10K_KeyIn = 0xFF;
 
     for (int i = 0; i < 4; i++) {
         top->clk = !top->clk;
@@ -68,7 +69,6 @@ int main(int argc, char **argv) {
     while (!g_stop && !Verilated::gotFinish()) {
 
         for (int b = 0; b < SIM_BATCH_CYCLES; ++b) {
-            top->ENC_10K_KeyIn = 0xFF;
             top->clk = 0;
             top->eval();
 

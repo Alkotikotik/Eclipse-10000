@@ -22,6 +22,7 @@ outline];
 #def u32 VRAM_BASE = 0x04000000;
 #def u32 SCREEN_WIDTH = 640;
 #def #rz293 u8 last_key = 0xFF;
+#def u16 current_x = 8;
 
 >_ 16x8 font, I drew it in font Forge and formatted using quick rust script it ../fonts/export_font.rs
 #def u8 font_data[1024] = { >_ Character set in ../fonts/ENC-10K.txt
@@ -226,19 +227,24 @@ func main(){
     u8 string[47] = {18, 41, 48, 48, 51, 10, 33, 51, 54, 48, 40, 63, 10, 30,
     44, 45, 55, 10, 13, 26, 31, 10, 45, 55, 10, 54, 57, 50, 50, 45, 50, 43,
     10, 37, 56, 10, 2, 3, 23, 18, 62, 10, 6, 0, 16, 26, 29};
+    u8 char[1] = {0xFF};
 
     kprintr(8, 8,  0xFFFF, 0x0000, &string, 47);
     >_kprintr(8, 32, 0xF0FF, 0x0000, &string, 47);
     >_kprintr(8, 56, 0x1F9F, 0x0000, &string, 47);
     >_kprintr(8, 80, 0xC92F, 0x0000, &string, 47);
     while[true]{
-        u8 char[1] = {last_key};
-        kprintr(8, 32, 0xFFFF, 0x0000, &char, 1);
+        if [char[1] != last_key] {
+            current_x = current_x + 10;
+        }
+        char[1] = last_key;
+        u8 char1[1] = {last_key};
+        kprintr(current_x, 32, 0xFFFF, 0x0000, &char1, 1);
     }
 }
 
 >_ Kernel print raw
-func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len) {
+func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len){
 
     for [u32 char; char < len; char = char + 1] {
         u32 char_idx = [string + char];
@@ -272,11 +278,23 @@ func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len) {
 }
 
 func HandleKey() {
-    u8 pressed_key = [0x04100000] as u8;
-    last_key = pressed_key;
-    [0x4002000] = last_key;
-
     inline [
+        PUSH rx26
+        PUSH rx27
+        PUSH rx28
+        PUSH rx30
+
+        LOAD ry300 <- 0
+        LOAD ry301 <- 1040
+        LDR rx28 <- [rx30 0]
+        XOR [rx30, rx30 0]
+        MOV rz290 <- rx28 0
+        MOV rz293 <- rz290 0
+
+        POP rx30
+        POP rx28
+        POP rx27
+        POP rx26
         RETU
     outline];
 }
