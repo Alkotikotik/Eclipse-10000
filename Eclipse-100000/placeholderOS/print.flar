@@ -1,28 +1,30 @@
 inline[
+    #ORG 60
     ~JmpBoot:
         JMP ~boot
 
-    #ORG 60
-    ~SyscallVector:
+    #ORG 100   >_ 0x64 Syscall Vector
         RETU
 
-    ~TimerVector:
+    #ORG 104   >_ 0x68 Timer Vector
         RETU
 
-    ~KeyVector:
+    #ORG 108   >_ 0x6C Key Interrupt Vector
         JMP ~HandleKey
+        >_RETU
 
-    ~MemFaultVector:
+    #ORG 112   >_ 0x70 Memory Fault Vector
         RETU
-
     ~boot:
 outline];
+
+
 #def u32 VRAM_BASE = 0x04000000;
 #def u32 SCREEN_WIDTH = 640;
 #def #rz293 u8 last_key = 0xFF;
 
->_ 16x8 font
-#def u8 font_data[1024] = { >_ 288
+>_ 16x8 font, I drew it in font Forge and formatted using quick rust script it ../fonts/export_font.rs
+#def u8 font_data[1024] = { >_ Character set in ../fonts/ENC-10K.txt
     >_ Index 1 (real: 48)
     0x7E, 0xFF, 0xE7, 0xC3, 0xC3, 0xDB, 0xDB, 0xDB,
     0xC3, 0xC3, 0xE7, 0xFF, 0x7E, 0x00, 0x00, 0x00,
@@ -242,12 +244,13 @@ func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len) {
         u32 char_idx = [string + char];
         [4000 + char * 4] = [string + char];
 
-        if [char_idx == 0xFF]{
+        if [char_idx == 0xFF]{ >_0xFF is no character
             return;
         }
 
         u32 offset = char_idx << 4;
 
+        >_ Draw each char pixel by pixel
         for [u32 row; row < 16; row = row + 1] {
             u8 bits = font_data[offset + row];
             u8 mask = 0x80;
@@ -271,6 +274,7 @@ func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len) {
 func HandleKey() {
     u8 pressed_key = [0x04100000] as u8;
     last_key = pressed_key;
+    [0x4002000] = last_key;
 
     inline [
         RETU

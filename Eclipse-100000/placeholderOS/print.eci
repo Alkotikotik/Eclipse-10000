@@ -1,19 +1,19 @@
+#ORG 60
 ~JmpBoot:
 	JMP ~boot
 	
-#ORG 60
-~SyscallVector:
+#ORG 100   >_ 0x64 Syscall Vector
 	RETU
 	
-~TimerVector:
+#ORG 104   >_ 0x68 Timer Vector
 	RETU
 	
-~KeyVector:
+#ORG 108   >_ 0x6C Key Interrupt Vector
 	JMP ~HandleKey
+	>_RETU
 	
-~MemFaultVector:
+#ORG 112   >_ 0x70 Memory Fault Vector
 	RETU
-	
 ~boot:
 ~Init_000:
 	XOR [rx31, rx31]
@@ -2366,5 +2366,9 @@
 	XOR [rx30, rx30 0]
 	MOV rz290 <- rx28 0
 	MOV rz293 <- rz290 0
+	LOAD ry300 <- 8192
+	LOAD ry301 <- 1024
+	STR rz293 -> [rx30 0]
+	XOR [rx30, rx30 0]
 	RETU
 	RET

@@ -292,10 +292,10 @@ module CU(
         endcase
 
         //Jump straight to exeption
-        if (next_state == FETCH && timer_interrupt_pending && !current_kernel_mode && current_state != EXCEPTION)
-            next_state = TIMER_INTERRUPT; //TIMER INTERRUPTE
-        else if (next_state == FETCH && key_interrupt_pending && !current_kernel_mode && current_state != EXCEPTION)
-           next_state = KEY_INTERRUPT; //KEY_INTERRUPT
+        if (next_state == FETCH && timer_interrupt_pending && !isKernelMode && current_state != EXCEPTION)
+            next_state = TIMER_INTERRUPT;
+        else if (next_state == FETCH && key_interrupt_pending && !isKernelMode && current_state != EXCEPTION)
+            next_state = KEY_INTERRUPT;
         if((current_state == LOAD || current_state == READ_DATA || current_state == STORE) && memViolation)
             next_state = MEM_FAULT; //MEM_FAULT
     end
