@@ -286,6 +286,7 @@ func HandleKey() {
 
     ioAddr = 0x04100004;
     ioVal  = [ioAddr];
+    [0x4100010] = ioVal;
 
     if [ioVal == 0] {
         if [last_key >= 11] {

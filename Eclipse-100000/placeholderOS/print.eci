@@ -2394,6 +2394,10 @@
 	LOAD ry01 <- 1040
 	LDR rx28 <- [rx0 0]
 	MOV rx1 <- rx28 0
+	LOAD ry300 <- 16
+	LOAD ry301 <- 1040
+	STR rx1 -> [rx30 0]
+	XOR [rx30, rx30 0]
 	LOAD rx30 <- 0
 	CMP rx1 <-> rx30
 	XOR [rx30, rx30 0]
