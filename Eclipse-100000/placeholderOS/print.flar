@@ -280,19 +280,24 @@ func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len){
 }
 
 func HandleKey() {
-    inline [
-        PUSH rx28
-        PUSH rx30
-        LOAD ry300 <- 0
-        LOAD ry301 <- 1040
-        LDR rx28 <- [rx30 0]
-        XOR [rx30, rx30 0]
-        MOV rz293 <- rx28 0
-        POP rx30
-        POP rx28
-    outline];
+    #rx0 u32 ioAddr = 0x04100000;
+    #rx1 u32 ioVal  = [ioAddr];
+    last_key = ioVal as u8;
+
+    ioAddr = 0x04100004;
+    ioVal  = [ioAddr];
+
+    if [ioVal == 0] {
+        if [last_key >= 11] {
+            if [last_key <= 36] {
+                ioAddr = last_key as u32;
+                ioAddr = ioAddr + 26;
+                last_key = ioAddr as u8;
+            }
+        }
+    }
 
     key_ready = 1;
 
-    inline [ RETU outline];
+    inline [RETU outline];
 }

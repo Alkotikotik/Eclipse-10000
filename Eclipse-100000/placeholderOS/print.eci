@@ -27,7 +27,7 @@
 	LOAD rx30 <- 640
 	SPRSTR rx30 -> [GP 4]
 	LOAD rz293 <- 255
-	LOAD rz292 <- 0
+	LOAD rz291 <- 0
 	LOAD rx30 <- 0
 	SPRSTR rx30 -> [GP 8]
 	LOAD rx30 <- 32
@@ -2241,19 +2241,19 @@
 
 ~Lab_while_start_0:
 	LOAD rx30 <- 1
-	CMP rz292 <-> rx30
+	CMP rz291 <-> rx30
 	XOR [rx30, rx30 0]
 	BNE -> ~Lab_endif_3
 
 	SPRLDR rx28 <- [GP 8]
 	LOAD rx30 <- 10
-	ADD ry290 <- [rx28, rx30 0]
-	MOV rx28 <- ry290 0
+	ADD ry280 <- [rx28, rx30 0]
+	MOV rx28 <- ry280 0
 	SPRSTR rx28 -> [GP 8]
 	SPRLEA rx28 <- [SP 47]
 	ADD rx28 <- [rx28, rx31 0]
 	STR rz293 -> [rx28 0]
-	LOAD rz292 <- 0
+	LOAD rz291 <- 0
 	SPRLEA rx27 <- [SP 47]
 	SPRLDR rx28 <- [GP 8]
 	MOV ry00 <- rx28 0
@@ -2277,21 +2277,21 @@
 	RET
 
 ~kprintr:
-	LOAD rx22 <- 0
+	LOAD rx23 <- 0
 
 ~Lab_for_start_4:
-	CMP rx22 <-> rz30
+	CMP rx23 <-> rz30
 	BGU -> ~Lab_for_end_5
 
 	BEQ -> ~Lab_for_end_5
 
-	ADD rx28 <- [rx2, rx22 0]
+	ADD rx28 <- [rx2, rx23 0]
 	LDR rz290 <- [rx28 0]
 	MOV rx27 <- rz290 0
-	ADD rx28 <- [rx2, rx22 0]
+	ADD rx28 <- [rx2, rx23 0]
 	LDR rz290 <- [rx28 0]
 	LOAD rx30 <- 4
-	MUL rx28 <- [rx22, rx30 0]
+	MUL rx28 <- [rx23, rx30 0]
 	LOAD rx30 <- 4000
 	ADD rx28 <- [rx30, rx28 0]
 	STR rz290 -> [rx28 0]
@@ -2320,33 +2320,33 @@
 	SPRLEA rx28 <- [GP 12]
 	ADD rx28 <- [rx28, rx27 0]
 	LDR rz290 <- [rx28 0]
-	MOV rz241 <- rz290 0
-	LOAD rz240 <- 128
-	ADD ry290 <- [ry01, rx26 0]
+	MOV rz220 <- rz290 0
+	LOAD rz292 <- 128
+	ADD ry270 <- [ry01, rx26 0]
 	SPRLDR rx28 <- [GP 4]
-	MUL ry290 <- [ry290, rx28 0]
-	ADD ry290 <- [ry290, ry00 0]
-	MOV rx27 <- ry290 0
+	MUL ry280 <- [ry270, rx28 0]
+	ADD ry280 <- [ry280, ry00 0]
+	MOV rx27 <- ry280 0
 	SHL [rx27, rx31 1]
 	SPRLDR rx28 <- [GP 0]
 	ADD rx28 <- [rx28, rx27 0]
 	MOV rx27 <- rx28 0
-	LOAD rx23 <- 0
+	LOAD rx24 <- 0
 
 ~Lab_for_start_10:
 	LOAD rx30 <- 8
-	CMP rx23 <-> rx30
+	CMP rx24 <-> rx30
 	XOR [rx30, rx30 0]
 	BGU -> ~Lab_for_end_11
 
 	BEQ -> ~Lab_for_end_11
 
-	MOV rx28 <- rx23 0
+	MOV rx28 <- rx24 0
 	SHL [rx28, rx31 1]
 	ADD rx28 <- [rx27, rx28 0]
-	MOV rz290 <- rz241 0
-	AND [rz290, rz240 0]
-	CMP rz290 <-> rz240
+	MOV rz290 <- rz220 0
+	AND [rz290, rz292 0]
+	CMP rz290 <-> rz292
 	BNE -> ~Lab_else_12
 
 	STR ry10 -> [rx28 0]
@@ -2357,11 +2357,11 @@
 	STR ry11 -> [rx28 0]
 
 ~Lab_endif_13:
-	MOV rz290 <- rz240 0
+	MOV rz290 <- rz292 0
 	SHR [rz290, rx31 1]
-	MOV rz240 <- rz290 0
-	ADD rx28 <- [rx23, rx31 1]
-	MOV rx23 <- rx28 0
+	MOV rz292 <- rz290 0
+	ADD rx28 <- [rx24, rx31 1]
+	MOV rx24 <- rx28 0
 	JMP -> ~Lab_for_start_10
 
 
@@ -2373,10 +2373,10 @@
 
 ~Lab_for_end_9:
 	LOAD rx30 <- 10
-	ADD ry290 <- [ry00, rx30 0]
-	MOV ry00 <- ry290 0
-	ADD rx28 <- [rx22, rx31 1]
-	MOV rx22 <- rx28 0
+	ADD ry280 <- [ry00, rx30 0]
+	MOV ry00 <- ry280 0
+	ADD rx28 <- [rx23, rx31 1]
+	MOV rx23 <- rx28 0
 	JMP -> ~Lab_for_start_4
 
 
@@ -2384,15 +2384,44 @@
 	RET
 
 ~HandleKey:
-	PUSH rx28
-	PUSH rx30
-	LOAD ry300 <- 0
-	LOAD ry301 <- 1040
-	LDR rx28 <- [rx30 0]
+	LOAD ry00 <- 0
+	LOAD ry01 <- 1040
+	LDR rx28 <- [rx0 0]
+	MOV rx1 <- rx28 0
+	MOV rz290 <- rx1 0
+	MOV rz293 <- rz290 0
+	LOAD ry00 <- 4
+	LOAD ry01 <- 1040
+	LDR rx28 <- [rx0 0]
+	MOV rx1 <- rx28 0
+	LOAD rx30 <- 0
+	CMP rx1 <-> rx30
 	XOR [rx30, rx30 0]
-	MOV rz293 <- rx28 0
-	POP rx30
-	POP rx28
-	LOAD rz292 <- 1
+	BNE -> ~Lab_endif_15
+
+	LOAD rx30 <- 11
+	CMP rz293 <-> rx30
+	XOR [rx30, rx30 0]
+	BSU -> ~Lab_endif_17
+
+	LOAD rx30 <- 36
+	CMP rz293 <-> rx30
+	XOR [rx30, rx30 0]
+	BGU -> ~Lab_endif_19
+
+	MOV rx28 <- rz293 0
+	MOV rx0 <- rx28 0
+	LOAD rx30 <- 26
+	ADD rx28 <- [rx0, rx30 0]
+	MOV rx0 <- rx28 0
+	MOV rz290 <- rx0 0
+	MOV rz293 <- rz290 0
+
+~Lab_endif_19:
+
+~Lab_endif_17:
+
+~Lab_endif_15:
+	LOAD rz291 <- 1
 	RETU
 	RET

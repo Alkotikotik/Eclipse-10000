@@ -8,12 +8,15 @@ module GPRs (
     input logic [7:0]  rw0,
     input logic [31:0] data_in,
 
+    input logic KernelMode,
+
     output logic [31:0] data_out0,
     output logic [31:0] data_out1
 );
 
 
     logic [31:0] GPRs [31:0]; //32 32bit registers
+    logic [31:0] KGPRs [1:0]; //banked copies of rx0 and rx1
 
     logic [4:0] base_id0;
     logic [2:0] offset0;
@@ -30,8 +33,10 @@ module GPRs (
     assign base_id_w0 = rw0[7:3];
     assign offset_w0  = rw0[2:0];
 
+    //So rx30 and rx31 are swapped for another register if its kernel mode,
+    //specifically for ISR
     logic [31:0] raw_val_r0;
-    assign raw_val_r0 = GPRs[base_id0];
+    assign raw_val_r0 = (base_id0 <= 5'd1 && KernelMode) ? KGPRs[base_id0[0]] : GPRs[base_id0];
 
     always_comb begin
         unique case (offset0)
@@ -50,7 +55,7 @@ module GPRs (
     end
 
     logic [31:0] raw_val_r1;
-    assign raw_val_r1 = GPRs[base_id1];
+    assign raw_val_r1 = (base_id1 <= 5'd1 && KernelMode) ? KGPRs[base_id1[0]] : GPRs[base_id1];
 
     always_comb begin
         unique case (offset1)
@@ -110,12 +115,16 @@ module GPRs (
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
-            for (integer i = 0; i < 32; i = i + 1) begin
-                GPRs[i] <= 32'b0;
-            end
+            for (integer i = 0; i < 32; i = i + 1) GPRs[i] <= 32'b0;
+                KGPRs[0] <= 32'b0;
+                KGPRs[1] <= 32'b0;
         end
         else if (reg_write) begin
-            GPRs[base_id_w0] <= (GPRs[base_id_w0] & ~write_mask) | (shifted_data_in & write_mask);
+            if (base_id_w0 <= 5'd1 && KernelMode) begin
+                KGPRs[base_id_w0[0]] <= (KGPRs[base_id_w0[0]] & ~write_mask) | (shifted_data_in & write_mask);
+            end else begin
+                GPRs[base_id_w0] <= (GPRs[base_id_w0] & ~write_mask) | (shifted_data_in & write_mask);
+            end
         end
     end
 

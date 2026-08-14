@@ -26,6 +26,7 @@ uint8_t sdl_scancode_to_charset(SDL_Scancode sc);
 
 int main(int argc, char **argv) {
     std::signal(SIGINT, handle_sigint);
+    bool shift_held = false;
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::cerr << "SDL Initialization failed: " << SDL_GetError() << std::endl;
@@ -74,6 +75,7 @@ int main(int argc, char **argv) {
 
             top->clk = 1;
             top->eval();
+            top->ENC_10K_ModArr = shift_held ? 1 : 0;
 
             if (top->vram_write) [[unlikely]] {
                 uint32_t addr = top->vram_addr;
@@ -99,8 +101,20 @@ int main(int argc, char **argv) {
                     g_stop = 1;
                 } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
                     top->ENC_10K_KeyIn = sdl_scancode_to_charset(event.key.keysym.scancode);
+                    if (event.key.keysym.scancode == SDL_SCANCODE_LSHIFT ||
+                        event.key.keysym.scancode == SDL_SCANCODE_RSHIFT) {
+                        shift_held = true;
+                    } else if (!event.key.repeat) {
+                        top->ENC_10K_KeyIn = sdl_scancode_to_charset(event.key.keysym.scancode);
+                    }
                 } else if (event.type == SDL_KEYUP) {
                     top->ENC_10K_KeyIn = 0xFF;
+                    if (event.key.keysym.scancode == SDL_SCANCODE_LSHIFT ||
+                        event.key.keysym.scancode == SDL_SCANCODE_RSHIFT) {
+                        shift_held = false;
+                    } else {
+                        top->ENC_10K_KeyIn = 0xFF;
+                    }
                 }
             }
 

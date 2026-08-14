@@ -2,6 +2,7 @@ module CORE(
     input logic clk,
     input logic reset,
     input logic [7:0] ENC_10K_KeyIn,
+    input logic ENC_10K_ModArr, //for shifts/alts
 
     output logic [31:0] vram_addr,
     output logic [31:0] vram_data_out,
@@ -53,6 +54,7 @@ module CORE(
     logic KernelMode;
     logic EPCWrite;
     logic isKernelMode;
+    logic mod_state;
 
     logic [31:0] GPRs_data_out0;
     logic [31:0] GPRs_data_out1;
@@ -225,6 +227,7 @@ module CORE(
             KScratch <= 32'd0;
             GP  <= 32'd0;
             KGP <= 32'd0;
+            mod_state <= 0;
 
             memBase    <= 32'h0;
             memLimit   <= 32'hFFFFFFFF;
@@ -240,6 +243,7 @@ module CORE(
             if (EPCWrite) EPC <= PC;
             if (flagsWrite) compactedFlags <= {CarryFlag, NegativeFlag, OverflowFlag, ZeroFlag};
             KernelMode <= isKernelMode;
+            mod_state <= ENC_10K_ModArr;
 
             if (isCallState && opcode == 6'b111000) begin
                 LR <= PC;
@@ -339,7 +343,8 @@ module CORE(
         end else if (IO_cs) begin
             unique case (memTarget)
                 32'h04100000: cpu_mem_data_out = {24'd0, ENC_10K_KeyIn};
-                32'h04100004: cpu_mem_data_out = {16'd0, mmio_timer_reg};
+                32'h04100004: cpu_mem_data_out = {31'd0, mod_state};
+                32'h04100008: cpu_mem_data_out = {16'd0, mmio_timer_reg};
                 32'h04100014: cpu_mem_data_out = SP;
                 32'h04100018: cpu_mem_data_out = KSP;
                 32'h0410001C: cpu_mem_data_out = KScratch;
@@ -404,6 +409,7 @@ module CORE(
         .clk(clk),
         .reset(reset),
         .reg_write(GPRsWrite),
+        .KernelMode(KernelMode),
         .rr0(rx0),
         .rr1(rx1),
         .rw0(gpr_rw0_sel),
