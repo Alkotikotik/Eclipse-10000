@@ -73,9 +73,10 @@ int main(int argc, char **argv) {
             top->clk = 0;
             top->eval();
 
+            top->ENC_10K_ModArr = shift_held ? 1 : 0;
+
             top->clk = 1;
             top->eval();
-            top->ENC_10K_ModArr = shift_held ? 1 : 0;
 
             if (top->vram_write) [[unlikely]] {
                 uint32_t addr = top->vram_addr;
@@ -100,15 +101,13 @@ int main(int argc, char **argv) {
                 if (event.type == SDL_QUIT) {
                     g_stop = 1;
                 } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
-                    top->ENC_10K_KeyIn = sdl_scancode_to_charset(event.key.keysym.scancode);
                     if (event.key.keysym.scancode == SDL_SCANCODE_LSHIFT ||
                         event.key.keysym.scancode == SDL_SCANCODE_RSHIFT) {
                         shift_held = true;
-                    } else if (!event.key.repeat) {
+                    } else {
                         top->ENC_10K_KeyIn = sdl_scancode_to_charset(event.key.keysym.scancode);
                     }
                 } else if (event.type == SDL_KEYUP) {
-                    top->ENC_10K_KeyIn = 0xFF;
                     if (event.key.keysym.scancode == SDL_SCANCODE_LSHIFT ||
                         event.key.keysym.scancode == SDL_SCANCODE_RSHIFT) {
                         shift_held = false;
