@@ -15,6 +15,9 @@ inline[
 
     #ORG 112   >_ 0x70 Memory Fault Vector
         RETU
+
+    #ORG 116 >_ 0x74 ZeroDiv
+        RETU
     ~boot:
 outline];
 

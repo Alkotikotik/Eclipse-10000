@@ -70,43 +70,48 @@ fn main() -> io::Result<()> {
     opcodes.insert("PAD",   0b000000);
 
     opcodes.insert("MOV",   0b000100);
-    opcodes.insert("ADD",   0b000001);
-    opcodes.insert("SUB",   0b000011);
-    opcodes.insert("MUL",   0b000111);
+
+    opcodes.insert("ADD", 0b000001);
+    opcodes.insert("SUB", 0b000011);
+    opcodes.insert("MUL", 0b000111);
+    opcodes.insert("DIV", 0b000101);
+    opcodes.insert("MOD", 0b001011);
+
     opcodes.insert("LOMUL", 0b000111);
     opcodes.insert("HIMUL", 0b001101);
-    opcodes.insert("XOR",   0b000010);
-    opcodes.insert("OR",    0b000110);
-    opcodes.insert("AND",   0b001110);
-    opcodes.insert("NOT",   0b001111);
-    opcodes.insert("SHL",   0b001000);
-    opcodes.insert("SHR",   0b001100);
-    opcodes.insert("SRA",   0b001010);
 
-    opcodes.insert("LOAD",  0b010001);
-    opcodes.insert("LMA",   0b011111);
-    opcodes.insert("LDR",   0b100011);
-    opcodes.insert("STR",   0b100111);
+    opcodes.insert("XOR", 0b000010);
+    opcodes.insert("OR", 0b000110);
+    opcodes.insert("AND", 0b001110);
+    opcodes.insert("NOT", 0b001111);
+    opcodes.insert("SHL", 0b001000);
+    opcodes.insert("SHR", 0b001100);
+    opcodes.insert("SRA", 0b001010);
 
-    opcodes.insert("CMP",   0b110000);
+    opcodes.insert("LOAD", 0b010001);
+    opcodes.insert("LMA", 0b011111);
+    opcodes.insert("LDR", 0b100011);
+    opcodes.insert("STR", 0b100111);
+
+    opcodes.insert("CMP", 0b110000);
 
     // Unsigned Branching
-    opcodes.insert("BEQ",   0b110001);
-    opcodes.insert("BNE",   0b111100);
-    opcodes.insert("BGU",   0b110011);
-    opcodes.insert("BSU",   0b110100);
+    opcodes.insert("BEQ", 0b110001);
+    opcodes.insert("BNE", 0b111100);
+    opcodes.insert("BGU", 0b110011);
+    opcodes.insert("BSU", 0b110100);
 
     // Signed Branching
-    opcodes.insert("BGS",   0b110101);
-    opcodes.insert("BSS",   0b110110);
+    opcodes.insert("BGS", 0b110101);
+    opcodes.insert("BSS", 0b110110);
 
-    // Control Flow & System
-    opcodes.insert("JMP",   0b111111);
-    opcodes.insert("JR",    0b110111);
-    opcodes.insert("CALL",  0b111000);
-    opcodes.insert("RET",   0b110010);
-    opcodes.insert("SYS",   0b111110);
-    opcodes.insert("RETU",  0b111101);
+    // Control Flow & Sysem
+    opcodes.insert("JMP", 0b111111);
+    opcodes.insert("JR", 0b110111);
+    opcodes.insert("CALL", 0b111000);
+    opcodes.insert("RET", 0b110010);
+    opcodes.insert("SYS", 0b111110);
+    opcodes.insert("RETU", 0b111101);
 
     //SPRs
     opcodes.insert("SPRLDR", 0b101000);
@@ -197,7 +202,7 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-            "ADD" | "SUB" | "MUL" | "LOMUL" | "HIMUL" => {
+            "ADD" | "SUB" | "MUL" | "LOMUL" | "HIMUL" | "DIV" | "MOD" => {
                 let mut dest_reg: u32 = 0;
                 let mut src1_reg: u32 = 0;
                 let src2_reg: u32;

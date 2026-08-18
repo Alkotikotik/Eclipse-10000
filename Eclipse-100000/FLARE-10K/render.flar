@@ -1,3 +1,23 @@
+inline[
+    #ORG 60
+    ~JmpBoot:
+        JMP ~boot
+
+    #ORG 100   >_ 0x64 Syscall Vector
+        RETU
+
+    #ORG 104   >_ 0x68 Timer Vector
+        RETU
+
+    #ORG 108   >_ 0x6C Key Interrupt Vector
+        JMP ~HandleKey
+        >_RETU
+
+    #ORG 112   >_ 0x70 Memory Fault Vector
+        RETU
+    ~boot:
+outline];
+
 regarch RGBA {
    u8 r;
    u8 g;

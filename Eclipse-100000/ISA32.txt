@@ -45,7 +45,7 @@ rz212 mid-high 8 bits of rx21
 //VRAM & Screen
 There is dedicated 1MB of VRAM at 04000000 - 0x040FFFFF, the screen resolution is 480p. The pixel format is standard RGBA4444, taking up exactly 2bytes or u16
 
-// 
+//
 By default stack lives at 03FFFFF0
 //Opcodes
 ALU Instructions (R-Type)
@@ -64,6 +64,9 @@ ALU Instructions (B-Type)
 000001 : ADD    rx0, rx1, rx2 +- imm2 (rx0 = rx1 + (rx2 +- imm2)
 000011 : SUB    rx0, rx1, rx2 +- imm2
 000111 : LOMUL  rx0, rx1, rx2 +- imm2
+000101 : DIV    rx0, rx1, rx2 +- imm2
+001011 : MOD    rx0, rx1, rx2 +- imm2
+
 
 Memory Instructions
 010001 : LOAD   rx0, imm18             //Loads imm into rx0

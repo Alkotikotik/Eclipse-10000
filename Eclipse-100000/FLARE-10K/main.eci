@@ -1,113 +1,24 @@
-~Init_000:
-	XOR [rx31, rx31]
-	XOR [rx30, rx30]
+JMP ~Init
 
-~main:
-	LOAD ry260 <- 0
-	LOAD ry261 <- 1024
-	LOAD rx29 <- 0
-	LOAD rz290 <- 15
-	LOAD rz291 <- 0
-	LOAD rz292 <- 0
-	LOAD rz293 <- 15
-	LOAD rz250 <- 0
+#ORG 116
+    JMP ~HandleZero
 
-~Lab_while_start_0:
-	MOV rz280 <- rz290 0
-	MOV rx27 <- rz280 0
-	SHL [rx27, rx31 12]
-	MOV rz280 <- rz291 0
-	MOV rx28 <- rz280 0
-	SHL [rx28, rx31 8]
-	OR  [rx27, rx28 0]
-	MOV rz280 <- rz292 0
-	MOV rx28 <- rz280 0
-	SHL [rx28, rx31 4]
-	OR  [rx27, rx28 0]
-	MOV rz280 <- rz293 0
-	MOV rx31 <- rz280 0
-	MOV rx28 <- rx27 0
-	OR  [rx28, rx31 0]
-	XOR [rx31, rx31 0]
-	STR rx28 -> [rx26 0]
-	ADD rx28 <- [rx26, rx31 2]
-	MOV rx26 <- rx28 0
-	LOAD rx30 <- 0
-	CMP rz250 <-> rx30
-	XOR [rx30, rx30 0]
-	BNE -> ~Lab_else_2
+~Init:
+    LOAD rx0 <- 100
+    LOAD rx1 <- 10
+    MUL  [rx3 <- rx0, rx1]
+    MOD  [rx2 <- rx0, rx1]
+    DIV  [rx4 <- rx0, rx1]
+    LOAD rx1 <- 4092
+    STR  rx4 -> rx1
+    LOAD rx1 <- 4088
+    STR  rx2 -> rx1
+    LOAD rx1 <- 4084
+    STR rx3 -> rx1
+    JMP ~End
 
-	MOV rz280 <- rz290 0
-	SUB rz280 <- [rz280, rx31 1]
-	MOV rz290 <- rz280 0
-	MOV rz280 <- rz291 0
-	ADD rz280 <- [rz280, rx31 1]
-	MOV rz291 <- rz280 0
-	MOV rz280 <- rz291 0
-	LOAD rx30 <- 15
-	CMP rz280 <-> rx30
-	XOR [rx30, rx30 0]
-	BNE -> ~Lab_endif_5
-
-	LOAD rz250 <- 1
-
-~Lab_endif_5:
-	JMP -> ~Lab_endif_3
-
-
-~Lab_else_2:
-	LOAD rx30 <- 1
-	CMP rz250 <-> rx30
-	XOR [rx30, rx30 0]
-	BNE -> ~Lab_else_6
-
-	MOV rz280 <- rz291 0
-	SUB rz280 <- [rz280, rx31 1]
-	MOV rz291 <- rz280 0
-	MOV rz280 <- rz292 0
-	ADD rz280 <- [rz280, rx31 1]
-	MOV rz292 <- rz280 0
-	MOV rz280 <- rz292 0
-	LOAD rx30 <- 15
-	CMP rz280 <-> rx30
-	XOR [rx30, rx30 0]
-	BNE -> ~Lab_endif_9
-
-	LOAD rz250 <- 2
-
-~Lab_endif_9:
-	JMP -> ~Lab_endif_7
-
-
-~Lab_else_6:
-	LOAD rx30 <- 2
-	CMP rz250 <-> rx30
-	XOR [rx30, rx30 0]
-	BNE -> ~Lab_endif_11
-
-	MOV rz280 <- rz292 0
-	SUB rz280 <- [rz280, rx31 1]
-	MOV rz292 <- rz280 0
-	MOV rz280 <- rz290 0
-	ADD rz280 <- [rz280, rx31 1]
-	MOV rz290 <- rz280 0
-	MOV rz280 <- rz290 0
-	LOAD rx30 <- 15
-	CMP rz280 <-> rx30
-	XOR [rx30, rx30 0]
-	BNE -> ~Lab_endif_13
-
-	LOAD rz250 <- 0
-
-~Lab_endif_13:
-
-~Lab_endif_11:
-
-~Lab_endif_7:
-
-~Lab_endif_3:
-	JMP -> ~Lab_while_start_0
-
-
-~Lab_while_end_1:
-	RET
+~HandleZero:
+    LOAD rx1 <- 4080
+    LOAD rx0 <- 666
+    STR rx0 -> rx1
+~End:

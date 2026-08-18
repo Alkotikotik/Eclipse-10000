@@ -78,6 +78,8 @@ module CORE(
     logic [31:0] cpu_mem_data_out; //unified data output
     logic [15:0] mmio_timer_reg;
 
+    logic ZeroDivException;
+
     logic [31:0] active_address;
 
     logic [3:0] ram_byte_enable;
@@ -112,15 +114,16 @@ module CORE(
     assign immediate = IR[11:0];
     assign j_imm_signed = {{6{IR[25]}}, IR[25:0]};
     assign gpr_rw0_sel = (opcode == 6'b011111) ? (8'd31 << 3) : //LMA rx31
-                 (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111) ? rx2 :
-                 rx0;
+                //3 register ALU type
+                (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111 || opcode == 6'b000101 || opcode == 6'b001011) ? rx2 :
+                rx0;
 
     logic [2:0] push_pop_bytes;
         always_comb begin
             unique case (rx0[2:0])
-                3'b011, 3'b100, 3'b101, 3'b110: push_pop_bytes = 3'd1; // rz — 8-bit
-                3'b001, 3'b010:                 push_pop_bytes = 3'd2; // ry — 16-bit
-                default:                        push_pop_bytes = 3'd4; // rx — 32-bit
+                3'b011, 3'b100, 3'b101, 3'b110: push_pop_bytes = 3'd1; // rz - 8-bit
+                3'b001, 3'b010:                 push_pop_bytes = 3'd2; // ry - 16-bit
+                default:                        push_pop_bytes = 3'd4; // rx - 32-bit
             endcase
         end
 
@@ -198,6 +201,9 @@ module CORE(
             4'b0111: PCNext = GPRs_data_out0; // JR
             default: PCNext = AluResult;
         endcase
+        if (ZeroDivException) begin
+            PCNext = 32'h00000074;
+        end
     end
 
     always_comb begin
@@ -402,7 +408,9 @@ module CORE(
         .OverflowFlag(OverflowFlag),
         .CarryFlag(CarryFlag),
         .NegativeFlag(NegativeFlag),
-        .ZeroFlag(ZeroFlag)
+        .ZeroFlag(ZeroFlag),
+
+        .ZeroDivException(ZeroDivException)
     );
 
     GPRs all_gprs (

@@ -8,7 +8,10 @@ module ALU (
     output logic OverflowFlag,
     output logic NegativeFlag,
     output logic ZeroFlag,
-    output logic CarryFlag
+    output logic CarryFlag,
+
+    output logic ZeroDivException
+
 );
 
     logic [63:0] mul_product;
@@ -24,6 +27,7 @@ module ALU (
     //Doesn't care about clk
     always_comb begin
         result = 32'b0;
+        ZeroDivException = 0;
 
         case (opcode)
             6'b000001: result = x + y;
@@ -39,6 +43,24 @@ module ALU (
             6'b001010: result = $signed($signed(x) >>> y[4:0]); //JIC
             6'b110000: result = x - y; //CMP
             6'b000100: result = y; //MOV
+            //Replace later for FPGA
+            6'b000101: begin // DIV
+                if (y == 32'b0) begin
+                    ZeroDivException = 1;
+                    result = 32'b0;
+                end else begin
+                    result = x / y;
+                end
+            end
+
+            6'b001011: begin // MOD
+                if (y == 32'b0) begin
+                    ZeroDivException = 1'b1;
+                    result = 32'b0;
+                end else begin
+                    result = x % y;
+                end
+            end
 
             default: result = 32'b0;
         endcase
