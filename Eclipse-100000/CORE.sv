@@ -175,7 +175,10 @@ module CORE(
                 unique case (opcode)
                     6'b000001,
                     6'b000011,
-                    6'b000111: AluMuxY = RegY + sign_ext_imm2;
+                    6'b000111,
+                    6'b000101,
+                    6'b001011:
+                        AluMuxY = RegY + sign_ext_imm2;
 
                     default:   AluMuxY = RegY + zero_ext_imm10; // 2-operand logic
                 endcase
