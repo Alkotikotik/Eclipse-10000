@@ -105,6 +105,9 @@ pub enum AsmInst {
     Add(AsmOperand, AsmOperand, AsmOperand, AsmOperand), // 3 regisers
     Sub(AsmOperand, AsmOperand, AsmOperand, AsmOperand),
     Mul(AsmOperand, AsmOperand, AsmOperand, AsmOperand),
+    Div(AsmOperand, AsmOperand, AsmOperand, AsmOperand),
+    Sdiv(AsmOperand, AsmOperand, AsmOperand, AsmOperand),
+    Mod(AsmOperand, AsmOperand, AsmOperand, AsmOperand),
     Xor(AsmOperand, AsmOperand, AsmOperand), //2 register plus unsiged 10bit
     Or(AsmOperand, AsmOperand, AsmOperand),
     And(AsmOperand, AsmOperand, AsmOperand),
@@ -1622,45 +1625,60 @@ impl<'a> Codegen<'a> {
 
         for inst in body {
             let mut inst = inst.clone();
+            let orig_uses = inst.uses();
+            let orig_kills = inst.kills();
 
-            for used in inst.uses() {
-                if let IROperand::Var(name) = &used {
-                    if let Some(&off) = layout.offsets.get(name) {
-                        let tmp = IROperand::Temp(next_temp);
-                        next_temp += 1;
-                        if layout.array_elem_sizes.contains_key(name) {
-                            new_body.push(IRInst::GlobalAddr {
-                                dest: tmp.clone(),
-                                offset: off,
-                            });
-                        } else {
-                            new_body.push(IRInst::LoadPtr {
-                                dest: tmp.clone(),
-                                ptr_addr: IROperand::GlobalSlot(off),
-                            });
-                        }
-                        inst = substitute_operand(inst, &used, &tmp);
+            let mut touched_globals: Vec<String> = Vec::new();
+            for op in orig_uses.iter().chain(orig_kills.iter()) {
+                if let IROperand::Var(name) = op {
+                    if layout.offsets.contains_key(name) && !touched_globals.contains(name) {
+                        touched_globals.push(name.clone());
                     }
                 }
             }
 
-            let mut store_backs = Vec::new();
-            for def in inst.kills() {
-                if let IROperand::Var(name) = &def {
-                    if let Some(&off) = layout.offsets.get(name) {
-                        let tmp = IROperand::Temp(next_temp);
-                        next_temp += 1;
-                        inst = substitute_operand(inst, &def, &tmp);
-                        store_backs.push(IRInst::StorePtr {
+            let mut pre = Vec::new();
+            let mut post = Vec::new();
+
+            for name in &touched_globals {
+                let off = layout.offsets[name];
+                let tmp = IROperand::Temp(next_temp);
+                next_temp += 1;
+
+                let is_used = orig_uses
+                    .iter()
+                    .any(|op| matches!(op, IROperand::Var(n) if n == name));
+                let is_killed = orig_kills
+                    .iter()
+                    .any(|op| matches!(op, IROperand::Var(n) if n == name));
+
+                if is_used {
+                    if layout.array_elem_sizes.contains_key(name) {
+                        pre.push(IRInst::GlobalAddr {
+                            dest: tmp.clone(),
+                            offset: off,
+                        });
+                    } else {
+                        pre.push(IRInst::LoadPtr {
+                            dest: tmp.clone(),
                             ptr_addr: IROperand::GlobalSlot(off),
-                            src: tmp,
                         });
                     }
                 }
+
+                inst = substitute_operand(inst, &IROperand::Var(name.clone()), &tmp);
+
+                if is_killed {
+                    post.push(IRInst::StorePtr {
+                        ptr_addr: IROperand::GlobalSlot(off),
+                        src: tmp,
+                    });
+                }
             }
 
+            new_body.extend(pre);
             new_body.push(inst);
-            new_body.extend(store_backs);
+            new_body.extend(post);
         }
 
         new_body
@@ -2298,8 +2316,15 @@ impl<'a> Codegen<'a> {
                 }
             }
 
-            IRInst::Div { .. } | IRInst::Mod { .. } => {
-                panic!("Codegen Error: division and modulo aren't implemented yet")
+            IRInst::Div { dest, left, right, signed } => {
+                if *signed {
+                    self.lower_btype_alu(dest, left, right, AsmInst::Sdiv, out)
+                } else {
+                    self.lower_btype_alu(dest, left, right, AsmInst::Div, out)
+                }
+            }
+            IRInst::Mod { dest, left, right, ..} => {
+                self.lower_btype_alu(dest, left, right, AsmInst::Mod, out)
             }
 
             IRInst::Pin { .. } => {}

@@ -76,6 +76,7 @@ fn main() -> io::Result<()> {
     opcodes.insert("MUL", 0b000111);
     opcodes.insert("DIV", 0b000101);
     opcodes.insert("MOD", 0b001011);
+    opcodes.insert("SDIV",0b001001);
 
     opcodes.insert("LOMUL", 0b000111);
     opcodes.insert("HIMUL", 0b001101);
@@ -202,7 +203,7 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-            "ADD" | "SUB" | "MUL" | "LOMUL" | "HIMUL" | "DIV" | "MOD" => {
+            "ADD" | "SUB" | "MUL" | "LOMUL" | "HIMUL" | "DIV" | "MOD" | "SDIV" => {
                 let mut dest_reg: u32 = 0;
                 let mut src1_reg: u32 = 0;
                 let src2_reg: u32;

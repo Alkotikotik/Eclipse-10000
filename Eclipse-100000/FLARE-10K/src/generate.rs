@@ -23,7 +23,15 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error
             AsmInst::Mul(dest, src1, src2, imm2) => {
                 writeln!(assembly, "\tMUL {} <- [{}, {} {}]", dest, src1, src2, imm2)?
             }
-
+            AsmInst::Div(dest, src1, src2, imm2) => {
+                writeln!(assembly, "\tDIV {} <- [{}, {} {}]", dest, src1, src2, imm2)?
+            }
+            AsmInst::Sdiv(dest, src1, src2, imm2) => {
+                writeln!(assembly, "\tSDIV {} <- [{}, {} {}]", dest, src1, src2, imm2)?
+            }
+            AsmInst::Mod(dest, src1, src2, imm2) => {
+                writeln!(assembly, "\tMOD {} <- [{}, {} {}]", dest, src1, src2, imm2)?
+            }
             AsmInst::Xor(dest, src, imm) => {
                 writeln!(assembly, "\tXOR [{}, {} {}]", dest, src, imm)?
             }

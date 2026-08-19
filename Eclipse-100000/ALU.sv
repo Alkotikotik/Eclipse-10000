@@ -61,7 +61,14 @@ module ALU (
                     result = x % y;
                 end
             end
-
+            6'b001001: begin // SDIV (signed)
+                if (y == 32'b0) begin
+                    ZeroDivException = 1;
+                    result = 32'b0;
+                end else begin
+                    result = $signed(x) / $signed(y);
+                end
+            end
             default: result = 32'b0;
         endcase
     end

@@ -66,6 +66,7 @@ ALU Instructions (B-Type)
 000111 : LOMUL  rx0, rx1, rx2 +- imm2
 000101 : DIV    rx0, rx1, rx2 +- imm2
 001011 : MOD    rx0, rx1, rx2 +- imm2
+001001 : SDIV   rx0, rx1, rx2 +- imm2
 
 
 Memory Instructions
