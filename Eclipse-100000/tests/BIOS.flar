@@ -14,25 +14,19 @@ func boot() {
     >_Boot
 }
 
-inline [
-    ~HandleSyscall
-outline];
+inline [~HandleSyscall outline];
 
 func HandleSyscall() {
     >_ handle syscall
 }
 
-inline [
-    ~HandleTimer
-outline];
+inline [ ~HandleTimer outline];
 
 func HandleTimer() {
     >_ handle timer
 }
 
-inline [
-    ~HandleMemfault
-outline];
+inline [ ~HandleMemfault outline];
 
 func HandleMemfault() {
     >_ handle Memfault
