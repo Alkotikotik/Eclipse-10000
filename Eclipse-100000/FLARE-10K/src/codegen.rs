@@ -668,6 +668,7 @@ pub struct Codegen<'a> {
     operand_sizes: HashMap<IROperand, RegType>,
     lr_slot: Option<usize>,
     wait_for_the_final_result: Vec<AsmInst>,
+    final_graph: Option<InterferenceGraph>,
 }
 
 fn type_to_regtype(ty: &Type) -> RegType {
@@ -722,6 +723,7 @@ impl<'a> Codegen<'a> {
                 .collect(),
             lr_slot: Some(0),
             wait_for_the_final_result: Vec::new(),
+            final_graph: None,
         };
 
         codegen.build_cfg(&legalized_body);
@@ -1330,6 +1332,7 @@ impl<'a> Codegen<'a> {
                 .collect();
 
             if spilled.is_empty() {
+                self.final_graph = Some(graph);
                 break;
             } //No spilled? Nice - break
 
@@ -1345,6 +1348,46 @@ impl<'a> Codegen<'a> {
                 );
             }
         }
+    }
+
+    pub fn extract_coloring_graph(&self) -> Option<crate::viz::FunctionGraph> {
+        let graph = self.final_graph.as_ref()?;
+        if graph.adjacent.is_empty() {
+            return None;
+        }
+
+        let mut sorted_nodes: Vec<&IROperand> = graph.adjacent.keys().collect();
+        sorted_nodes.sort();
+
+        let mut ids: HashMap<&IROperand, usize> = HashMap::new();
+        let mut nodes = Vec::with_capacity(sorted_nodes.len());
+        for (i, node) in sorted_nodes.iter().enumerate() {
+            ids.insert(node, i);
+            let color = match self.allocations.get(*node) {
+                Some(Location::Register(reg)) => crate::viz::register_color(reg.id),
+                Some(Location::StackOffset(_)) => "#999999".to_string(),
+                None => "#cccccc".to_string(),
+            };
+            nodes.push(crate::viz::GraphNode {
+                label: format!("{:?}", node),
+                color,
+            });
+        }
+
+        let mut edges: BTreeSet<(usize, usize)> = BTreeSet::new();
+        for node in &sorted_nodes {
+            let a = ids[*node];
+            for neighbor in &graph.adjacent[*node] {
+                let b = ids[neighbor];
+                edges.insert(if a < b { (a, b) } else { (b, a) });
+            }
+        }
+
+        Some(crate::viz::FunctionGraph {
+            name: self.ir_func.name.clone(),
+            nodes,
+            edges: edges.into_iter().collect(),
+        })
     }
 
     //Check for pin conflicts
@@ -2472,4 +2515,3 @@ impl<'a> Codegen<'a> {
         }
     }
 }
-
