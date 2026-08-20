@@ -18,7 +18,7 @@ module CU(
     output logic IRWrite,
     output logic PCWrite,
     output logic GPRsWrite,
-    output logic EAWrite, //Effective address write (custom register)
+    output logic EAWrite, //Effective address write (custom register, might be gone soon)
 
     output logic EPCWrite,
     output logic isKernelMode,
