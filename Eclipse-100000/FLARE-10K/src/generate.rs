@@ -79,7 +79,7 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error
             AsmInst::Push(rx0) => writeln!(assembly, "\tPUSH <- {}", rx0)?,
             AsmInst::Pop(rx0) => writeln!(assembly, "\tPOP -> {}", rx0)?,
 
-            AsmInst::Cmp(rx0, rx1, imm10) => writeln!(assembly, "\tCMP {} <-> {} {}", rx0, rx1, imm10)?,
+            AsmInst::Cmp(rx0, rx1, imm10) => writeln!(assembly, "\tCMP {} <-> [{}, {}]", rx0, rx1, imm10)?,
             AsmInst::Beq(lbl) => writeln!(assembly, "\tBEQ -> {}\n", lbl)?,
             AsmInst::Bne(lbl) => writeln!(assembly, "\tBNE -> {}\n", lbl)?,
             AsmInst::Bgu(lbl) => writeln!(assembly, "\tBGU -> {}\n", lbl)?,
