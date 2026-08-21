@@ -1,0 +1,3 @@
+Static branch prediction
+SPARC style register shifting on calls
+Expand/shift LR in similar style
