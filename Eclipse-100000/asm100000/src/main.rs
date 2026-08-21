@@ -246,6 +246,22 @@ fn main() -> io::Result<()> {
                 if tokens.len() > 2 {
                     rx1 = parse_reg(tokens[2]);
                 }
+                if tokens.len() > 3 {
+                    if tokens[3] == "-" && tokens.len() > 4 {
+                        let val = parse_imm64(tokens[4]);
+                        immediate = -val;
+                    } else if tokens[3] == "+" && tokens.len() > 4 {
+                        immediate = parse_imm64(tokens[3]);
+                    } else {
+                        let target = tokens[3].trim_start_matches('~');
+                        if let Some(&label_addr) = labels.get(target) {
+                            let offset = (label_addr as i64) - ((current_pc + 4) as i64);
+                            immediate = offset;
+                        } else {
+                            immediate = parse_imm64(tokens[3]);
+                        }
+                    }
+                }
             }
             "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" => {
                 if tokens.len() > 1 {

@@ -88,7 +88,7 @@ Special type operations (S-Type)
 101101 : SPRLEA rx0, SPR, imm16    // rx0 = location of selected SPR
 
 CMP:
-110000 : CMP rx0 rx1
+110000 : CMP rx0 <-> (rx1 +- imm10)
 
 Unsigned branching
 110001 : BEQ imm26 //Likely ~Label

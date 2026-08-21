@@ -2243,9 +2243,7 @@
 
 
 ~Lab_while_start_0:
-	LOAD rx30 <- 1
-	CMP rz292 <-> rx30
-	XOR [rx30, rx30 0]
+	CMP rz292 <-> rx31 1
 	BNE -> ~Lab_endif_3
 
 	SPRLDR rx28 <- [GP 8]
@@ -2283,7 +2281,7 @@
 	LOAD rx22 <- 0
 
 ~Lab_for_start_4:
-	CMP rx22 <-> rz30
+	CMP rx22 <-> rz30 0
 	BGU -> ~Lab_for_end_5
 
 	BEQ -> ~Lab_for_end_5
@@ -2298,9 +2296,7 @@
 	LOAD rx30 <- 4000
 	ADD rx28 <- [rx30, rx28 0]
 	STR rz290 -> [rx28 0]
-	LOAD rx30 <- 255
-	CMP rx27 <-> rx30
-	XOR [rx30, rx30 0]
+	CMP rx27 <-> rx31 255
 	BNE -> ~Lab_endif_7
 
 	RET
@@ -2312,9 +2308,7 @@
 	LOAD rx26 <- 0
 
 ~Lab_for_start_8:
-	LOAD rx30 <- 16
-	CMP rx26 <-> rx30
-	XOR [rx30, rx30 0]
+	CMP rx26 <-> rx31 16
 	BGU -> ~Lab_for_end_9
 
 	BEQ -> ~Lab_for_end_9
@@ -2337,9 +2331,7 @@
 	LOAD rx23 <- 0
 
 ~Lab_for_start_10:
-	LOAD rx30 <- 8
-	CMP rx23 <-> rx30
-	XOR [rx30, rx30 0]
+	CMP rx23 <-> rx31 8
 	BGU -> ~Lab_for_end_11
 
 	BEQ -> ~Lab_for_end_11
@@ -2349,7 +2341,7 @@
 	ADD rx28 <- [rx27, rx28 0]
 	MOV rz290 <- rz241 0
 	AND [rz290, rz240 0]
-	CMP rz290 <-> rz240
+	CMP rz290 <-> rz240 0
 	BNE -> ~Lab_else_12
 
 	STR ry10 -> [rx28 0]
@@ -2401,19 +2393,13 @@
 	LOAD ry301 <- 1040
 	STR rx1 -> [rx30 0]
 	XOR [rx30, rx30 0]
-	LOAD rx30 <- 0
-	CMP rx1 <-> rx30
-	XOR [rx30, rx30 0]
+	CMP rx1 <-> rx31 0
 	BNE -> ~Lab_endif_15
 
-	LOAD rx30 <- 11
-	CMP rz293 <-> rx30
-	XOR [rx30, rx30 0]
+	CMP rz293 <-> rx31 11
 	BSU -> ~Lab_endif_17
 
-	LOAD rx30 <- 36
-	CMP rz293 <-> rx30
-	XOR [rx30, rx30 0]
+	CMP rz293 <-> rx31 36
 	BGU -> ~Lab_endif_19
 
 	MOV rx28 <- rz293 0

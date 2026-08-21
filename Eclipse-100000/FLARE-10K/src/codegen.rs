@@ -130,7 +130,7 @@ pub enum AsmInst {
     Push(AsmOperand),
     Pop(AsmOperand),
 
-    Cmp(AsmOperand, AsmOperand),
+    Cmp(AsmOperand, AsmOperand, AsmOperand),
     Beq(String),
     Bne(String),
     Bgu(String), //unsigned
@@ -2004,6 +2004,18 @@ impl<'a> Codegen<'a> {
             self.operand_to_asm(left)
         };
 
+        if is_const(right) && fits(const_val(right) as i64, 10, true) {
+            out.push(AsmInst::Cmp(
+                l_op,
+                rx31(),
+                AsmOperand::Imm10(const_val(right) as i16),
+            ));
+            if used_rx30 {
+                out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));
+            }
+            return;
+        }
+
         let r_op = if is_const(right) {
             let target = if used_rx30 { rx31_reg() } else { rx30_reg() };
             load_const(target, const_val(right), out);
@@ -2017,7 +2029,7 @@ impl<'a> Codegen<'a> {
             self.operand_to_asm(right)
         };
 
-        out.push(AsmInst::Cmp(l_op, r_op));
+        out.push(AsmInst::Cmp(l_op, r_op, AsmOperand::Imm10(0)));
 
         if used_rx30 {
             out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));

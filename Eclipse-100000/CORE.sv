@@ -115,7 +115,7 @@ module CORE(
     assign j_imm_signed = {{6{IR[25]}}, IR[25:0]};
     assign gpr_rw0_sel = (opcode == 6'b011111) ? (8'd31 << 3) : //LMA rx31
                 //3 register ALU type
-                (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111 || opcode == 6'b000101 || opcode == 6'b001011 || 001001) ? rx2 :
+                (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111 || opcode == 6'b000101 || opcode == 6'b001011 || opcode == 6'b001001) ? rx2 :
                 rx0;
 
     logic [2:0] push_pop_bytes;
