@@ -8,11 +8,164 @@ module CORE(
     output logic [31:0] vram_data_out,
     output logic vram_write
 );
+    //====//
+    //Pipilined 5 cycle CU, I chose 5 cycles because its perfect balance
+    //between clock speed, which is higher because of shorter critical path, and
+    //penatly for mispredicted branch which is 2 cycles for regular branches
+    //and only 1 for unconditional ones.
+
+    //The estimated CPI is ~=1.25 considering average instruction split
+    //obviosely varies by program being executed.
+    //That is about 2.5 times faster than my multi-cycle design(~= 2.9CPI) as
+    //well as higher estimated clock frequency due to shorter critical path
+    //3 cycles per instruction to 2
+    //====//
+
+    logic  demolish;   //Removes current instructions on the branch misprediction/branch
+    logic  stall;     //Stalls on branch
+    logic  bubble;   //for handling load-use hazard
+    logic  [31:0] PC_target;
+
+    assign demolish  = 1'b0;
+    assign stall     = 1'b0;
+    assign bubble    = 1'b0;
+    assign PC_target = 32'd0;
+
+    //== IF(Instruction Fetch) ==//
+    logic [31:0] IF_PC;
+    logic [31:0] IF_PC_plus4;
+
+    assign IF_PC_plus4 = IF_PC + 32'h4;  //Computing it here dynamically
+
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) IF_PC <= 32'h0;
+        else if(demolish) IF_PC <= PC_target;
+        else if(!stall) IF_PC <= IF_PC_plus4;
+        else IF_PC <= IF_PC;
+    end
+
+    logic [31:0] instr_fetch_data; //from RAM's dedicated instruction port
+
+    //== That looks nice ==//
+    //== Anyways ID(Instruction Decode) stage ==//
+    logic [31:0] ID_PC, ID_IR; //Each stage gets into own IR and PC
+    logic        isID_valid;
+
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset || demolish) begin
+            isID_valid <= 0;
+        end else if (!stall) begin
+            ID_PC <= IF_PC;
+            ID_IR <= instr_fetch_data;
+            isID_valid <= 1'b1;
+        end
+        //else: stall holds PC and IR as they are
+    end
+
+    //== EX(Execute) ==//
+    //A lot of things happen here, full enum in CU.sv
+    logic [31:0] EX_PC, EX_IR;
+    logic isEX_valid;
+
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset || demolish || bubble) begin
+            isEX_valid <= 0;
+        end else begin
+            EX_PC <= ID_PC; //Handing instruction to the EX
+            EX_IR <= ID_IR;
+            isEX_valid <= isID_valid;
+        end
+    end
+
+    //====//
+    logic [5:0] opcode;
+    logic [7:0] rx0;
+    logic [7:0] rx1;
+    logic [7:0] rx2;
+    logic [11:0] immediate;
+    logic [31:0] j_imm_signed;
+
+    assign opcode = EX_IR[31:26];
+    assign rx0 = EX_IR[25:18];
+    assign rx1 = EX_IR[17:10];
+    assign rx2 = EX_IR[9:2];
+    assign immediate = EX_IR[11:0];
+    assign j_imm_signed = {{6{EX_IR[25]}}, EX_IR[25:0]};
+
+    logic [31:0] sign_ext_imm10;
+    assign sign_ext_imm10 = { {22{EX_IR[9]}}, EX_IR[9:0] };
+    logic [31:0] zero_ext_imm10;
+    assign zero_ext_imm10 = {22'h0, EX_IR[9:0]};
+
+    logic [31:0] sign_ext_imm18;
+    assign sign_ext_imm18 = { {14{EX_IR[17]}}, EX_IR[17:0] };
+
+    logic [31:0] sign_ext_imm26;
+    assign sign_ext_imm26 = { {6{EX_IR[25]}}, EX_IR[25:0] };
+
+    logic [31:0] sign_ext_imm16;
+    assign sign_ext_imm16 = { {16{EX_IR[15]}}, EX_IR[15:0] };
+
+    //Is it useless? Absolutely not, imagine it for "for" loops
+    logic [31:0] sign_ext_imm2;
+
+    always_comb begin
+        unique case (EX_IR[1:0])
+            2'b00: sign_ext_imm2 = 32'd0;
+            2'b01: sign_ext_imm2 = 32'd1;
+            2'b10: sign_ext_imm2 = 32'd2; //Here is a crazy idea for ya 0b10 signed is 2
+            2'b11: sign_ext_imm2 = -32'sd1;
+        endcase
+    end
+
+    //== MEM(memory) ==//
+    //Work with memory - load, store
+    logic [31:0] MEM_PC, MEM_result;
+
+    logic [5:0] MEM_opcode;
+    logic [7:0] MEM_gpr_dest;
+
+    logic MEM_gpr_write;
+    logic isMEM_valid;
+
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset || demolish) begin
+            isMEM_valid <= 0;
+        end else begin
+            MEM_PC   <= EX_PC;
+            MEM_result<= GPRs_data_in;
+            MEM_opcode <= opcode;
+            isMEM_valid <= isEX_valid;
+            MEM_gpr_dest <= gpr_rw0_sel;
+            MEM_gpr_write <= GPRsWrite;
+        end
+    end
+
+    //== WB(WriteBack) ==//
+    logic [31:0] WB_PC, WB_result;
+
+    logic [5:0] WB_opcode;
+    logic [7:0]  WB_gpr_dest;
+
+    logic WB_gpr_write;
+    logic isWB_valid;
+
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset || demolish) begin
+            isWB_valid <= 0;
+        end else begin
+            WB_PC   <= MEM_PC;
+            WB_result<= MEM_result;
+            WB_opcode <= MEM_opcode;
+            isWB_valid <= isMEM_valid;
+            WB_gpr_dest <= MEM_gpr_dest;
+            WB_gpr_write <= MEM_gpr_write;
+        end
+    end
+
+
 
     //Declarations
-    logic [31:0] PC, IR;
-    logic [31:0] EA;
-    logic [31:0] RegX, RegY;
     logic [31:0] EPC;
 
     logic [31:0] SP, GP, KGP, KSP, LR, KScratch;
@@ -24,14 +177,6 @@ module CORE(
     logic [31:0] PCNext;
     logic [31:0] SPRNext;
 
-    logic [5:0] opcode;
-    logic [7:0] rx0;
-    logic [7:0] rx1;
-    logic [7:0] rx2;
-    logic [11:0] immediate;
-    logic [31:0] j_imm_signed;
-
-    logic XWrite, YWrite, IRWrite, PCWrite, GPRsWrite, EAWrite;
     logic memRead, memWrite;
     logic SPRWrite;
     logic memViolation;
@@ -46,10 +191,6 @@ module CORE(
     logic [3:0] PCSrc;
     logic [2:0] GPRsSrc;
     logic [2:0] SPRSrc;
-    logic [31:0] sign_ext_imm10;
-    assign sign_ext_imm10 = { {22{IR[9]}}, IR[9:0] };
-    logic [31:0] zero_ext_imm10;
-    assign zero_ext_imm10 = {22'h0, IR[9:0]};
 
     logic KernelMode;
     logic EPCWrite;
@@ -80,39 +221,11 @@ module CORE(
 
     logic ZeroDivException;
 
-    logic [31:0] active_address;
+    logic PCWrite, GPRsWrite;
 
     logic [3:0] ram_byte_enable;
     logic [31:0] ram_data_in_aligned;
 
-    logic [31:0] sign_ext_imm18;
-    assign sign_ext_imm18 = { {14{IR[17]}}, IR[17:0] };
-
-    logic [31:0] sign_ext_imm26;
-    assign sign_ext_imm26 = { {6{IR[25]}}, IR[25:0] };
-
-    logic [31:0] sign_ext_imm16;
-    assign sign_ext_imm16 = { {16{IR[15]}}, IR[15:0] };
-
-    //Is it useless? Absolutely not, imagine it for "for" loops
-    logic [31:0] sign_ext_imm2;
-
-    always_comb begin
-        unique case (IR[1:0])
-            2'b00: sign_ext_imm2 = 32'd0;
-            2'b01: sign_ext_imm2 = 32'd1;
-            2'b10: sign_ext_imm2 = 32'd2; //Here is a crazy idea for ya 0b10 signed is 2
-            2'b11: sign_ext_imm2 = -32'sd1;
-        endcase
-    end
-
-    //Breaking instruction down
-    assign opcode = IR[31:26];
-    assign rx0 = IR[25:18];
-    assign rx1 = IR[17:10];
-    assign rx2 = IR[9:2];
-    assign immediate = IR[11:0];
-    assign j_imm_signed = {{6{IR[25]}}, IR[25:0]};
     assign gpr_rw0_sel = (opcode == 6'b011111) ? (8'd31 << 3) : //LMA rx31
                 //3 register ALU type
                 (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111 || opcode == 6'b000101 || opcode == 6'b001011 || opcode == 6'b001001) ? rx2 :
@@ -127,8 +240,6 @@ module CORE(
             endcase
         end
 
-    assign active_address = (IRWrite) ? PC : memTarget;
-
     always_comb begin
         unique case (opcode)
             6'b100100: memTarget = (ActiveSP - {29'd0, push_pop_bytes}); // PUSH
@@ -139,20 +250,20 @@ module CORE(
 
             default: begin
                 if (opcode[5:4] == 2'b10)
-                    memTarget = RegY + sign_ext_imm10;
+                    memTarget = GPRs_data_out1 + sign_ext_imm10;
                 else
-                    memTarget = RegY;
+                    memTarget = GPRs_data_out1;
             end
         endcase
     end
 
     assign memViolation = (!KernelMode && (memRead || memWrite) &&
-                         ((active_address < memBase) ||
-                          (33'(active_address) >= (33'(memBase) + 33'(memLimit)))));
+                         ((memTarget < memBase) ||
+                          (33'(memTarget) >= (33'(memBase) + 33'(memLimit)))));
 
     assign spr_target_sel =
         (opcode == 6'b101000 || opcode == 6'b101001 || opcode == 6'b101010 ||
-        opcode == 6'b101011 || opcode == 6'b101100 || opcode == 6'b101101) ? IR[17:16] : 2'b00;
+        opcode == 6'b101011 || opcode == 6'b101100 || opcode == 6'b101101) ? EX_IR[17:16] : 2'b00;
 
     logic [31:0] SelectedSPR;
     always_comb begin
@@ -165,7 +276,7 @@ module CORE(
     end
 
     //Muxes
-    assign AluMuxX = (aluSrcX == 1'b1) ? PC : RegX;
+    assign AluMuxX = (aluSrcX == 1'b1) ? EX_PC : GPRs_data_out0;
 
     always_comb begin
         unique case (aluSrcY)
@@ -179,22 +290,22 @@ module CORE(
                     6'b000101,
                     6'b001001,
                     6'b001011:
-                        AluMuxY = RegY + sign_ext_imm2;
+                        AluMuxY = GPRs_data_out1 + sign_ext_imm2;
 
-                    default:   AluMuxY = RegY + zero_ext_imm10; // 2-operand logic
+                    default:   AluMuxY = GPRs_data_out1 + zero_ext_imm10; // 2-operand logic
                 endcase
             end
 
             2'b10: AluMuxY = j_imm_signed;
             2'b11: AluMuxY = { {20{immediate[11]}}, immediate };
 
-            default: AluMuxY = RegY;
+            default: AluMuxY = GPRs_data_out1;
         endcase
     end
 
     always_comb begin
         unique case (PCSrc)
-            4'b0000: PCNext = EA;
+            4'b0000: PCNext = AluResult;
             4'b0001: PCNext = AluResult;
             4'b0011: PCNext = EPC;          // RETU
             4'b0101: PCNext = LR;           // RET
@@ -222,14 +333,8 @@ module CORE(
         endcase
     end
 
-    //SPRs
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
-            PC <= 32'd0;
-            IR <= 32'd0;
-            RegX <= 32'd0;
-            RegY <= 32'd0;
-            EA <= 32'd0;
             KernelMode <= 0;
             SP <= 32'h03FFFFF0;
             KSP <= 32'h000000FC;
@@ -245,46 +350,44 @@ module CORE(
 
             compactedFlags <= 4'b0000;
         end else begin
-            if (PCWrite) PC <= PCNext;
-            if (IRWrite) IR <= ram_data_out;
-            if (XWrite) RegX <= GPRs_data_out0;
-            if (YWrite) RegY <= GPRs_data_out1;
-            if (EAWrite) EA <= AluResult;
-            if (EPCWrite) EPC <= PC;
-            if (flagsWrite) compactedFlags <= {CarryFlag, NegativeFlag, OverflowFlag, ZeroFlag};
-            KernelMode <= isKernelMode;
             mod_state <= ENC_10K_ModArr;
 
-            if (isCallState && opcode == 6'b111000) begin
-                LR <= PC;
-            end
+            if (isEX_valid) begin
+                if (EPCWrite) EPC <= EX_PC;
+                if (flagsWrite) compactedFlags <= {CarryFlag, NegativeFlag, OverflowFlag, ZeroFlag};
+                KernelMode <= isKernelMode;
 
-            if (SPRWrite) begin
-                unique case (spr_target_sel)
-                    2'b00: begin
-                        if (KernelMode) KSP <= SPRNext;
-                        else SP <= SPRNext;
-                    end
-                    2'b01: LR <= SPRNext;
-                    2'b10: begin
-                        if (KernelMode) KGP <= SPRNext;
-                        else GP <= SPRNext;
-                    end
-                    default: ; // reserved for later
-                endcase
-            end
+                if (isCallState && opcode == 6'b111000) begin
+                    LR <= EX_PC;
+                end
 
-            if (memWrite && IO_cs && KernelMode) begin
-                unique case (memTarget)
-                    32'hFFFFFF04: mmio_timer_reg <= RegX[15:0];
-                    32'hFFFFFF08: memBase        <= RegX;
-                    32'hFFFFFF0C: memLimit       <= RegX;
-                    32'hFFFFFF10: EPC            <= RegX;
-                    32'hFFFFFF14: SP             <= RegX;
-                    32'hFFFFFF18: KSP            <= RegX;
-                    32'hFFFFFF1C: KScratch       <= RegX;
-                    default: ;
-                endcase
+                if (SPRWrite) begin
+                    unique case (spr_target_sel)
+                        2'b00: begin
+                            if (KernelMode) KSP <= SPRNext;
+                            else SP <= SPRNext;
+                        end
+                        2'b01: LR <= SPRNext;
+                        2'b10: begin
+                            if (KernelMode) KGP <= SPRNext;
+                            else GP <= SPRNext;
+                        end
+                        default: ; // reserved for later
+                    endcase
+                end
+
+                if (memWrite && IO_cs && KernelMode) begin
+                    unique case (memTarget)
+                        32'hFFFFFF04: mmio_timer_reg <= GPRs_data_out0[15:0];
+                        32'hFFFFFF08: memBase        <= GPRs_data_out0;
+                        32'hFFFFFF0C: memLimit       <= GPRs_data_out0;
+                        32'hFFFFFF10: EPC            <= GPRs_data_out0;
+                        32'hFFFFFF14: SP             <= GPRs_data_out0;
+                        32'hFFFFFF18: KSP            <= GPRs_data_out0;
+                        32'hFFFFFF1C: KScratch       <= GPRs_data_out0;
+                        default: ;
+                    endcase
+                end
             end
         end
     end
@@ -308,43 +411,33 @@ module CORE(
         VRAM_cs = 0;
         IO_cs   = 0;
 
-        if (IRWrite) begin
+        if (memTarget <= 32'h03FFFFFF) begin
             RAM_cs = 1;
         end
-        else begin
-            if (memTarget <= 32'h03FFFFFF) begin
-                RAM_cs = 1;
-            end
-            else if (memTarget >= 32'h04000000 && memTarget <= 32'h040FFFFF) begin
-                VRAM_cs = 1;
-            end
-            else if (memTarget >= 32'h04100000 && memTarget <= 32'h041000FF) begin
-                IO_cs = 1;
-            end
-            //Else memFault
+        else if (memTarget >= 32'h04000000 && memTarget <= 32'h040FFFFF) begin
+            VRAM_cs = 1;
         end
+        else if (memTarget >= 32'h04100000 && memTarget <= 32'h041000FF) begin
+            IO_cs = 1;
+        end
+        //Else memFault
     end
 
     always_comb begin
-        if (IRWrite) begin
-            ram_byte_enable = 4'b1111;
-            ram_data_in_aligned = RegX;
-        end else begin
-            unique case (rx0[2:0])
-                3'b011, 3'b100, 3'b101, 3'b110: begin // 8-bit
-                    ram_byte_enable = 4'b0001;
-                    ram_data_in_aligned = {24'h0, RegX[7:0]};
-                end
-                3'b001, 3'b010: begin // 16-bit
-                    ram_byte_enable = 4'b0011;
-                    ram_data_in_aligned = {16'h0, RegX[15:0]};
-                end
-                default: begin // 32-bit
-                    ram_byte_enable = 4'b1111;
-                    ram_data_in_aligned = RegX;
-                end
-            endcase
-        end
+        unique case (rx0[2:0])
+            3'b011, 3'b100, 3'b101, 3'b110: begin // 8-bit
+                ram_byte_enable = 4'b0001;
+                ram_data_in_aligned = {24'h0, GPRs_data_out0[7:0]};
+            end
+            3'b001, 3'b010: begin // 16-bit
+                ram_byte_enable = 4'b0011;
+                ram_data_in_aligned = {16'h0, GPRs_data_out0[15:0]};
+            end
+            default: begin // 32-bit
+                ram_byte_enable = 4'b1111;
+                ram_data_in_aligned = GPRs_data_out0;
+            end
+        endcase
     end
 
     always_comb begin
@@ -367,7 +460,7 @@ module CORE(
         end
     end
     assign GPRs_data_in = (GPRsSrc == 3'b001) ? cpu_mem_data_out :
-                  (GPRsSrc == 3'b010) ? PC :
+                  (GPRsSrc == 3'b010) ? EX_PC :
                   (GPRsSrc == 3'b011) ? sign_ext_imm18 :
                   (GPRsSrc == 3'b100) ? sign_ext_imm26 :
                   (GPRsSrc == 3'b101) ? memTarget : // SPLEA
@@ -381,13 +474,9 @@ module CORE(
         .mmio_timer_reg(mmio_timer_reg),
         .current_kernel_mode(KernelMode),
         .memViolation(memViolation),
-        .XWrite(XWrite),
-        .YWrite(YWrite),
         .key_in(ENC_10K_KeyIn),
-        .IRWrite(IRWrite),
         .PCWrite(PCWrite),
         .GPRsWrite(GPRsWrite),
-        .EAWrite(EAWrite),
         .EPCWrite(EPCWrite),
         .isKernelMode(isKernelMode),
         .memRead(memRead),
@@ -420,28 +509,31 @@ module CORE(
     GPRs all_gprs (
         .clk(clk),
         .reset(reset),
-        .reg_write(GPRsWrite),
+        .reg_write(WB_gpr_write && isWB_valid),
         .KernelMode(KernelMode),
         .rr0(rx0),
         .rr1(rx1),
-        .rw0(gpr_rw0_sel),
-        .data_in(GPRs_data_in),
+        .rw0(WB_gpr_dest),
+        .data_in(WB_result),
         .data_out0(GPRs_data_out0),
         .data_out1(GPRs_data_out1)
     );
 
     RAM system_ram (
         .clk(clk),
-        .address(active_address),
+        .address(memTarget),
         .data_in(ram_data_in_aligned),
         .byte_enable(ram_byte_enable),
         .mem_write(memWrite && !memViolation && RAM_cs),
         .mem_read(memRead && !memViolation && RAM_cs),
-        .data_out(ram_data_out)
+        .data_out(ram_data_out),
+
+        .instr_address(IF_PC),
+        .instr_data_out(instr_fetch_data)
     );
 
     assign vram_addr     = memTarget - 32'h04000000;
-    assign vram_data_out = RegX;
+    assign vram_data_out = GPRs_data_out0;
     assign vram_write    = (memWrite && VRAM_cs);
 
 endmodule
