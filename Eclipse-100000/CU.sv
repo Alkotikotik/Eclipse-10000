@@ -40,263 +40,42 @@ module CU(
 
 );
 
-    typedef enum logic [3:0] {
-        FETCH,
-        DECODE,
-        ALU_EXE,
-        BRANCH,
-        LOAD,
-        READ_DATA,
-        EXCEPTION,
-        TIMER_INTERRUPT,
-        MEM_FAULT,
-        STORE,
-        KEY_INTERRUPT
-    } fsm_states;
+    //Pipilined 5 cycle CU, I chose 5 cycles because its perfect balance
+    //between clock speed, which is higher because of shorter critical path, and
+    //penatly for mispredicted branch which is 2 cycles for regular branches
+    //and only 1 for unconditional ones.
+    //The estimated CPI is ~=1.25 considering average instruction split
+    //obviosely varies by program being executed.
+    //That is about 2.5 times faster than my multi-cycle design(~= 2.9CPI) as
+    //well as higher estimated clock frequency due to shorter critical path
+    //3 cycles per instruction to 2
 
-    fsm_states current_state, next_state;
+    //== IF(Instruction Fetch) ==//
+    logic [31:0] PC_IF;
+    logic [31:0] PC_IF_plus4;
 
-    logic [15:0] counter;
-    logic timer_interrupt_pending;
-
-    logic C, N, V, Z;
-    assign {C, N, V, Z} = flags;
-
-    logic [7:0] prev_key_in;
-    logic key_interrupt_pending;
-
+    assign PC_IF_plus4 = PC_IF + 32'h4;  //Computing it here dynamically
 
     always_ff @(posedge clk or posedge reset) begin
-        if (reset) begin
-            current_state <= FETCH;
-            counter <= 16'd10000;
-            timer_interrupt_pending <= 0;
-            prev_key_in <= 8'hFF;
-            key_interrupt_pending <= 0;
-        end else begin
-            current_state <= next_state;
-
-            if (counter == 16'd0) begin
-                counter <= mmio_timer_reg;
-                timer_interrupt_pending <= 1;
-            end else begin
-                counter <= counter - 1;
-            end
-
-            if (current_state == TIMER_INTERRUPT)
-                timer_interrupt_pending <= 0;
-
-            prev_key_in <= key_in;
-            if (key_in != 8'hFF && key_in != prev_key_in)
-                key_interrupt_pending <= 1;
-            if (current_state == KEY_INTERRUPT)
-                key_interrupt_pending <= 0;
-        end
+        if (reset) PC_IF <= 32'h0;
+        else if(squash) PC_IF <= PC_target;
+        else if(!stall) PC_IF <= PC_IF_plus4;
+        else PC_IF <= PC_IF;
     end
 
-    always_comb begin
-        next_state = FETCH;
-        XWrite = 0; YWrite = 0;
-        IRWrite = 0; PCWrite = 0; GPRsWrite = 0; EAWrite = 0;
-        EPCWrite = 0; isKernelMode = current_kernel_mode;
-        memRead = 0; memWrite = 0;
-        aluSrcX = 0; aluSrcY = 2'b00;
-        PCSrc = 4'b0000; GPRsSrc = 3'b000;
-        aluOpSel = 2'b00;
-        flagsWrite = 0;
-        isCallState = 0;
-        SPRWrite = 0; SPRSrc = 3'b000;
+    //== That looks nice ==//
+    //== Anyways ID(Instruction Decode) stage ==//
+    logic [31:0] PC_ID, IR_ID; //Each stage gets into own IR and PC
+    logic        isID_valid;
 
-        unique case (current_state) //allows for parralellization
-            FETCH: begin
-                next_state = DECODE;
-                IRWrite = 1;
-                PCWrite = 1;
-                aluSrcX = 1;
-                aluSrcY = 2'b00;
-                PCSrc = 4'b0001;
-                aluOpSel = 2'b00;
-                memRead = 1;
-            end
-            DECODE: begin
-                aluSrcX = 1;
-                aluSrcY = 2'b11;
-                EAWrite = 1;
-                aluOpSel = 2'b00;
-
-                XWrite = 1;
-                YWrite = 1;
-
-                unique case (opcode[5:4])
-                    2'b00: next_state = ALU_EXE;
-                    2'b11: next_state = BRANCH;
-                    2'b01: next_state = LOAD;
-
-                    2'b10: begin //Calculating effective address during decode bc otherwise ALU is just chilling
-                        unique case(opcode)
-                            6'b100111: next_state = STORE;      // STR
-                            6'b100011: next_state = READ_DATA;  // LDR
-                            6'b100100: next_state = STORE;      // PUSH
-                            6'b100101: next_state = READ_DATA;  // POP
-                            6'b101000: next_state = READ_DATA;  // SPRLDR
-                            6'b101001: next_state = STORE;      // SPRSTR
-                            6'b101101: next_state = LOAD;       // SPRLEA — computed value, no memory access
-                            default:   next_state = STORE;
-                        endcase
-                    end
-                    default: next_state = ALU_EXE;
-                endcase
-
-                case (opcode)
-                    6'b111110: next_state = EXCEPTION; //SYS
-                    6'b111101: begin //RETU
-                        isKernelMode = 0;
-                        PCSrc = 4'b0011;
-                        PCWrite = 1;
-                        next_state = FETCH;
-                    end
-                    6'b111000: begin //CALL
-                        next_state = FETCH;
-                        aluSrcY = 2'b10;
-                        PCSrc   = 4'b0001;
-                        PCWrite = 1;
-                        isCallState = 1;
-                    end
-                    6'b110010: begin //RET
-                        next_state = FETCH;
-                        PCSrc   = 4'b0101;
-                        PCWrite = 1;
-                    end
-                    6'b110111: begin //JR
-                        next_state = FETCH;
-                        PCSrc   = 4'b0111;
-                        PCWrite = 1;
-                    end
-                    6'b110000: next_state = ALU_EXE;  // CMP
-                    6'b111111: begin //JMP
-                        next_state = FETCH;
-                        aluSrcY = 2'b10;
-                        PCSrc   = 4'b0001;
-                        PCWrite = 1;
-                    end
-                    6'b101010: begin // SPRSET
-                        next_state = FETCH;
-                        SPRSrc = 3'b011;
-                        SPRWrite = 1;
-                    end
-                    6'b101011: begin // SPRADD
-                        next_state = FETCH;
-                        SPRSrc = 3'b110;
-                        SPRWrite = 1;
-                    end
-                    6'b101100: begin // SPRSUB
-                        next_state = FETCH;
-                        SPRSrc = 3'b111;
-                        SPRWrite = 1;
-                    end
-
-                    6'b110001: aluSrcY = 2'b10; //BEQ
-                    6'b111100: aluSrcY = 2'b10; //BNE
-                    6'b110011: aluSrcY = 2'b10; //BGU
-                    6'b110100: aluSrcY = 2'b10; //BSU
-                    6'b110101: aluSrcY = 2'b10; //BGS
-                    6'b110110: aluSrcY = 2'b10; //BSS
-
-                    default: ;
-                endcase
-            end
-            ALU_EXE: begin
-                next_state = FETCH;
-                aluSrcY   = 2'b01;
-                aluSrcX   = 0;
-                aluOpSel  = 2'b10;
-                GPRsSrc = 3'b000;
-
-                if (opcode == 6'b110000) begin // CMP
-                    flagsWrite = 1;
-                    GPRsWrite = 0;
-                end else begin
-                    GPRsWrite = 1;
-                end
-            end
-
-            BRANCH: begin
-                next_state = FETCH;
-                PCSrc = 4'b0000;
-
-                unique case (opcode)
-                    6'b110001: PCWrite = Z; //BEQ
-                    6'b111100: PCWrite = !Z; //BNE
-
-                    6'b110011: PCWrite = (C && !Z);  // BGU
-                    6'b110100: PCWrite = !C;         // BSU
-
-                    6'b110101: PCWrite = ((N == V) && !Z); //BGS
-                    6'b110110: PCWrite = (N != V); //BSS
-
-                    default: PCWrite = 0;
-                endcase
-            end
-            EXCEPTION: begin
-                EPCWrite = 1;
-                isKernelMode = 1;
-                PCSrc = 4'b0010;
-                PCWrite = 1;
-                next_state = FETCH;
-            end
-            TIMER_INTERRUPT: begin
-                EPCWrite = 1;
-                isKernelMode = 1;
-                PCSrc = 4'b0100;
-                PCWrite = 1;
-                next_state = FETCH;
-            end
-            KEY_INTERRUPT: begin
-                EPCWrite = 1;
-                isKernelMode = 1;
-                PCSrc = 4'b1000;
-                PCWrite = 1;
-                next_state = FETCH;
-            end
-            MEM_FAULT: begin
-                EPCWrite = 1;
-                isKernelMode = 1;
-                PCSrc = 4'b0110;
-                PCWrite = 1;
-                next_state = FETCH;
-            end
-            LOAD: begin
-                next_state = FETCH;
-                GPRsWrite  = 1;
-                GPRsSrc    = (opcode == 6'b011111) ? 3'b100 : (opcode == 6'b101101) ? 3'b101 : 3'b011;
-            end
-            READ_DATA: begin
-                next_state = FETCH;
-                memRead = 1;
-                GPRsSrc = 3'b001;
-                GPRsWrite = 1;
-                if (opcode == 6'b100101) begin // POP
-                    SPRSrc = 3'b101;
-                    SPRWrite = 1;
-                end
-            end
-            STORE: begin
-                next_state = FETCH;
-                memWrite = 1;
-                if (opcode == 6'b100100) begin // PUSH
-                    SPRSrc = 3'b100;
-                    SPRWrite = 1;
-                end
-            end
-            default: next_state = FETCH;
-        endcase
-
-        //Jump straight to exeption
-        if (next_state == FETCH && timer_interrupt_pending && !isKernelMode && current_state != EXCEPTION)
-            next_state = TIMER_INTERRUPT;
-        else if (next_state == FETCH && key_interrupt_pending && !isKernelMode && current_state != EXCEPTION)
-            next_state = KEY_INTERRUPT;
-        if((current_state == LOAD || current_state == READ_DATA || current_state == STORE) && memViolation)
-            next_state = MEM_FAULT; //MEM_FAULT
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset || squash) begin
+            isID_valid <= 0;
+        end else if (!stall) begin
+            PC_ID <= PC_IF;
+            IR_ID <= instr
     end
+
+
+
 endmodule
