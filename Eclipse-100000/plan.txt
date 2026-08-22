@@ -1,3 +1,5 @@
 Static branch prediction
 SPARC style register shifting on calls
 Expand/shift LR in similar style
+L1 cache
+SIMD - already kinda exists just gotta expand on that
