@@ -1,5 +1,6 @@
 Static branch prediction
-SPARC style register shifting on calls
-Expand/shift LR in similar style
+SPARC style LR shifting
 L1 cache
 SIMD - already kinda exists just gotta expand on that
+Switch to 1024x600 display
+
