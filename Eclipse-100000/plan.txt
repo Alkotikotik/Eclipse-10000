@@ -1,5 +1,6 @@
 Static branch prediction
 SPARC style LR shifting
+Resolve unconditional branching in ID
 L1 cache
 SIMD - already kinda exists just gotta expand on that
 Switch to 1024x600 display
