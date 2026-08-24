@@ -177,24 +177,70 @@ module CORE(
     //So its a pretty interesting one, if instruction needs result(EX) that hasn't
     //been written to GPRs yet(end of WB), instead of stalling I check for this
     //condition, if its true I just use MEM/WB result, otherwise read from registers
+
+    //The problem is sub registers: a selector is {base_id[4:0], offset[2:0]} and the
+    //offset picks which slice of the 32bit register you actually touch:
+    //000 - rx, 001 - ry0, 010 - ry1, 011 - rz0, 100 - rz1, 101 - rz2, 110 - rz3
+    //Two selectors that differ only in the offset still name the exact same physical
+    //register, so comparing the whole 8bit selector breaks everything.
+    //The fix is only match using base_id and apply offset only at the end
     logic [31:0] FWD_rx0, FWD_rx1;
- 
+    logic MEM_fwd0, WB_fwd0, MEM_fwd1, WB_fwd1;
+
+    //This checks whether the write in MEM/WB touches the register this read wants
+    //Also account for rx0, rx1 banking
+    assign MEM_fwd0 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rx0[7:3]) &&
+                      (rx0[7:3] > 5'd1 || MEM_kernel_mode == KernelMode);
+    assign WB_fwd0  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rx0[7:3]) &&
+                      (rx0[7:3] > 5'd1 || WB_kernel_mode  == KernelMode);
+    assign MEM_fwd1 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rx1[7:3]) &&
+                      (rx1[7:3] > 5'd1 || MEM_kernel_mode == KernelMode);
+    assign WB_fwd1  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rx1[7:3]) &&
+                      (rx1[7:3] > 5'd1 || WB_kernel_mode  == KernelMode);
+
+    //So yeah this is just verilator function, they are automatic because it
+    //means that each call gets its own unique set of argumenst, like in
+    //regular C stack allocation, regularly though, it gives everyone the same
+    //argumetns. Best thing is that it costs nothing in hardware
+
+    function automatic [31:0] fwd_merge(input [2:0] off, input [31:0] old, input [31:0] val);
+        unique case (off)
+            3'b001:  fwd_merge = {old[31:16], val[15:0]};             //ry0
+            3'b010:  fwd_merge = {val[15:0],  old[15:0]};             //ry1
+            3'b011:  fwd_merge = {old[31:8],  val[7:0]};              //rz0
+            3'b100:  fwd_merge = {old[31:16], val[7:0], old[7:0]};    //rz1
+            3'b101:  fwd_merge = {old[31:24], val[7:0], old[15:0]};   //rz2
+            3'b110:  fwd_merge = {val[7:0],   old[23:0]};             //rz3
+            default: fwd_merge = val;                                 //rx, whole register
+        endcase
+    endfunction
+
+    function automatic [31:0] fwd_slice(input [2:0] off, input [31:0] v);
+        unique case (off)
+            3'b001:  fwd_slice = {16'h0000, v[15:0]};
+            3'b010:  fwd_slice = {16'h0000, v[31:16]};
+            3'b011:  fwd_slice = {24'h000000, v[7:0]};
+            3'b100:  fwd_slice = {24'h000000, v[15:8]};
+            3'b101:  fwd_slice = {24'h000000, v[23:16]};
+            3'b110:  fwd_slice = {24'h000000, v[31:24]};
+            default: fwd_slice = v;
+        endcase
+    endfunction
+
+    //Here automatic comes in play, function gets called more than ones in
+    //always_comb block so its neccessery
     always_comb begin
-        if (isMEM_valid && MEM_gpr_write && (MEM_gpr_dest == rx0))
-            FWD_rx0 = MEM_result;
-        else if (isWB_valid && WB_gpr_write && (WB_gpr_dest == rx0))
-            FWD_rx0 = WB_result;
-        else
-            FWD_rx0 = GPRs_data_out0;
+        FWD_rx0 = GPRs_data_out0;
+        if (WB_fwd0)  FWD_rx0 = fwd_merge(WB_gpr_dest[2:0],  FWD_rx0, WB_result);
+        if (MEM_fwd0) FWD_rx0 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx0, MEM_result);
+        FWD_rx0 = fwd_slice(rx0[2:0], FWD_rx0);
     end
- 
+
     always_comb begin
-        if (isMEM_valid && MEM_gpr_write && (MEM_gpr_dest == rx1))
-            FWD_rx1 = MEM_result;
-        else if (isWB_valid && WB_gpr_write && (WB_gpr_dest == rx1))
-            FWD_rx1 = WB_result;
-        else
-            FWD_rx1 = GPRs_data_out1;
+        FWD_rx1 = GPRs_data_out1;
+        if (WB_fwd1)  FWD_rx1 = fwd_merge(WB_gpr_dest[2:0],  FWD_rx1, WB_result);
+        if (MEM_fwd1) FWD_rx1 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx1, MEM_result);
+        FWD_rx1 = fwd_slice(rx1[2:0], FWD_rx1);
     end
 
     //Declarations
@@ -507,6 +553,7 @@ module CORE(
         .current_kernel_mode(KernelMode),
         .memViolation(memViolation),
         .key_in(ENC_10K_KeyIn),
+        .isEX_valid(isEX_valid),
         .PCWrite(PCWrite),
         .GPRsWrite(GPRsWrite),
         .EPCWrite(EPCWrite),
@@ -544,8 +591,10 @@ module CORE(
         .reg_write(WB_gpr_write && isWB_valid),
         .KernelModeRead(KernelMode),
         .KernelModeWrite(WB_kernel_mode),
-        .rr0(rx0),
-        .rr1(rx1),
+        //offset forced to 000 so these come back as the raw 32bit register,
+        //the forwarding block above does the slicing after it merges
+        .rr0({rx0[7:3], 3'b000}),
+        .rr1({rx1[7:3], 3'b000}),
         .rw0(WB_gpr_dest),
         .data_in(WB_result),
         .data_out0(GPRs_data_out0),
@@ -557,7 +606,7 @@ module CORE(
         .address(memTarget),
         .data_in(ram_data_in_aligned),
         .byte_enable(ram_byte_enable),
-        .mem_write(memWrite && !memViolation && RAM_cs),
+        .mem_write(memWrite && !memViolation && RAM_cs && isEX_valid),
         .mem_read(memRead && !memViolation && RAM_cs),
         .data_out(ram_data_out),
 
@@ -566,6 +615,6 @@ module CORE(
     );
     assign vram_addr     = memTarget - 32'h04000000;
     assign vram_data_out = FWD_rx0;
-    assign vram_write    = (memWrite && VRAM_cs);
+    assign vram_write = (memWrite && VRAM_cs && isEX_valid);
 
 endmodule

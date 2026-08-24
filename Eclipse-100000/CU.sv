@@ -11,6 +11,7 @@ module CU(
     input logic memViolation,
 
     input logic [7:0] key_in,
+    input logic isEX_valid,
 
     output logic PCWrite,
     output logic GPRsWrite,
@@ -68,10 +69,10 @@ module CU(
                 timer_interrupt_pending <= 0;
 
             prev_key_in <= key_in;
-            if (key_in != 8'hFF && key_in != prev_key_in)
-                key_interrupt_pending <= 1;
             if (key_interrupt_taken)
                 key_interrupt_pending <= 0;
+            if (key_in != 8'hFF && key_in != prev_key_in)
+                key_interrupt_pending <= 1;
         end
     end
 
@@ -207,7 +208,7 @@ module CU(
         //Interrupt override whatever was in the current EX now checking on
         //every cycle instead of only between states, also it is gated by
         //!PCWrite so in base of branch nothing would break
-        if (!isKernelMode && !PCWrite) begin
+        if (isEX_valid && !isKernelMode && !PCWrite) begin
             if (timer_interrupt_pending) begin
                 EPCWrite = 1; isKernelMode = 1; PCSrc = 4'b0100; PCWrite = 1;
                 timer_interrupt_taken = 1;
