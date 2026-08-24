@@ -147,6 +147,7 @@ module CU(
                 PCWrite = 1;
             end
             6'b110000: begin // CMP
+                aluSrcX = 0;
                 aluSrcY = 2'b01; aluOpSel = 2'b10;
                 flagsWrite = 1;
                 GPRsWrite = 0;
