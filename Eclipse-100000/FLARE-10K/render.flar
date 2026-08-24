@@ -27,6 +27,7 @@ regarch RGBA {
 
 func main() {
     u32 ptr = 0x04000000;
+    [4096] = 11;
 
     #rx29 RGBA colors;
 
@@ -38,6 +39,7 @@ func main() {
     u8 phase = 0;
 
     while [true] {
+        [4092] = 12;
         u32 color = (colors.r << 12) | (colors.g << 8) | (colors.b << 4) | colors.a;
         [ptr] = color;
         ptr = ptr + 2;
@@ -63,5 +65,6 @@ func main() {
                 phase = 0;
             }
         }
+        [4088] = 13;
     }
 }

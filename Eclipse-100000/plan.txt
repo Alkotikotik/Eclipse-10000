@@ -1,4 +1,4 @@
-Static branch prediction
+Static branch prediction - BTFNT
 SPARC style LR shifting
 Resolve unconditional branching in ID
 L1 cache, data/instruction as well as WB cache with similar to forwarding mechanism

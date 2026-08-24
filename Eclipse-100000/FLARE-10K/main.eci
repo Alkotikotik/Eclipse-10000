@@ -22,6 +22,11 @@
 ~main:
 	LOAD ry260 <- 0
 	LOAD ry261 <- 1024
+	LOAD rx30 <- 4096
+	LOAD rx31 <- 11
+	STR rx31 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	XOR [rx31, rx31 0]
 	LOAD rx29 <- 0
 	LOAD rz290 <- 15
 	LOAD rz291 <- 0
@@ -30,6 +35,11 @@
 	LOAD rz250 <- 0
 
 ~Lab_while_start_0:
+	LOAD rx30 <- 4092
+	LOAD rx31 <- 12
+	STR rx31 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	XOR [rx31, rx31 0]
 	MOV rz280 <- rz290 0
 	MOV rx27 <- rz280 0
 	SHL [rx27, rx31 12]
@@ -49,7 +59,7 @@
 	STR rx28 -> [rx26 0]
 	ADD rx28 <- [rx26, rx31 2]
 	MOV rx26 <- rx28 0
-	CMP rz250 <-> rx31 0
+	CMP rz250 <-> [rx31, 0]
 	BNE -> ~Lab_else_2
 
 	MOV rz280 <- rz290 0
@@ -59,7 +69,7 @@
 	ADD rz280 <- [rz280, rx31 1]
 	MOV rz291 <- rz280 0
 	MOV rz280 <- rz291 0
-	CMP rz280 <-> rx31 15
+	CMP rz280 <-> [rx31, 15]
 	BNE -> ~Lab_endif_5
 
 	LOAD rz250 <- 1
@@ -69,7 +79,7 @@
 
 
 ~Lab_else_2:
-	CMP rz250 <-> rx31 1
+	CMP rz250 <-> [rx31, 1]
 	BNE -> ~Lab_else_6
 
 	MOV rz280 <- rz291 0
@@ -79,7 +89,7 @@
 	ADD rz280 <- [rz280, rx31 1]
 	MOV rz292 <- rz280 0
 	MOV rz280 <- rz292 0
-	CMP rz280 <-> rx31 15
+	CMP rz280 <-> [rx31, 15]
 	BNE -> ~Lab_endif_9
 
 	LOAD rz250 <- 2
@@ -89,7 +99,7 @@
 
 
 ~Lab_else_6:
-	CMP rz250 <-> rx31 2
+	CMP rz250 <-> [rx31, 2]
 	BNE -> ~Lab_endif_11
 
 	MOV rz280 <- rz292 0
@@ -99,7 +109,7 @@
 	ADD rz280 <- [rz280, rx31 1]
 	MOV rz290 <- rz280 0
 	MOV rz280 <- rz290 0
-	CMP rz280 <-> rx31 15
+	CMP rz280 <-> [rx31, 15]
 	BNE -> ~Lab_endif_13
 
 	LOAD rz250 <- 0
@@ -111,6 +121,11 @@
 ~Lab_endif_7:
 
 ~Lab_endif_3:
+	LOAD rx30 <- 4088
+	LOAD rx31 <- 13
+	STR rx31 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	XOR [rx31, rx31 0]
 	JMP -> ~Lab_while_start_0
 
 

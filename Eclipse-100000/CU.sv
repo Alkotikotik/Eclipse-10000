@@ -216,10 +216,12 @@ module CU(
             end
         end
 
+
         if ((memRead || memWrite) && memViolation) begin
             EPCWrite = 1; isKernelMode = 1; PCSrc = 4'b0110; PCWrite = 1;
-            memRead = 0; memWrite = 0; GPRsWrite = 0; SPRWrite = 0;
+            GPRsWrite = 0; SPRWrite = 0;
         end
+
     end
 
     //== End of CU(god do I love that thing) ==//

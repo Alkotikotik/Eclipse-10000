@@ -94,10 +94,11 @@ int main(int argc, char **argv) {
 
         // Active edge logging & VRAM update
         if (top->clk == 1) {
-            // Print PC / IR CPU state
+            // Print ID stage PC / IR
             std::cout << "[Cycle " << (sim_time / 2) << "] "
-                      << "PC = 0x" << std::hex << (int)top->rootp->CORE__DOT__PC << " | IR = 0x"
-                      << std::hex << (int)top->rootp->CORE__DOT__IR << std::dec << std::endl;
+                      << "ID_PC=0x" << std::hex << (uint32_t)top->rootp->CORE__DOT__ID_PC
+                      << " ID_IR=0x" << std::hex << (uint32_t)top->rootp->CORE__DOT__ID_IR
+                      << std::dec << std::endl;
 
             // Capture VRAM writes
             if (top->vram_write) [[unlikely]] {
