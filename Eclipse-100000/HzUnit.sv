@@ -1,4 +1,0 @@
-module HzUnit(
-    //Hazard unit
-
-);

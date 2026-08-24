@@ -198,11 +198,11 @@ module CORE(
     assign WB_fwd1  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rx1[7:3]) &&
                       (rx1[7:3] > 5'd1 || WB_kernel_mode  == KernelMode);
 
+
     //So yeah this is just verilator function, they are automatic because it
     //means that each call gets its own unique set of argumenst, like in
     //regular C stack allocation, regularly though, it gives everyone the same
     //argumetns. Best thing is that it costs nothing in hardware
-
     function automatic [31:0] fwd_merge(input [2:0] off, input [31:0] old, input [31:0] val);
         unique case (off)
             3'b001:  fwd_merge = {old[31:16], val[15:0]};             //ry0
@@ -211,7 +211,7 @@ module CORE(
             3'b100:  fwd_merge = {old[31:16], val[7:0], old[7:0]};    //rz1
             3'b101:  fwd_merge = {old[31:24], val[7:0], old[15:0]};   //rz2
             3'b110:  fwd_merge = {val[7:0],   old[23:0]};             //rz3
-            default: fwd_merge = val;                                 //rx, whole register
+            default: fwd_merge = val;                                 //rx
         endcase
     endfunction
 
