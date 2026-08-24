@@ -26,9 +26,9 @@ module CORE(
     logic  bubble;   //for handling load-use hazard
     logic  [31:0] PC_target;
 
-    assign demolish  = 1'b0;
-    assign stall     = 1'b0;
-    assign bubble    = 1'b0;
+    assign demolish  = 0;
+    assign stall     = 0;
+    assign bubble    = 0;
     assign PC_target = 32'd0;
 
     //== IF(Instruction Fetch) ==//
@@ -61,6 +61,16 @@ module CORE(
         end
         //else: stall holds PC and IR as they are
     end
+
+    //We need to compare those registers to EX's ones it case they
+    //overlap - stall
+    logic [7:0] ID_rx0, ID_rx1;
+    assign ID_rx0 = ID_IR[25:18];
+    assign ID_rx1 = ID_IR[17:10];
+
+    logic load_use_hazard;
+    assign load_use_hazard = isEX_valid && memRead && GPRsWrite &&
+                          ((gpr_rw0_sel == ID_rx0) || (gpr_rw0_sel == ID_rx1));
 
     //== EX(Execute) ==//
     //A lot of things happen here, full enum in CU.sv
@@ -120,26 +130,26 @@ module CORE(
 
     //== MEM(memory) ==//
     //Work with memory - load, store
+    //
     logic [31:0] MEM_PC, MEM_result;
-
     logic [5:0] MEM_opcode;
     logic [7:0] MEM_gpr_dest;
-
-    logic MEM_gpr_write;
-    logic isMEM_valid;
-
+    logic       MEM_gpr_write;
+    logic       isMEM_valid;
+ 
     always_ff @(posedge clk or posedge reset) begin
-        if (reset || demolish) begin
+        if (reset || squash) begin
             isMEM_valid <= 0;
         end else begin
-            MEM_PC   <= EX_PC;
-            MEM_result<= GPRs_data_in;
-            MEM_opcode <= opcode;
-            isMEM_valid <= isEX_valid;
-            MEM_gpr_dest <= gpr_rw0_sel;
+            MEM_PC        <= EX_PC;
+            MEM_result    <= GPRs_data_in;
+            MEM_opcode    <= opcode;
             MEM_gpr_write <= GPRsWrite;
+            MEM_gpr_dest  <= gpr_rw0_sel;
+            isMEM_valid   <= isEX_valid;
         end
     end
+
 
     //== WB(WriteBack) ==//
     logic [31:0] WB_PC, WB_result;
@@ -163,7 +173,29 @@ module CORE(
         end
     end
 
-
+    //== Forwarding ==//
+    //So its a pretty interesting one, if instruction needs result(EX) that hasn't
+    //been written to GPRs yet(end of WB), instead of stalling I check for this
+    //condition, if its true I just use MEM/WB result, otherwise read from registers
+    logic [31:0] FWD_rx0, fwd_rx1;
+ 
+    always_comb begin
+        if (isMEM_valid && MEM_gpr_write && (MEM_gpr_dest == rx0))
+            FWD_rx0 = MEM_result;
+        else if (isWB_valid && WB_gpr_write && (WB_gpr_dest == rx0))
+            FWD_rx0 = WB_result;
+        else
+            FWD_rx0 = GPRs_data_out0;
+    end
+ 
+    always_comb begin
+        if (isMEM_valid && MEM_gpr_write && (MEM_gpr_dest == rx1))
+            FWD_rx1 = MEM_result;
+        else if (isWB_valid && WB_gpr_write && (WB_gpr_dest == rx1))
+            FWD_rx1 = WB_result;
+        else
+            FWD_rx1 = GPRs_data_out1;
+    end
 
     //Declarations
     logic [31:0] EPC;

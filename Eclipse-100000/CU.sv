@@ -49,6 +49,7 @@ module CU(
 
     logic timer_interrupt_taken, key_interrupt_taken;
 
+    //Just interrupt handling
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             counter <= 16'd10000;
