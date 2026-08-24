@@ -564,7 +564,6 @@ module CORE(
         .instr_address(IF_PC),
         .instr_data_out(instr_fetch_data)
     );
-
     assign vram_addr     = memTarget - 32'h04000000;
     assign vram_data_out = FWD_rx0;
     assign vram_write    = (memWrite && VRAM_cs);
