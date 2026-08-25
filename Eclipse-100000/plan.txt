@@ -6,3 +6,6 @@
 [/]Add multi-core
 [/]Switch to 1024x600 display
 
+[~] Variable sized instructions
+
+
