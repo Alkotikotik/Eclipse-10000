@@ -9,3 +9,13 @@
 [~] Variable sized instructions
 
 
+Verilator commands: 
+Regular: 
+verilator --cc --exe -O3 -Wall -I. --build -j 0 --x-assign fast --x-initial fast --noassert sim_main.cpp CORE.sv -CFLAGS "-O3 -march=native -flto=auto -std=c++20 $(sdl2-config --cflags)" -LDFLAGS "-flto=auto $(sdl2-config --libs)"
+
+Profile 
+verilator --cc --exe -O3 -Wall -I. --build -j 0 --x-assign fast --x-initial fast --noassert sim_main.cpp CORE.sv -CFLAGS "-O3 -march=native -flto=auto -std=c++20 $(sdl2-config --cflags) -fprofile-generate" -LDFLAGS "-flto=auto $(sdl2-config --libs) -fprofile-generate"
+Run for 30s, then:
+verilator --cc --exe -O3 -Wall -I. --build -j 0 --x-assign fast --x-initial fast --noassert sim_main.cpp CORE.sv -CFLAGS "-O3 -march=native -flto=auto -std=c++20 $(sdl2-config --cflags) -fprofile-use -fprofile-correction" -LDFLAGS "-flto=auto $(sdl2-config --libs) -fprofile-use -fprofile-correction"
+
+
