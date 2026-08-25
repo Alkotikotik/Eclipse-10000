@@ -137,6 +137,10 @@ pub enum AsmInst {
     Bsu(String),
     Bgs(String), //signed
     Bss(String),
+    Bgeu(String),
+    Bseu(String),
+    Bges(String),
+    Bses(String),
 
     Jmp(String),
     Jr(AsmOperand),
@@ -2337,13 +2341,16 @@ impl<'a> Codegen<'a> {
                 isEq
             } => {
                 self.lower_cmp(left, right, out);
-                if *signed {
-                    out.push(AsmInst::Bss(target.clone()));
+                if *isEq {
+                    if *signed {
+                        out.push(AsmInst::Bss(target.clone()));
+                    } else {
+                        out.push(AsmInst::Bsu(target.clone()));
+                    }
+                } else if *signed {
+                    out.push(AsmInst::Bses(target.clone()));
                 } else {
-                    out.push(AsmInst::Bsu(target.clone()));
-                }
-                if !*isEq {
-                    out.push(AsmInst::Beq(target.clone()));
+                    out.push(AsmInst::Bseu(target.clone()));
                 }
             }
 
@@ -2355,13 +2362,16 @@ impl<'a> Codegen<'a> {
                 isEq,
             } => {
                 self.lower_cmp(left, right, out);
-                if *signed {
-                    out.push(AsmInst::Bgs(target.clone()));
+                if *isEq {
+                    if *signed {
+                        out.push(AsmInst::Bgs(target.clone()));
+                    } else {
+                        out.push(AsmInst::Bgu(target.clone()));
+                    }
+                } else if *signed {
+                    out.push(AsmInst::Bges(target.clone()));
                 } else {
-                    out.push(AsmInst::Bgu(target.clone()));
-                }
-                if !*isEq {
-                    out.push(AsmInst::Beq(target.clone())); // Branch Equal (==)
+                    out.push(AsmInst::Bgeu(target.clone()));
                 }
             }
 

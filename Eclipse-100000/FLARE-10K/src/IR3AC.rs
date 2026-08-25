@@ -953,9 +953,9 @@ impl IR {
                 let end_label = self.new_label("for_end");
 
                 self.reduce_expr(init);
-                self.emit(IRInst::Label(start_label.clone()));
-
                 self.reduce_cond(cond, end_label.clone());
+
+                self.emit(IRInst::Label(start_label.clone()));
 
                 //For break
                 self.loop_exit_stack.push(end_label.clone());
@@ -966,7 +966,7 @@ impl IR {
                 self.loop_exit_stack.pop();
                 self.reduce_expr(inc);
 
-                self.emit(IRInst::JMP(start_label));
+                self.reduce_cond_true(cond, start_label);
                 self.emit(IRInst::Label(end_label));
             }
 
@@ -977,12 +977,12 @@ impl IR {
                 let always_true = matches!(cond, Expr::IntLiteral(n) if *n != 0)
                     || matches!(cond, Expr::HexLiteral(n) if *n != 0);
 
-                self.emit(IRInst::Label(start_label.clone()));
-
                 if !always_true {
                     //Jump past if false
                     self.reduce_cond(cond, end_label.clone());
                 }
+
+                self.emit(IRInst::Label(start_label.clone()));
 
                 //For breaks
                 self.loop_exit_stack.push(end_label.clone());
@@ -993,7 +993,11 @@ impl IR {
 
                 self.loop_exit_stack.pop();
 
-                self.emit(IRInst::JMP(start_label));
+                if always_true {
+                    self.emit(IRInst::JMP(start_label));
+                } else {
+                    self.reduce_cond_true(cond, start_label);
+                }
                 self.emit(IRInst::Label(end_label));
             }
             Stmt::IfElse {
@@ -1174,6 +1178,32 @@ impl IR {
             temp_types: self.temp_types.clone(),
             body: self.insts_buffer.clone(),
             local_frame_size: self.local_frame_size,
+        }
+    }
+
+    fn reduce_cond_true(&mut self, expr: &Expr, true_label: String) {
+        match expr {
+            Expr::MoreLessEq { left, op, right } => {
+                let flipped = Expr::MoreLessEq {
+                    left: left.clone(),
+                    op: match op {
+                        MoreLess::Eq => MoreLess::NotEq,
+                        MoreLess::NotEq => MoreLess::Eq,
+                        MoreLess::More(is_eq) => MoreLess::Less(!*is_eq),
+                        MoreLess::Less(is_eq) => MoreLess::More(!*is_eq),
+                    },
+                    right: right.clone(),
+                };
+                self.reduce_cond(&flipped, true_label);
+            }
+            _ => {
+                let cond_op = self.reduce_expr(expr);
+                self.emit(IRInst::Equal {
+                    left: cond_op,
+                    right: IROperand::SignedConstant(0),
+                    target: true_label,
+                });
+            }
         }
     }
 

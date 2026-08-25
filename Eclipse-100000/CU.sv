@@ -108,13 +108,19 @@ module CU(
                     6'b110001: PCWrite = Z;             // BEQ
                     6'b111100: PCWrite = !Z;           // BNE
                     6'b110100: PCWrite = !C;          // BSU
+                    6'b111001: PCWrite = (N == V);
+                    6'b110010: PCWrite = C;
+                    6'b111011: PCWrite = ((N != V) || Z);
+                    6'b111010: PCWrite = (!C || Z);
 
                     default:   PCWrite = 0;         //Default(just need comment here)
                 endcase
             end
             2'b01: begin // LOAD-imm / LMA
-                GPRsWrite = 1;
-                GPRsSrc = (opcode == 6'b011111) ? 3'b100 : 3'b011; // LMA vs LOAD rx0,imm18
+                if (opcode == 6'b010001 || opcode == 6'b011111) begin
+                    GPRsWrite = 1;
+                    GPRsSrc = (opcode == 6'b011111) ? 3'b100 : 3'b011; // LMA vs LOAD rx0,imm18
+                end
             end
             2'b10: ;
             default: ;
@@ -122,7 +128,7 @@ module CU(
 
         //Basically stays the same
         unique case (opcode)
-            6'b111110: begin //SYS
+            6'b010010: begin //SYS
                 EPCWrite = 1;
                 isKernelMode = 1;
                 PCSrc = 4'b0010;
@@ -139,7 +145,7 @@ module CU(
                 PCWrite = 1;
                 isCallState = 1;
             end
-            6'b110010: begin //RET
+            6'b010000: begin //RET
                 PCSrc   = 4'b0101;
                 PCWrite = 1;
             end

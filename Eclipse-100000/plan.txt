@@ -3,5 +3,6 @@
 [/]Resolve unconditional branching in ID
 [/]L1 cache, data/instruction as well as WB cache with similar to forwarding mechanism
 [/]SIMD - already kinda exists just gotta expand on that
+[/]Add multi-core
 [/]Switch to 1024x600 display
 

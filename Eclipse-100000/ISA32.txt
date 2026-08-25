@@ -95,17 +95,21 @@ Unsigned branching
 111100 : BNE imm26
 110011 : BGU imm26
 110100 : BSU imm26
+110010 : BGEU imm26 //branch greater equal
+111010 : BSEU imm26 //branch smaller equal
 
 Signed branching
 110101 : BGS imm26
 110110 : BSS imm26
+111001 : BGES imm26
+111011 : BSES imm26
 
 Jumps & Subroutines
 111111 : JMP imm26        // Unconditional Jump to imm26 address/label
 110111 : JR rx0          // Unconditional Jump to rx0
 111000 : CALL imm26     // Save PC+4 to LR and Jump to imm26 address
-110010 : RET           // Return from subroutine (PC = LR)
+010000 : RET           // Return from subroutine (PC = LR)
 
 Privilege and Syscalls
-110110 : SYS             // System Call Exception
+010010 : SYS             // System Call Exception
 111101 : RETU           // Return to User Mode from Exception

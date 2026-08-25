@@ -2279,13 +2279,11 @@
 
 ~kprintr:
 	LOAD rx22 <- 0
+	CMP rx22 <-> [rz30, 0]
+	BGEU -> ~Lab_for_end_5
+
 
 ~Lab_for_start_4:
-	CMP rx22 <-> [rz30, 0]
-	BGU -> ~Lab_for_end_5
-
-	BEQ -> ~Lab_for_end_5
-
 	ADD rx28 <- [rx2, rx22 0]
 	LDR rz290 <- [rx28 0]
 	MOV rx27 <- rz290 0
@@ -2306,13 +2304,11 @@
 	SHL [rx28, rx31 4]
 	MOV rx25 <- rx28 0
 	LOAD rx26 <- 0
+	CMP rx26 <-> [rx31, 16]
+	BGEU -> ~Lab_for_end_9
+
 
 ~Lab_for_start_8:
-	CMP rx26 <-> [rx31, 16]
-	BGU -> ~Lab_for_end_9
-
-	BEQ -> ~Lab_for_end_9
-
 	ADD rx27 <- [rx25, rx26 0]
 	SPRLEA rx28 <- [GP 12]
 	ADD rx28 <- [rx28, rx27 0]
@@ -2329,13 +2325,11 @@
 	ADD rx28 <- [rx28, rx27 0]
 	MOV rx27 <- rx28 0
 	LOAD rx23 <- 0
+	CMP rx23 <-> [rx31, 8]
+	BGEU -> ~Lab_for_end_11
+
 
 ~Lab_for_start_10:
-	CMP rx23 <-> [rx31, 8]
-	BGU -> ~Lab_for_end_11
-
-	BEQ -> ~Lab_for_end_11
-
 	MOV rx28 <- rx23 0
 	SHL [rx28, rx31 1]
 	ADD rx28 <- [rx27, rx28 0]
@@ -2357,13 +2351,15 @@
 	MOV rz240 <- rz290 0
 	ADD rx28 <- [rx23, rx31 1]
 	MOV rx23 <- rx28 0
-	JMP -> ~Lab_for_start_10
+	CMP rx23 <-> [rx31, 8]
+	BSU -> ~Lab_for_start_10
 
 
 ~Lab_for_end_11:
 	ADD rx28 <- [rx26, rx31 1]
 	MOV rx26 <- rx28 0
-	JMP -> ~Lab_for_start_8
+	CMP rx26 <-> [rx31, 16]
+	BSU -> ~Lab_for_start_8
 
 
 ~Lab_for_end_9:
@@ -2372,7 +2368,8 @@
 	MOV ry00 <- ry290 0
 	ADD rx28 <- [rx22, rx31 1]
 	MOV rx22 <- rx28 0
-	JMP -> ~Lab_for_start_4
+	CMP rx22 <-> [rz30, 0]
+	BSU -> ~Lab_for_start_4
 
 
 ~Lab_for_end_5:

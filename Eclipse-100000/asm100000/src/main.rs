@@ -105,13 +105,17 @@ fn main() -> io::Result<()> {
     // Signed Branching
     opcodes.insert("BGS", 0b110101);
     opcodes.insert("BSS", 0b110110);
+    opcodes.insert("BGEU", 0b110010);
+    opcodes.insert("BSEU", 0b111010);
+    opcodes.insert("BGES", 0b111001);
+    opcodes.insert("BSES", 0b111011);
 
     // Control Flow & Sysem
     opcodes.insert("JMP", 0b111111);
     opcodes.insert("JR", 0b110111);
     opcodes.insert("CALL", 0b111000);
-    opcodes.insert("RET", 0b110010);
-    opcodes.insert("SYS", 0b111110);
+    opcodes.insert("RET", 0b010000);
+    opcodes.insert("SYS", 0b010010);
     opcodes.insert("RETU", 0b111101);
 
     //SPRs
@@ -263,7 +267,8 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-            "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" => {
+            "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" | "BGEU" | "BSEU" | "BGES"
+            | "BSES" => {
                 if tokens.len() > 1 {
                     let target = tokens[1].trim_start_matches('~');
                     if let Some(&label_addr) = labels.get(target) {
@@ -337,7 +342,8 @@ fn main() -> io::Result<()> {
 
         let machine_code: u32 = match instr.as_str() {
             "LMA" => ((opcode & 0x3F) << 26) | ((immediate as u32) & 0x03FF_FFFF),
-            "JMP" | "CALL" | "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" => {
+            "JMP" | "CALL" | "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" | "BGEU"
+            | "BSEU" | "BGES" | "BSES" => {
                 ((opcode & 0x3F) << 26) | (imm_u32 & 0x03FF_FFFF)
             }
             "SPRLDR" | "SPRSTR" | "SPRSET" | "SPRADD" | "SPRSUB" | "SPRLEA" => {
