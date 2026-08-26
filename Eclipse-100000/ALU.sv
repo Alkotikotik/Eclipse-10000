@@ -19,6 +19,7 @@ module ALU (
 
     /* verilator lint_off UNUSEDSIGNAL */
     logic [32:0] ext_result;
+    logic [32:0] ext8, ext16;
     logic is_sub_op;
     /* verilator lint_on UNUSEDSIGNAL */
 
@@ -73,6 +74,10 @@ module ALU (
         endcase
     end
 
+    //So previosly comparing sub-registers wouldn't work so I gotta fix it
+    assign ext8  = is_sub_op ? ({25'b0, x[7:0]}  + {25'b0, ~y[7:0]}  + 33'd1) : ({25'b0, x[7:0]}  + {25'b0, y[7:0]});
+    assign ext16 = is_sub_op ? ({17'b0, x[15:0]} + {17'b0, ~y[15:0]} + 33'd1) : ({17'b0, x[15:0]} + {17'b0, y[15:0]});
+
     always_comb begin
         if (is_sub_op) begin
             ext_result = {1'b0, x} + {1'b0, ~y} + 33'd1;
@@ -82,7 +87,7 @@ module ALU (
 
         unique case (op_size)
             3'b011, 3'b100, 3'b101, 3'b110: begin //rz
-                CarryFlag    = ext_result[8];
+                CarryFlag    = ext8[8];
                 ZeroFlag     = (result[7:0] == 8'b0);
                 NegativeFlag = result[7];
                 if (is_sub_op) begin
@@ -92,7 +97,7 @@ module ALU (
                 end
             end
             3'b001, 3'b010: begin //ry
-                CarryFlag    = ext_result[16];
+                CarryFlag    = ext16[16];
                 ZeroFlag     = (result[15:0] == 16'b0);
                 NegativeFlag = result[15];
                 if (is_sub_op) begin

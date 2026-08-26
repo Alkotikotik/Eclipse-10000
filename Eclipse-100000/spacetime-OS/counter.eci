@@ -2082,41 +2082,64 @@
 	SPRSUB rx31 ->SP<- 5
 	SPRLEA rx30 <- [LR 0]
 	SPRSTR rx30 -> [SP 1]
-	LOAD rz270 <- 0
-	LOAD rx28 <- 0
+	LOAD rz283 <- 0
+	LOAD rx27 <- 0
 	LOAD rx30 <- 0
 	SPRSTR rx30 -> [SP 0]
 	XOR [rx30, rx30 0]
+	LOAD rz282 <- 0
+	LOAD ry260 <- 1
+	LOAD ry280 <- 8
 
 ~Lab_while_start_0:
-	ADD rx29 <- [rx28, rx31 1]
-	MOV rx28 <- rx29 0
+	ADD rx29 <- [rx27, rx31 1]
+	MOV rx27 <- rx29 0
 	SPRLEA rx29 <- [SP 0]
 	ADD rx29 <- [rx29, rx31 0]
-	STR rz270 -> [rx29 0]
-	LMA 2000000
-	CMP rx28 <-> [rx31, 0]
+	STR rz283 -> [rx29 0]
+	LMA 200000
+	CMP rx27 <-> [rx31, 0]
 	XOR [rx31, rx31 0]
 	BSEU -> ~Lab_endif_3
 
-	ADD rz290 <- [rz270, rx31 1]
-	MOV rz270 <- rz290 0
+	LOAD rx30 <- 15
+	MUL ry290 <- [ry260, rx30 0]
+	MOV ry260 <- ry290 0
+	LOAD rx27 <- 0
 	SPRLEA rx29 <- [SP 0]
-	PUSH <- rz270
-	PUSH <- rx28
-	LOAD ry00 <- 8
+	PUSH <- ry260
+	PUSH <- rz283
+	PUSH <- rx27
+	PUSH <- rz282
+	PUSH <- ry280
+	MOV ry00 <- ry280 0
 	LOAD ry01 <- 8
-	LOAD ry10 <- 65535
+	MOV ry10 <- ry260 0
 	LOAD ry11 <- 0
 	MOV rx2 <- rx29 0
 	LOAD rz30 <- 1
 	CALL kprintr
 
-	POP -> rx28
-	POP -> rz270
-	CMP rz270 <-> [rx31, 9]
-	BSEU -> ~Lab_endif_5
+	POP -> ry280
+	POP -> rz282
+	POP -> rx27
+	POP -> rz283
+	POP -> ry260
+	CMP rz283 <-> [rz282, 0]
+	BNE -> ~Lab_else_4
 
+	LOAD rz283 <- 0
+	ADD rz290 <- [rz282, rx31 1]
+	MOV rz282 <- rz290 0
+	LOAD rx30 <- 10
+	ADD ry290 <- [ry280, rx30 0]
+	MOV ry280 <- ry290 0
+	JMP -> ~Lab_endif_5
+
+
+~Lab_else_4:
+	ADD rz290 <- [rz283, rx31 1]
+	MOV rz283 <- rz290 0
 
 ~Lab_endif_5:
 

@@ -225,17 +225,27 @@ outline];
 
 
 func main(){
+    >_ Benchmark for branch predictor print 0-9
+    >_ No branch predictor(20.7MHz): 7.52, 7.70 7.33
     u8 counter0;
     u32 counter1;
     u8 char[1];
+    u8 prev_char;
+    u16 color = 1;
+    u16 x = 8;
     while [true] {
         counter1 = counter1 + 1;
         char[0] = counter0;
-        if [counter1 > 2000000]{
-            counter0 = counter0 + 1;
-            kprintr(8, 8, 0xFFFF, 0x0000, &char, 1);
-            if [counter0 > 9]{
+        if [counter1 > 200000]{
+            color = color * 0xF;
+            counter1 = 0;
+            kprintr(x, 8, color, 0x0000, &char, 1);
+            if [counter0 == prev_char]{
                 counter0 = 0;
+                prev_char = prev_char + 1;
+                x = x + 10;
+            } else {
+                counter0 = counter0 + 1;
             }
         }
     }
