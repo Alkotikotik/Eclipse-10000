@@ -226,7 +226,8 @@ outline];
 
 func main(){
     >_ Benchmark for branch predictor print 0-9
-    >_ No branch predictor(20.7MHz): 7.52, 7.70 7.33
+    >_ No branch predictor(20.7MHz): 7.52, 7.70 7.33. avg: 7.52
+    >_ Resolve uncond in IF: 6.63, 6.80, 6.76. avg:  6.73 - nice
     u8 counter0;
     u32 counter1;
     u8 char[1];

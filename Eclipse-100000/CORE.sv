@@ -12,12 +12,13 @@ module CORE(
     //Pipilined 5 cycle CU, I chose 5 cycles because its perfect balance
     //between clock speed, which is higher because of shorter critical path, and
     //penatly for mispredicted branch which is 2 cycles for regular branches
-    //and literally 0 for unconditional ones.
+    //and only 1 for unconditional ones.
 
-    //The estimated CPI is ~=1.05 considering average instruction split
+    //The estimated CPI is ~=1.25 considering average instruction split
     //obviosely varies by program being executed.
-    //That is about 2.7 times faster than my multi-cycle design(~= 2.9CPI) as
-    //well as higher estimated clock frequency due to shorter critical path.
+    //That is about 2.5 times faster than my multi-cycle design(~= 2.9CPI) as
+    //well as higher estimated clock frequency due to shorter critical path
+    //3 cycles per instruction to 2
     //====//
 
     logic  demolish;   //Removes current instructions on the branch misprediction/branch
@@ -25,7 +26,9 @@ module CORE(
     logic  bubble;   //for handling load-use hazard
     logic  [31:0] PC_target;
 
-    assign demolish  = PCWrite && isEX_valid;
+    assign demolish  = isEX_valid && PCWrite &&
+                        !(opcode == 6'b111111 || opcode == 6'b111000) &&
+                        !((opcode == 6'b010000 || opcode == 6'b111101) && (EX_early_target == PCNext));
     assign stall     = 0;
     assign bubble    = 0;
     assign PC_target = PCNext;
@@ -39,15 +42,23 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin
         if (reset) IF_PC <= 32'h0;
         else if(demolish) IF_PC <= PC_target;
-        else if(!stall) IF_PC <= IF_PC_plus4;
+        else if(!stall) IF_PC <= (instr_fetch_data[31:26]==6'b111111 || instr_fetch_data[31:26]==6'b111000 || instr_fetch_data[31:26]==6'b010000 || instr_fetch_data[31:26]==6'b111101) ? IF_redirect_target : IF_PC_plus4;
         else IF_PC <= IF_PC;
     end
 
     logic [31:0] instr_fetch_data; //from RAM's dedicated instruction port
 
+    //So unconditional branches: JMP, CALL, RET, RETU are immediately resolved
+    //in the IF stage, so no penatly for them whatsoever
+    logic [31:0] IF_redirect_target;
+    assign IF_redirect_target =
+        (instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000) ? (IF_PC + 32'd4 + {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]}) :
+        (instr_fetch_data[31:26] == 6'b111101) ? EPC : LR;
+
     //== That looks nice ==//
     //== Anyways ID(Instruction Decode) stage ==//
     logic [31:0] ID_PC, ID_IR; //Each stage gets into own IR and PC
+    logic [31:0] ID_early_target;
     logic        isID_valid;
 
     always_ff @(posedge clk or posedge reset) begin
@@ -56,6 +67,7 @@ module CORE(
         end else if (!stall) begin
             ID_PC <= IF_PC;
             ID_IR <= instr_fetch_data;
+            ID_early_target <= IF_redirect_target;
             isID_valid <= 1'b1;
         end
         //else: stall holds PC and IR as they are
@@ -77,6 +89,7 @@ module CORE(
     //== EX(Execute) ==//
     //A lot of things happen here, full enum in CU.sv
     logic [31:0] EX_PC, EX_IR;
+    logic [31:0] EX_early_target;
     logic isEX_valid;
 
     always_ff @(posedge clk or posedge reset) begin
@@ -85,6 +98,7 @@ module CORE(
         end else begin
             EX_PC <= ID_PC; //Handing instruction to the EX
             EX_IR <= ID_IR;
+            EX_early_target <= ID_early_target;
             isEX_valid <= isID_valid;
         end
     end
@@ -138,7 +152,7 @@ module CORE(
     logic       MEM_gpr_write;
     logic       MEM_kernel_mode;
     logic       isMEM_valid;
- 
+
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isMEM_valid <= 0;
