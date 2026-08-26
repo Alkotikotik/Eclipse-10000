@@ -12,13 +12,12 @@ module CORE(
     //Pipilined 5 cycle CU, I chose 5 cycles because its perfect balance
     //between clock speed, which is higher because of shorter critical path, and
     //penatly for mispredicted branch which is 2 cycles for regular branches
-    //and only 1 for unconditional ones.
+    //and literally 0 for unconditional ones.
 
-    //The estimated CPI is ~=1.25 considering average instruction split
+    //The estimated CPI is ~=1.05 considering average instruction split
     //obviosely varies by program being executed.
-    //That is about 2.5 times faster than my multi-cycle design(~= 2.9CPI) as
-    //well as higher estimated clock frequency due to shorter critical path
-    //3 cycles per instruction to 2
+    //That is about 2.7 times faster than my multi-cycle design(~= 2.9CPI) as
+    //well as higher estimated clock frequency due to shorter critical path.
     //====//
 
     logic  demolish;   //Removes current instructions on the branch misprediction/branch

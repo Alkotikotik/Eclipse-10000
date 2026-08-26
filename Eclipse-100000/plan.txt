@@ -1,4 +1,4 @@
-[/]Static branch prediction - BTFNT
+[-]Dynamic branch prediction
 [/]SPARC style LR shifting
 [/]Resolve unconditional branching in ID
 [/]L1 cache, data/instruction as well as WB cache with similar to forwarding mechanism
@@ -6,7 +6,7 @@
 [/]Add multi-core
 [/]Switch to 1024x600 display
 
-[~] Variable sized instructions
+[~] Variable sized instructions using branching opcodes with imm26
 
 
 Verilator commands: 
