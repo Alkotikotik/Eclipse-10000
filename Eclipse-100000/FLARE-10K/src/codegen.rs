@@ -2021,14 +2021,9 @@ impl<'a> Codegen<'a> {
         }
 
         let r_op = if is_const(right) {
-            let target = if used_rx30 { rx31_reg() } else { rx30_reg() };
-            load_const(target, const_val(right), out);
-            if target.id == 31 {
-                used_rx31 = true;
-            } else {
-                used_rx30 = true;
-            }
-            reg_op(target)
+            load_const(rx31_reg(), const_val(right), out);
+            used_rx31 = true;
+            rx31()
         } else {
             self.operand_to_asm(right)
         };
