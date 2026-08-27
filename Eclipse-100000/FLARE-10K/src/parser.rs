@@ -422,6 +422,9 @@ impl<'a> Parser<'a> {
         while let Some(&(ref token, _, _)) = self.tokens.peek() {
             match token {
                 Token::Add => {
+                    if matches!(self.peek_two(), Some(Token::Equal) | Some(Token::Add)) {
+                        break;
+                    }
                     self.advance();
                     let right = self.parse_factor();
 
@@ -432,6 +435,9 @@ impl<'a> Parser<'a> {
                     };
                 }
                 Token::Sub => {
+                    if matches!(self.peek_two(), Some(Token::Equal) | Some(Token::Sub)) {
+                        break;
+                    }
                     self.advance();
                     let right = self.parse_factor();
 
@@ -599,9 +605,18 @@ impl<'a> Parser<'a> {
 
         let lhs = self.parse_equality();
 
-        if let Some(&(Token::Equal, _, _)) = self.tokens.peek() {
-            self.advance();
+        let is_assign = match self.tokens.peek() {
+            Some(&(Token::Equal | Token::MulEq | Token::DivEq, _, _)) => true,
+            Some(&(Token::Add, _, _)) => {
+                matches!(self.peek_two(), Some(Token::Equal) | Some(Token::Add))
+            }
+            Some(&(Token::Sub, _, _)) => {
+                matches!(self.peek_two(), Some(Token::Equal) | Some(Token::Sub))
+            }
+            _ => false,
+        };
 
+        if is_assign {
             match &lhs {
                 Expr::Identifier(_)
                 | Expr::Deref(_)
@@ -613,8 +628,51 @@ impl<'a> Parser<'a> {
                 ),
             }
 
-            //Recursively to allow val=val1=5
-            let rhs = self.parse_assign();
+            let rhs = match self.advance() {
+                //Alright so my idea is not making specific AddEq and SubEq tokens because I can
+                //just do this, i don't feel like explaining so just read the code
+                Token::Add => {
+                    let right = match self.advance() {
+                        Token::Equal => self.parse_assign(),
+                        _ => Expr::IntLiteral(1),
+                    };
+                    Expr::Binary {
+                        left: Box::new(lhs.clone()),
+                        op: BinaryOpKind::Add,
+                        right: Box::new(right),
+                    }
+                }
+                Token::Sub => {
+                    let right = match self.advance() {
+                        Token::Equal => self.parse_assign(),
+                        _ => Expr::IntLiteral(1),
+                    };
+                    Expr::Binary {
+                        left: Box::new(lhs.clone()),
+                        op: BinaryOpKind::Sub,
+                        right: Box::new(right),
+                    }
+                }
+                Token::MulEq => {
+                    Expr::Binary {
+                        left: Box::new(lhs.clone()),
+                        op: BinaryOpKind::Mul,
+                        right: Box::new(self.parse_assign()),
+                    }
+                }
+                Token::DivEq => {
+                    Expr::Binary {
+                        left: Box::new(lhs.clone()),
+                        op: BinaryOpKind::Div,
+                        right: Box::new(self.parse_assign()),
+                    }
+                }
+                Token::Equal => {
+                    //Recursively to allow val=val1=5
+                    self.parse_assign()
+                }
+                other => panic!("Invalid assigment, expected =, +=, -=, *= or /=, but instead got: {:?}", other),
+            };
 
             Expr::Assign {
                 lhs: Box::new(lhs),

@@ -37,8 +37,10 @@ pub enum Token {
     Add,
     Sub,
     Asterix,
+    MulEq,
     Dot,
     Div,
+    DivEq,
     Percent,
     Comma,
     Colon,
@@ -264,8 +266,22 @@ impl<'a> Iterator for Lexer<'a> {
             ';' => Token::Semicolon,
             '+' => Token::Add,
             '-' => Token::Sub,
-            '*' => Token::Asterix,
-            '/' => Token::Div,
+            '*' => {
+                if self.peek() == Some(&'=') {
+                    self.advance();
+                    Token::MulEq
+                } else {
+                    Token::Asterix
+                }
+            }
+            '/' => {
+                if self.peek() == Some(&'=') {
+                    self.advance();
+                    Token::DivEq
+                } else {
+                    Token::Div
+                }
+            }
             '%' => Token::Percent,
             '.' => Token::Dot,
             '^' => Token::Hat,

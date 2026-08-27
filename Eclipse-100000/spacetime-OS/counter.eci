@@ -2088,7 +2088,7 @@
 	SPRSTR rx30 -> [SP 0]
 	XOR [rx30, rx30 0]
 	LOAD rz282 <- 0
-	LOAD ry260 <- 1
+	LOAD ry260 <- 65535
 	LOAD ry280 <- 8
 
 ~Lab_while_start_0:
