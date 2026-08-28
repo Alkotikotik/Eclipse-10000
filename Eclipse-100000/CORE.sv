@@ -36,7 +36,7 @@ module CORE(
 
     assign stall     = 0;
     assign bubble    = 0;
-    assign PC_target = (is_EX_cond_branch && !was_branch_taken) ? (EX_PC + 32'd4) : PCNext;
+    assign PC_target = (is_EX_cond_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + 32'd4) : PCNext;
 
     //== IF(Instruction Fetch) ==//
     logic [31:0] IF_PC;
