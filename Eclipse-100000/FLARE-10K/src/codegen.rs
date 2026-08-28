@@ -1363,6 +1363,15 @@ impl<'a> Codegen<'a> {
         let mut sorted_nodes: Vec<&IROperand> = graph.adjacent.keys().collect();
         sorted_nodes.sort();
 
+        let mut defs: HashMap<IROperand, &IRInst> = HashMap::new();
+        for block in &self.cfg {
+            for inst in &block.body {
+                for def in inst.kills() {
+                    defs.entry(def).or_insert(inst);
+                }
+            }
+        }
+
         let mut ids: HashMap<&IROperand, usize> = HashMap::new();
         let mut nodes = Vec::with_capacity(sorted_nodes.len());
         for (i, node) in sorted_nodes.iter().enumerate() {
@@ -1381,8 +1390,15 @@ impl<'a> Codegen<'a> {
                 Some(Location::StackOffset(_)) => crate::viz::Slot::Spilled,
                 None => crate::viz::Slot::Unassigned,
             };
+            let detail = match node {
+                IROperand::Temp(_) => defs
+                    .get(*node)
+                    .and_then(|inst| crate::viz::describe_def(inst)),
+                _ => None,
+            };
             nodes.push(crate::viz::GraphNode {
                 label: format!("{:?}", node),
+                detail,
                 slot,
             });
         }

@@ -207,6 +207,13 @@ pub struct IR {
     local_frame_size: usize,
 }
 
+//Alright yall same goes for all pre-codegen files I didn't know how and why to write comments at a
+//time hence I just didn't do it much, and yeah so im not gonna comment allat from the start.
+//The thing is though, no one's gonna read ts anyways, not my comments, not my code. Yeah im just
+//writing this all for fun including comments, and primarly code of course. But if you are actually
+//somehow reading this - well thanks ig. Yeah I do understand that like actually no one apart
+//from my mom and dad cares about my projects, but honestly im fine and happy with that - im just writing
+//this for fun.
 pub fn get_type_align(ty: &Type, structs: &HashMap<String, StructDef>) -> usize {
     match ty {
         Type::U8 | Type::I8 | Type::Bool => 1,
