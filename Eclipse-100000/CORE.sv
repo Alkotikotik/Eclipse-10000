@@ -15,7 +15,7 @@ module CORE(
     //and literally 0 for unconditional ones. The penalty is 0 for correctly
     //predicted ones though
 
-    //The estimated CPI is ~=1.04 considering average instruction split
+    //The estimated CPI is ~=1.02-1.08 considering average instruction split
     //obviosely varies by program being executed.
     //That is about 2.8 times faster than my multi-cycle design(~= 2.9CPI) as
     //well as higher estimated clock frequency due to shorter critical path

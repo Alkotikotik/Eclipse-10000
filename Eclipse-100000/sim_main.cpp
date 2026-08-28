@@ -24,6 +24,24 @@ static volatile std::sig_atomic_t g_stop = 0;
 void handle_sigint(int) { g_stop = 1; }
 uint8_t sdl_scancode_to_charset(SDL_Scancode sc);
 
+// CPI counter
+static uint64_t g_total_cycles = 0;
+static uint64_t g_retired_instructions = 0;
+static uint64_t g_cond_branches = 0;
+static uint64_t g_branch_mispredicts = 0;
+
+static inline double current_cpi() {
+    return g_retired_instructions
+               ? static_cast<double>(g_total_cycles) / static_cast<double>(g_retired_instructions)
+               : 0.0;
+}
+
+static inline double current_mispredict_pct() {
+    return g_cond_branches ? 100.0 * static_cast<double>(g_branch_mispredicts) /
+                                 static_cast<double>(g_cond_branches)
+                           : 0.0;
+}
+
 int main(int argc, char **argv) {
     std::signal(SIGINT, handle_sigint);
     bool shift_held = false;
@@ -87,6 +105,21 @@ int main(int argc, char **argv) {
                     vram_dirty = true;
                 }
             }
+
+            //== CPI sampling, right after the posedge settles ==//
+            g_total_cycles++;
+            if (top->rootp->CORE__DOT__isWB_valid) {
+                g_retired_instructions++;
+            }
+            if (top->rootp->CORE__DOT__isEX_valid && top->rootp->CORE__DOT__is_EX_cond_branch) {
+                g_cond_branches++;
+                bool predicted_taken = top->rootp->CORE__DOT__EX_predicted_taken;
+                bool actually_taken = top->rootp->CORE__DOT__was_branch_taken;
+                if (predicted_taken != actually_taken) {
+                    g_branch_mispredicts++;
+                }
+            }
+
             cycles_last_second++;
         }
 
@@ -134,7 +167,8 @@ int main(int argc, char **argv) {
         if (std::chrono::duration_cast<std::chrono::seconds>(now - last_mhz_report).count() >= 1) {
             double mhz = static_cast<double>(cycles_last_second) / 1'000'000.0;
             std::cout << "[PERF] Speed: " << mhz << " MHz | Rendering: " << frames_last_second
-                      << " FPS" << std::endl;
+                      << " FPS | CPI: " << current_cpi()
+                      << " | Branch mispredict: " << current_mispredict_pct() << "%" << std::endl;
 
             cycles_last_second = 0;
             frames_last_second = 0;
@@ -146,6 +180,14 @@ int main(int argc, char **argv) {
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
+
+    std::cout << "\n--- PERFORMANCE SUMMARY ---" << std::endl;
+    std::cout << "Total cycles:          " << g_total_cycles << std::endl;
+    std::cout << "Retired instructions:  " << g_retired_instructions << std::endl;
+    std::cout << "CPI:                   " << current_cpi() << std::endl;
+    std::cout << "Conditional branches:  " << g_cond_branches << std::endl;
+    std::cout << "Mispredicts:           " << g_branch_mispredicts << " ("
+              << current_mispredict_pct() << "%)" << std::endl;
 
     std::cout << "\n--- VRAM DUMP ---" << std::endl;
     for (uint32_t vram_offset = 0; vram_offset <= 0x2000; vram_offset += 4) {
