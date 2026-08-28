@@ -9,6 +9,9 @@
 #include <memory>
 #include <vector>
 
+#include <iomanip>
+#include <sstream>
+
 constexpr int INTERNAL_WIDTH = 640;
 constexpr int INTERNAL_HEIGHT = 480;
 constexpr uint32_t VRAM_SIZE = INTERNAL_WIDTH * INTERNAL_HEIGHT * 2; // RGBA4444
@@ -166,10 +169,15 @@ int main(int argc, char **argv) {
 
         if (std::chrono::duration_cast<std::chrono::seconds>(now - last_mhz_report).count() >= 1) {
             double mhz = static_cast<double>(cycles_last_second) / 1'000'000.0;
-            std::cout << "[PERF] Speed: " << mhz << " MHz | Rendering: " << frames_last_second
-                      << " FPS | CPI: " << current_cpi()
-                      << " | Branch mispredict: " << current_mispredict_pct() << "%" << std::endl;
 
+            std::ostringstream mhz_str;
+            mhz_str << std::fixed << std::setprecision(2) << mhz;
+
+            std::cout << "[PERF] Speed: " << mhz_str.str()
+                      << " MHz | Rendering: " << frames_last_second
+                      << " FPS | CPI: " << current_cpi()
+                      << " | Predictor accurracy: " << (100 - current_mispredict_pct()) << "%"
+                      << std::endl;
             cycles_last_second = 0;
             frames_last_second = 0;
             last_mhz_report = now;
