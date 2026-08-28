@@ -12,13 +12,14 @@ module CORE(
     //Pipilined 5 cycle CPU, I chose 5 cycles because its perfect balance
     //between clock speed, which is higher because of shorter critical path, and
     //penatly for mispredicted branch which is 2 cycles for regular branches
-    //and only 1 for unconditional ones.
+    //and literally 0 for unconditional ones. The penalty is 0 for correctly
+    //predicted ones though
 
-    //The estimated CPI is ~=1.25 considering average instruction split
+    //The estimated CPI is ~=1.04 considering average instruction split
     //obviosely varies by program being executed.
-    //That is about 2.5 times faster than my multi-cycle design(~= 2.9CPI) as
+    //That is about 2.8 times faster than my multi-cycle design(~= 2.9CPI) as
     //well as higher estimated clock frequency due to shorter critical path
-    //3 cycles per instruction to 2
+    //3 cycles per instruction to 5
     //====//
 
     logic  demolish;   //Removes current instructions on the branch misprediction/branch
@@ -26,12 +27,16 @@ module CORE(
     logic  bubble;   //for handling load-use hazard
     logic  [31:0] PC_target;
 
-    assign demolish  = isEX_valid && PCWrite &&
+    assign demolish  =  isEX_valid &&
+                        ((PCWrite &&
                         !(opcode == 6'b111111 || opcode == 6'b111000) &&
-                        !((opcode == 6'b010000 || opcode == 6'b111101) && (EX_early_target == PCNext));
+                        !((opcode == 6'b010000 || opcode == 6'b111101) && (EX_early_target == PCNext)) &&
+                        !(is_EX_cond_branch && EX_predicted_taken)) ||
+                        (is_EX_cond_branch && (EX_predicted_taken != was_branch_taken)));
+
     assign stall     = 0;
     assign bubble    = 0;
-    assign PC_target = PCNext;
+    assign PC_target = (is_EX_cond_branch && !was_branch_taken) ? (EX_PC + 32'd4) : PCNext;
 
     //== IF(Instruction Fetch) ==//
     logic [31:0] IF_PC;
@@ -39,11 +44,14 @@ module CORE(
 
     assign IF_PC_plus4 = IF_PC + 32'h4;  //Computing it here dynamically
 
+    logic [31:0] IF_PC_next;
+    assign IF_PC_next = (instr_fetch_data[31:26]==6'b111111 || instr_fetch_data[31:26]==6'b111000 || instr_fetch_data[31:26]==6'b010000 || instr_fetch_data[31:26]==6'b111101 || IF_predicted_taken) ? IF_redirect_target : IF_PC_plus4;
+
     always_ff @(posedge clk or posedge reset) begin
         if (reset) IF_PC <= 32'h0;
         else if(demolish) IF_PC <= PC_target;
-        else if(!stall) IF_PC <= (instr_fetch_data[31:26]==6'b111111 || instr_fetch_data[31:26]==6'b111000 || instr_fetch_data[31:26]==6'b010000 || instr_fetch_data[31:26]==6'b111101) ? IF_redirect_target : IF_PC_plus4;
-        else IF_PC <= IF_PC;
+        else if(!stall) IF_PC <= IF_PC_next;
+        else IF_PC <= IF_PC; //I just can't omit it
     end
 
     logic [31:0] instr_fetch_data; //from RAM's dedicated instruction port
@@ -52,29 +60,104 @@ module CORE(
     //in the IF stage, so no penatly for them whatsoever
     logic [31:0] IF_redirect_target;
     assign IF_redirect_target =
-        (instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000) ? (IF_PC + 32'd4 + {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]}) :
+        (instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000 || IF_predicted_taken) ? (IF_PC + 32'd4 + {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]}) :
         (instr_fetch_data[31:26] == 6'b111101) ? EPC : LR;
 
     //== Branch prediction ==//
-    //My implementation of gshare branch predictor
-    //
-    //PHT - pattern history table a 1KB BRAM memory for each of recent
-    //branches holding 2 bit saturating counter with maximum of 4096 branch
-    //instructions which is plently
+    //My implementation of gshare branch predictor, source McFalring's 1991 paper
+
+    //Idk who I explain it to but I just want to explain gshare branch predictor.
+    //So Basically all branch predictors work on one main principle - branches
+    //tends to do the same thing they did last time, so if it was taken last time - chances are it will ba taken this time
+    //So we just make a bigass table of all recent branches with saturating counters of 2 bits. Why 2 bits -
+    //well there are occasionally anomalous results and 2 bit counter handles
+    //them much better than 1 bit one.
+    //Except I kinda lied - branches tends to follow the pattern not just
+    //based on what they did last time, but what pattern of previous branches
+    //led to it. This is actually beatiful, take a look at my render.flar
+    //program, branches follow a strict pattern based on phase, that pattern
+    //could be captured by gshare allowing for nearly 100% accuracy after
+    //a couple of training iterations
+    //The GHR is this exact register that holds outputs of previous branches,
+    //xoring it with pht_idx gives us different address every time output of
+    //previous branches is different.
+
+    //PHT - pattern history table 1KB of BRAM. It actually doesn't store
+    //saturing counters for each branch, it just stores saturating counters
+    //without any inherit meaning associated with them.
     logic [1:0] PHT [0:4095];
 
     //GHR - Global history register 12 bits because its just enough to address
     //all 1KB
     logic [11:0] GHR;
 
-    logic [11:0] pht_index;
-    assign pht_index = instr_fetch_data[13:2] ^ GHR; //Last 12 bits of imm26 13:2 because last two bits are always 0 since labels are 4 byte aligned
+    logic [11:0] pht_read_idx;
+    //Last 12 bits of imm26 13:2 because last two bits are always 0 since labels are 4 byte aligned
+    //IF_PC_next because BRAM read happens on the next clock cycle to the request
+    assign pht_read_idx = IF_PC_next[13:2] ^ GHR;
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [1:0] pht_out; //Actual counter for particular branch, only lowest bit isn't really read
+    /* verilator lint_off UNUSEDSIGNAL */
+    always_ff @(posedge clk) begin
+        pht_out <= PHT[pht_read_idx];
+    end
+
+    logic  is_IF_cond_branch;
+    assign is_IF_cond_branch =  (instr_fetch_data[31:26] == 6'b110101) || (instr_fetch_data[31:26] == 6'b110011) ||
+                                (instr_fetch_data[31:26] == 6'b110110) || (instr_fetch_data[31:26] == 6'b110001) ||
+                                (instr_fetch_data[31:26] == 6'b111100) || (instr_fetch_data[31:26] == 6'b110100) ||
+                                (instr_fetch_data[31:26] == 6'b111001) || (instr_fetch_data[31:26] == 6'b110010) ||
+                                (instr_fetch_data[31:26] == 6'b111011) || (instr_fetch_data[31:26] == 6'b111010)  ;
+
+    logic  is_EX_cond_branch;
+    assign is_EX_cond_branch =  (opcode==6'b110101)||(opcode==6'b110011)||(opcode==6'b110110)||(opcode==6'b110001)||
+                                (opcode==6'b111100)||(opcode==6'b110100)||(opcode==6'b111001)||(opcode==6'b110010)||
+                                (opcode==6'b111011)||(opcode==6'b111010);
+
+    //We gotta check whether branch was actually taken or not
+    logic  was_branch_taken;
+    assign was_branch_taken = PCWrite && (PCSrc == 4'b0000);
+
+    //Simple table:
+    //00 || 01 - predict not taken
+    //10 || 11 - predict taken
+    logic  IF_predicted_taken;
+    assign IF_predicted_taken = is_IF_cond_branch && pht_out[1];
+
+    function automatic [1:0] updated_pht(input [1:0] prev_pht, input taken);
+        if (taken) begin
+            updated_pht = (prev_pht == 2'b11) ? 2'b11 : prev_pht + 2'b01;
+        end else begin
+            updated_pht = (prev_pht == 2'b00) ? 2'b00 : prev_pht - 2'b01;
+        end
+    endfunction
+
+    logic [11:0] pht_idx_r;
+    always_ff @(posedge clk) begin
+        pht_idx_r <= pht_read_idx;
+    end
+
+    //This all coming together
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            GHR <= 12'b0;
+            //Default is weakly taken simply because branches are usually taken
+            //then not, though if particular one isn't its just 1 time calibration
+            for (integer i = 0; i < 4096; i = i + 1) PHT[i] <= 2'b10;
+        end else if (isEX_valid && is_EX_cond_branch) begin
+            PHT[EX_pht_idx] <= updated_pht(PHT[EX_pht_idx], was_branch_taken);
+            GHR <= {GHR[10:0], was_branch_taken};
+        end
+    end
+
 
     //== That looks nice ==//
     //== Anyways ID(Instruction Decode) stage ==//
     logic [31:0] ID_PC, ID_IR; //Each stage gets into own IR and PC
     logic [31:0] ID_early_target;
     logic        isID_valid;
+    logic [11:0] ID_pht_idx;
+    logic        ID_predicted_taken;
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset || demolish) begin
@@ -84,6 +167,8 @@ module CORE(
             ID_IR <= instr_fetch_data;
             ID_early_target <= IF_redirect_target;
             isID_valid <= 1'b1;
+            ID_pht_idx <= pht_idx_r;
+            ID_predicted_taken <= IF_predicted_taken;
         end
         //else: stall holds PC and IR as they are
     end
@@ -105,6 +190,8 @@ module CORE(
     //A lot of things happen here, full enum in CU.sv
     logic [31:0] EX_PC, EX_IR;
     logic [31:0] EX_early_target;
+    logic [11:0] EX_pht_idx;
+    logic EX_predicted_taken;
     logic isEX_valid;
 
     always_ff @(posedge clk or posedge reset) begin
@@ -115,6 +202,8 @@ module CORE(
             EX_IR <= ID_IR;
             EX_early_target <= ID_early_target;
             isEX_valid <= isID_valid;
+            EX_pht_idx <= ID_pht_idx;
+            EX_predicted_taken <= ID_predicted_taken;
         end
     end
 
