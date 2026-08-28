@@ -36,7 +36,7 @@ J-Type (Massive Load / Direct Jumps)
 
 //Register
 Registers are fragmented, visual representation is in Fragmentation.svg file.
-Shortly, each 32-bit rx register is fragmented into 2 16-bit ry register and they are fragmented into 2 8-bit rz registers, thus each 32-bit register fragmented into 4 8-bit registers. Though they are the same register but the different parts of it.
+Shortly, each 32-bit rx register is fragmented into 2 16-bit ry register and they are fragmented into 2 8-bit rz registers, thus each 32-bit register fragmented into 4 8-bit registers. Though note: they are the same register but the different parts of it.
 Accessing them:
 rx21 full rx21 register
 ry211 higher 16bits of rx21
@@ -50,7 +50,7 @@ By default stack lives at 03FFFFF0
 //Opcodes
 ALU Instructions (R-Type)
 000100 : MOV    rx0, rx1
-001101 : HIMUL  rx0, (rx1 + imm10) //Unsigned, might very well be 0
+001101 : HIMUL  rx0, (rx1 + imm10) //imm10 Unsigned, might very well be 0
 000010 : XOR    rx0, (rx1 + imm10) (rx0 = rx0 XOR (rx1 + imm10))
 000110 : OR     rx0, (rx1 + imm10)
 001110 : AND    rx0, (rx1 + imm10)
@@ -61,7 +61,7 @@ ALU Instructions (R-Type)
 
 ALU Instructions (B-Type)
 //The imm2 is made specifically for "for loops" it supports +1, +2 and -1
-000001 : ADD    rx0, rx1, rx2 +- imm2 (rx0 = rx1 + (rx2 +- imm2)
+000001 : ADD    rx0, rx1, rx2 +- imm2 rx0 = rx1 + (rx2 +- imm2)
 000011 : SUB    rx0, rx1, rx2 +- imm2
 000111 : LOMUL  rx0, rx1, rx2 +- imm2
 000101 : DIV    rx0, rx1, rx2 +- imm2

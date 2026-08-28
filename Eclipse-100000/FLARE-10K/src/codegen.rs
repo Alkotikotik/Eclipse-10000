@@ -1367,14 +1367,23 @@ impl<'a> Codegen<'a> {
         let mut nodes = Vec::with_capacity(sorted_nodes.len());
         for (i, node) in sorted_nodes.iter().enumerate() {
             ids.insert(node, i);
-            let color = match self.allocations.get(*node) {
-                Some(Location::Register(reg)) => crate::viz::register_color(reg.id),
-                Some(Location::StackOffset(_)) => "#999999".to_string(),
-                None => "#cccccc".to_string(),
+            let slot = match self.allocations.get(*node) {
+                Some(Location::Register(reg)) => crate::viz::Slot::Register {
+                    name: reg.to_string(),
+                    base: reg.id,
+                    byte_lo: reg.sub_index,
+                    bytes: match reg.reg_type {
+                        RegType::B8 => 1,
+                        RegType::B16 => 2,
+                        RegType::B32 => 4,
+                    },
+                },
+                Some(Location::StackOffset(_)) => crate::viz::Slot::Spilled,
+                None => crate::viz::Slot::Unassigned,
             };
             nodes.push(crate::viz::GraphNode {
                 label: format!("{:?}", node),
-                color,
+                slot,
             });
         }
 

@@ -198,7 +198,7 @@ int main(int argc, char **argv) {
               << current_mispredict_pct() << "%)" << std::endl;
 
     std::cout << "\n--- VRAM DUMP ---" << std::endl;
-    for (uint32_t vram_offset = 0; vram_offset <= 0x2000; vram_offset += 4) {
+    for (uint32_t vram_offset = 0; vram_offset <= 0x200; vram_offset += 4) {
         uint32_t bus_addr = 0x04000000 + vram_offset;
         uint32_t word = vram_buffer[vram_offset + 0] | (vram_buffer[vram_offset + 1] << 8) |
                         (vram_buffer[vram_offset + 2] << 16) | (vram_buffer[vram_offset + 3] << 24);
