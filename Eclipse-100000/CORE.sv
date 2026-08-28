@@ -9,7 +9,7 @@ module CORE(
     output logic vram_write
 );
     //====//
-    //Pipilined 5 cycle CU, I chose 5 cycles because its perfect balance
+    //Pipilined 5 cycle CPU, I chose 5 cycles because its perfect balance
     //between clock speed, which is higher because of shorter critical path, and
     //penatly for mispredicted branch which is 2 cycles for regular branches
     //and only 1 for unconditional ones.
@@ -54,6 +54,21 @@ module CORE(
     assign IF_redirect_target =
         (instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000) ? (IF_PC + 32'd4 + {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]}) :
         (instr_fetch_data[31:26] == 6'b111101) ? EPC : LR;
+
+    //== Branch prediction ==//
+    //My implementation of gshare branch predictor
+    //
+    //PHT - pattern history table a 1KB BRAM memory for each of recent
+    //branches holding 2 bit saturating counter with maximum of 4096 branch
+    //instructions which is plently
+    logic [1:0] PHT [0:4095];
+
+    //GHR - Global history register 12 bits because its just enough to address
+    //all 1KB
+    logic [11:0] GHR;
+
+    logic [11:0] pht_index;
+    assign pht_index = instr_fetch_data[13:2] ^ GHR; //Last 12 bits of imm26 13:2 because last two bits are always 0 since labels are 4 byte aligned
 
     //== That looks nice ==//
     //== Anyways ID(Instruction Decode) stage ==//
