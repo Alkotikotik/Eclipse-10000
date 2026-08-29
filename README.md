@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> The README and the paper are heavily outdated
+
 # Eclipse-10000 & 100000 Stack [WIP]
 A complete computer system built from the ground up: from raw logic gates CPU and custom 32-bit SystemVerilog CPUs to an assembler, compiler, and relatively high-level programming language.
 
