@@ -188,6 +188,7 @@ module CORE(
                           ((gpr_rw0_sel == ID_rx0) || (gpr_rw0_sel == ID_rx1));
     /* verilator lint_on UNUSEDSIGNAL */
 
+
     //== EX(Execute) ==//
     //A lot of things happen here, full enum in CU.sv
     logic [31:0] EX_PC, EX_IR;
