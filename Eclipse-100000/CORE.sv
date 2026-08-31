@@ -60,8 +60,9 @@ module CORE(
     //in the IF stage, so no penatly for them whatsoever
     logic [31:0] IF_redirect_target;
     assign IF_redirect_target =
-        (instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000 || IF_predicted_taken) ? (IF_PC + 32'd4 + {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]}) :
-        (instr_fetch_data[31:26] == 6'b111101) ? EPC : LR;
+        (instr_fetch_data[31:26] == 6'b111101) ? EPC :   // RETU
+        (instr_fetch_data[31:26] == 6'b010000) ? LR  :   // RET
+        (IF_PC + 32'd4 + {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]});
 
     //== Branch prediction ==//
     //My implementation of gshare branch predictor, source McFalring's 1991 paper
@@ -178,10 +179,11 @@ module CORE(
     logic [7:0] ID_rx0, ID_rx1;
     assign ID_rx0 = ID_IR[25:18];
     assign ID_rx1 = ID_IR[17:10];
+    logic ID_wb_hit0, ID_wb_hit1;
 
     //For later when memory would take actual clock cycles to reach
     /* verilator lint_off UNUSEDSIGNAL */
-    logic load_use_hazard;
+    logic  load_use_hazard;
     assign load_use_hazard = isEX_valid && memRead && GPRsWrite &&
                           ((gpr_rw0_sel == ID_rx0) || (gpr_rw0_sel == ID_rx1));
     /* verilator lint_on UNUSEDSIGNAL */
@@ -392,10 +394,10 @@ module CORE(
     logic isKernelMode;
     logic mod_state;
 
-    logic [31:0] GPRs_data_out0;
-    logic [31:0] GPRs_data_out1;
+    logic [31:0] GPRs_data_out0, GPRs_data_out1;
+    logic [31:0] KGPR0, KGPR1;
     logic [31:0] GPRs_data_in;
-    logic [7:0] gpr_rw0_sel;
+    logic [7:0]  gpr_rw0_sel;
 
     logic [31:0] AluMuxX;
     logic [31:0] AluMuxY;
@@ -500,8 +502,8 @@ module CORE(
 
     always_comb begin
         unique case (PCSrc)
-            4'b0000: PCNext = AluResult;
-            4'b0001: PCNext = AluResult;
+            4'b0000: PCNext = EX_early_target;
+            4'b0001: PCNext = EX_early_target;
             4'b0011: PCNext = EPC;          // RETU
             4'b0101: PCNext = LR;           // RET
             4'b0010: PCNext = 32'h00000064; // Syscall Vector
@@ -509,7 +511,7 @@ module CORE(
             4'b1000: PCNext = 32'h0000006C; // Key Interrupt Vector
             4'b0110: PCNext = 32'h00000070; // Memory Protection Fault Vector
             4'b0111: PCNext = FWD_rx0; // JR
-            default: PCNext = AluResult;
+            default: PCNext = EX_early_target;
         endcase
         if (ZeroDivException) begin
             PCNext = 32'h00000074;
