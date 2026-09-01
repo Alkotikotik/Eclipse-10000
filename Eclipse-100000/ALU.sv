@@ -25,7 +25,11 @@ module ALU (
         mul_product <= x * y;
     end
 
-    //Basically had 5 adders, now only 1, somewhat big LUT save
+    //Basically I previosely had several reduntant adders and shifters, same
+    //results can be achieved with 1 shifter/adder and some really cool bit tricks.
+    //Im doing this purely for LUT savings, as far as im aware it has to impact on the worst
+    //critical path
+    //==Adder==//
     logic is_sub_op;
     assign is_sub_op = (opcode == 6'b000011 || opcode == 6'b110000);
     logic [31:0] add_y;
@@ -42,6 +46,29 @@ module ALU (
     logic [31:0] add_result;
     assign add_result = {add_s2[15:0], add_s1[7:0], add_s0[7:0]};
 
+    //==Barrel==// 
+    //A left shift is just a right shift with the bits flipped on both ends, and flipping is just writing,
+    //actually no LUTs involved
+    function automatic [31:0] rev32(input [31:0] v);
+        for (int i = 0; i < 32; i++) rev32[i] = v[31-i];
+    endfunction
+
+    logic is_shl, is_sra;
+    assign is_shl = (opcode == 6'b001000);
+    assign is_sra = (opcode == 6'b001010);
+
+    logic [31:0] sh_src;
+    logic        sh_fill;
+    assign sh_src  = is_shl ? rev32(x) : x;
+    assign sh_fill = is_sra & x[31];  //33rd bit carries the sign for SRA
+
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [32:0] sh_wide;
+    /* verilator lint_on UNUSEDSIGNAL */
+    assign sh_wide = $signed({sh_fill, sh_src}) >>> y[4:0];
+
+    logic [31:0] sh_result;
+    assign sh_result = is_shl ? rev32(sh_wide[31:0]) : sh_wide[31:0];
 
     //Doesn't care about clk
     always_comb begin
@@ -55,9 +82,9 @@ module ALU (
             6'b000110: result = x | y;
             6'b001110: result = x & y;
             6'b001111: result = ~x   ;
-            6'b001000: result = x << y[4:0]; //lower 5
-            6'b001100: result = x >> y[4:0];
-            6'b001010: result = $signed($signed(x) >>> y[4:0]); //Signed shift right iirc
+            6'b001000: result = sh_result; //SHL
+            6'b001100: result = sh_result; //SHR
+            6'b001010: result = sh_result; //SRA for singed shift right iirc
             6'b110000: result = add_result; //CMP
             6'b000100: result = y; //MOV
             //Replace later for FPGA

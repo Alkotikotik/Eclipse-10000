@@ -13,7 +13,7 @@ module CORE(
     //between clock speed, which is higher because of shorter critical path, and
     //penatly for mispredicted branch which is 2 cycles for regular branches
     //and literally 0 for unconditional ones. The penalty is 0 for correctly
-    //predicted ones though
+    //predicted ones too.
 
     //The estimated CPI is ~=1.02-1.08 considering average instruction split
     //obviosely varies by program being executed.
