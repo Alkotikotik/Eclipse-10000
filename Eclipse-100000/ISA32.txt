@@ -112,3 +112,23 @@ Jumps & Subroutines
 Privilege and Syscalls
 010010 : SYS             // System Call Exception
 111101 : RETU           // Return to User Mode from Exception
+
+Target board:
+On-Board FPGA: XC7A100T-1FGG676C;
+On-Board FPGA external crystal frequency: 50MHz;
+XC7A100T-1FGG676C has rich block RAM resource up to 4,860Kb;
+XC7A100T-1FGG676C has 101,440 logic cells;
+On-Board N25Q64A Micron SPI Flash, 8M bytes for user configuration code;
+On-Board 256MB Micron DDR3，MT41K128M16JT-125:K;
+On-Board 32MB Winbond SDRAM, W9825G6KH-6;
+On-Board power supply for FPGA by using TPS563201 wide input range DC/DC;
+XC7A100T Wukong board provides 4 PMOD compatible headers and 40P Male header for User IOs;
+XC7A100T Wukong board has 3 user switches;
+XC7A100T Wukong board has 4 user LEDs;
+XC7A100T Wukong board provides one Micro SD card slot;
+XC7A100T Wukong board has JTAG interface, by using 6p, 2.54mm pitch header;
+XC7A100T Wukong board provides GMII Ethernet by using RealTek RTL8211EG;
+XC7A100T Wukong board provides HDMI compatible display interface;
+XC7A100T Wukong board provides USB to UART serial port by using CH340N;
+XC7A100T Wukong board PCB size is: 9.96cm x 9.96cm;
+Default power source for board is: 2A@5V DC, the DC header type: DC-050, 5.5mmx2.1mm;

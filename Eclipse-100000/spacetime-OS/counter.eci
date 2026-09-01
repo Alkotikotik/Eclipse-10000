@@ -2097,7 +2097,9 @@
 	SPRLEA rx29 <- [SP 0]
 	ADD rx29 <- [rx29, rx31 0]
 	STR rz283 -> [rx29 0]
-	CMP rx27 <-> [rx31, 1]
+	LMA 200000
+	CMP rx27 <-> [rx31, 0]
+	XOR [rx31, rx31 0]
 	BSEU -> ~Lab_endif_3
 
 	LOAD rx30 <- 15

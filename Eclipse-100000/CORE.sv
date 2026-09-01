@@ -176,9 +176,13 @@ module CORE(
 
     //We need to compare those registers to EX's ones it case they
     //overlap - stall
-    logic [7:0] ID_rx0, ID_rx1;
+    //So the regfile read is moved to the ID, saves up on critical path and ID
+    //is almost empty anyways so I might as well fill it as much as possible
+    logic [7:0]  ID_rx0, ID_rx1; //Selector
+    logic [31:0] ID_rx0_val, ID_rx1_val;
     assign ID_rx0 = ID_IR[25:18];
     assign ID_rx1 = ID_IR[17:10];
+
     logic ID_wb_hit0, ID_wb_hit1;
 
     //For later when memory would take actual clock cycles to reach
@@ -194,6 +198,7 @@ module CORE(
     logic [31:0] EX_PC, EX_IR;
     logic [31:0] EX_early_target;
     logic [11:0] EX_pht_idx;
+    logic [31:0] EX_rx0_val, EX_rx1_val;
     logic EX_predicted_taken;
     logic isEX_valid;
 
@@ -203,6 +208,9 @@ module CORE(
         end else begin
             EX_PC <= ID_PC; //Handing instruction to the EX
             EX_IR <= ID_IR;
+            EX_rx0_val <= ID_rx0_val;
+            EX_rx1_val <= ID_rx1_val;
+
             EX_early_target <= ID_early_target;
             isEX_valid <= isID_valid;
             EX_pht_idx <= ID_pht_idx;
@@ -212,9 +220,7 @@ module CORE(
 
     //====//
     logic [5:0] opcode;
-    logic [7:0] rx0;
-    logic [7:0] rx1;
-    logic [7:0] rx2;
+    logic [7:0] rx0, rx1, rx2;
     logic [11:0] immediate;
     logic [31:0] j_imm_signed;
 
@@ -347,17 +353,38 @@ module CORE(
         endcase
     endfunction
 
+    //Reading one cycle earier - introduces the similar hazard to when it was
+    //in EX just gotta expand on that 1 cycle more.
+    logic  wb_writes_array;
+    assign wb_writes_array = isWB_valid && WB_gpr_write &&
+                             !(WB_gpr_dest[7:3] <= 5'd1 && WB_kernel_mode);
+    assign ID_wb_hit0 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx0[7:3]);
+    assign ID_wb_hit1 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx1[7:3]);
+
+    always_comb begin
+        ID_rx0_val = ID_wb_hit0 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out0, WB_result) : GPRs_data_out0;
+        ID_rx1_val = ID_wb_hit1 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out1, WB_result) : GPRs_data_out1;
+    end
+
+    //So at ID we don't know if instruction should be executed in kernel mode
+    //yet, so we always just get the KGPRs and then in EX deduce whether we
+    //use GPRs or KGPRs
+    logic [31:0] EX_gpr0, EX_gpr1;
+    assign EX_gpr0 = (rx0[7:3] <= 5'd1 && KernelMode) ? (rx0[3] ? KGPR1 : KGPR0) : EX_rx0_val;
+    assign EX_gpr1 = (rx1[7:3] <= 5'd1 && KernelMode) ? (rx1[3] ? KGPR1 : KGPR0) : EX_rx1_val;
+
+
     //Here automatic comes in play, function gets called more than ones in
     //always_comb block so its neccessery
     always_comb begin
-        FWD_rx0 = GPRs_data_out0;
+        FWD_rx0 = EX_gpr0;
         if (WB_fwd0)  FWD_rx0 = fwd_merge(WB_gpr_dest[2:0],  FWD_rx0, WB_result);
         if (MEM_fwd0) FWD_rx0 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx0, MEM_result);
         FWD_rx0 = fwd_slice(rx0[2:0], FWD_rx0);
     end
 
     always_comb begin
-        FWD_rx1 = GPRs_data_out1;
+        FWD_rx1 = EX_gpr1;
         if (WB_fwd1)  FWD_rx1 = fwd_merge(WB_gpr_dest[2:0],  FWD_rx1, WB_result);
         if (MEM_fwd1) FWD_rx1 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx1, MEM_result);
         FWD_rx1 = fwd_slice(rx1[2:0], FWD_rx1);
@@ -709,16 +736,18 @@ module CORE(
         .clk(clk),
         .reset(reset),
         .reg_write(WB_gpr_write && isWB_valid),
-        .KernelModeRead(KernelMode),
         .KernelModeWrite(WB_kernel_mode),
         //offset forced to 000 so these come back as the raw 32bit register,
         //the forwarding block above does the slicing after it merges
-        .rr0({rx0[7:3], 3'b000}),
-        .rr1({rx1[7:3], 3'b000}),
+        //Again - read in ID
+        .rr0(ID_rx0[7:3]),
+        .rr1(ID_rx1[7:3]),
         .rw0(WB_gpr_dest),
         .data_in(WB_result),
         .data_out0(GPRs_data_out0),
-        .data_out1(GPRs_data_out1)
+        .data_out1(GPRs_data_out1),
+        .KGPR0(KGPR0),
+        .KGPR1(KGPR1)
     );
 
     RAM system_ram (

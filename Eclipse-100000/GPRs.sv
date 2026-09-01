@@ -21,10 +21,16 @@ module GPRs (
     //Alright so I completely rewrote the GPRs file so it would go to the
     //LUTRAM of FPGA because its a massive LUT save bc there wouldn't be thing
     //horrible 32:1 mux
-    (* ram_style = "distributed" *) logic [7:0] gpr0 [0:31];
-    (* ram_style = "distributed" *) logic [7:0] gpr1 [0:31];
-    (* ram_style = "distributed" *) logic [7:0] gpr2 [0:31];
-    (* ram_style = "distributed" *) logic [7:0] gpr3 [0:31];
+    //"distributed" literally means LUTRAM
+    //Alright so I split it into 4 lanes because of fragmented registers
+    //- previosely if im writing to sub-register I had to read the consents of
+    //every other fragmented part that im not writing it, to then write that
+    //data back so nothing would change. Now I can just write to lanes hence
+    //write wouldn't include any read and its nice.
+    (* ram_style = "distributed" *) logic [7:0] gpr0 [0:31];//rz0
+    (* ram_style = "distributed" *) logic [7:0] gpr1 [0:31];//rz1
+    (* ram_style = "distributed" *) logic [7:0] gpr2 [0:31];//rz2
+    (* ram_style = "distributed" *) logic [7:0] gpr3 [0:31];//rz3
 
     logic [31:0] KGPRs [1:0]; //banked copies of rx0 and rx1
 
