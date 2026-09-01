@@ -266,6 +266,8 @@ module CORE(
     logic       MEM_kernel_mode;
     logic       isMEM_valid;
 
+    logic MEM_is_lomul, MEM_is_himul;
+
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isMEM_valid <= 0;
@@ -275,7 +277,17 @@ module CORE(
             MEM_gpr_dest    <= gpr_rw0_sel;
             MEM_kernel_mode <= KernelMode; // mode as of THIS instruction's own EX cycle
             isMEM_valid     <= isEX_valid;
+            MEM_is_lomul    <= (opcode == 6'b000111);
+            MEM_is_himul    <= (opcode == 6'b001101);
         end
+    end
+
+    //Specifically for mul
+    logic [31:0] MEM_val;
+    always_comb begin
+        if (MEM_is_lomul) MEM_val = mul_product[31:0];
+        else if (MEM_is_himul) MEM_val = mul_product[63:32];
+        else MEM_val = MEM_result;
     end
 
 
@@ -291,7 +303,7 @@ module CORE(
         if (reset) begin
             isWB_valid <= 0;
         end else begin
-            WB_result<= MEM_result;
+            WB_result<= MEM_val;
             isWB_valid <= isMEM_valid;
             WB_gpr_dest <= MEM_gpr_dest;
             WB_gpr_write <= MEM_gpr_write;
@@ -379,14 +391,14 @@ module CORE(
     always_comb begin
         FWD_rx0 = EX_gpr0;
         if (WB_fwd0)  FWD_rx0 = fwd_merge(WB_gpr_dest[2:0],  FWD_rx0, WB_result);
-        if (MEM_fwd0) FWD_rx0 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx0, MEM_result);
+        if (MEM_fwd0) FWD_rx0 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx0, MEM_val);
         FWD_rx0 = fwd_slice(rx0[2:0], FWD_rx0);
     end
 
     always_comb begin
         FWD_rx1 = EX_gpr1;
         if (WB_fwd1)  FWD_rx1 = fwd_merge(WB_gpr_dest[2:0],  FWD_rx1, WB_result);
-        if (MEM_fwd1) FWD_rx1 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx1, MEM_result);
+        if (MEM_fwd1) FWD_rx1 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx1, MEM_val);
         FWD_rx1 = fwd_slice(rx1[2:0], FWD_rx1);
     end
 
@@ -430,6 +442,7 @@ module CORE(
     logic [31:0] AluMuxX;
     logic [31:0] AluMuxY;
     logic [31:0] AluResult;
+    logic [63:0] mul_product;
     logic [1:0] aluOpSel;
     logic [5:0] AluOpcode;
     logic flagsWrite;
@@ -719,11 +732,15 @@ module CORE(
     );
 
     ALU cpu_alu (
+        .clk(clk),
         .x(AluMuxX),
         .y(AluMuxY),
         .opcode(AluOpcode),
         .op_size(rx0[2:0]),
+
         .result(AluResult),
+        .mul_product(mul_product),
+
         .OverflowFlag(OverflowFlag),
         .CarryFlag(CarryFlag),
         .NegativeFlag(NegativeFlag),
