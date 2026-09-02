@@ -18,7 +18,6 @@ constexpr uint32_t VRAM_SIZE = INTERNAL_WIDTH * INTERNAL_HEIGHT * 2; // RGBA4444
 constexpr int WINDOW_WIDTH = 1920;
 constexpr int WINDOW_HEIGHT = 1080;
 
-static std::vector<uint8_t> vram_buffer(1024 * 1024, 0);
 
 static volatile std::sig_atomic_t g_stop = 0;
 void handle_sigint(int) { g_stop = 1; }
@@ -51,6 +50,10 @@ int main(int argc, char **argv) {
     Verilated::traceEverOn(true);
 
     auto top = std::make_unique<VCORE>();
+
+    // VRAM lives in the RTL now, point straight at it instead of
+    // mirroring writes, that way byte enables are honoured for free
+    uint8_t *vram_buffer = &top->rootp->CORE__DOT__system_vram__DOT__vramm[0];
     auto tfp = std::make_unique<VerilatedFstC>();
 
     top->trace(tfp.get(), 99);
@@ -102,13 +105,7 @@ int main(int argc, char **argv) {
 
             // Capture VRAM writes
             if (top->vram_write) [[unlikely]] {
-                uint32_t addr = top->vram_addr;
-                uint32_t data = top->vram_data_out;
-
-                if (addr < vram_buffer.size() - 3) {
-                    *reinterpret_cast<uint32_t *>(&vram_buffer[addr]) = data;
-                    vram_dirty = true;
-                }
+                vram_dirty = true;
             }
         }
 
@@ -132,7 +129,7 @@ int main(int argc, char **argv) {
                 void *pixels;
                 int pitch;
                 SDL_LockTexture(texture, NULL, &pixels, &pitch);
-                std::memcpy(pixels, vram_buffer.data(), VRAM_SIZE);
+                std::memcpy(pixels, vram_buffer, VRAM_SIZE);
                 SDL_UnlockTexture(texture);
                 vram_dirty = false;
             }

@@ -21,7 +21,6 @@ constexpr int WINDOW_HEIGHT = 1080;
 
 constexpr int SIM_BATCH_CYCLES = 50000;
 
-static std::vector<uint8_t> vram_buffer(1024 * 1024, 0);
 
 static volatile std::sig_atomic_t g_stop = 0;
 void handle_sigint(int) { g_stop = 1; }
@@ -68,6 +67,10 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     auto top = std::make_unique<VCORE>();
 
+    // VRAM lives in the RTL now, point straight at it instead of
+    // mirroring writes, that way byte enables are honoured for free
+    uint8_t *vram_buffer = &top->rootp->CORE__DOT__system_vram__DOT__vramm[0];
+
     // Reset sequence
     top->reset = 1;
     top->clk = 0;
@@ -100,13 +103,7 @@ int main(int argc, char **argv) {
             top->eval();
 
             if (top->vram_write) [[unlikely]] {
-                uint32_t addr = top->vram_addr;
-                uint32_t data = top->vram_data_out;
-
-                if (addr < vram_buffer.size() - 3) {
-                    *reinterpret_cast<uint32_t *>(&vram_buffer[addr]) = data;
-                    vram_dirty = true;
-                }
+                vram_dirty = true;
             }
 
             //== CPI sampling, right after the posedge settles ==//
@@ -157,7 +154,7 @@ int main(int argc, char **argv) {
                 void *pixels;
                 int pitch;
                 SDL_LockTexture(texture, NULL, &pixels, &pitch);
-                memcpy(pixels, vram_buffer.data(), VRAM_SIZE);
+                memcpy(pixels, vram_buffer, VRAM_SIZE);
                 SDL_UnlockTexture(texture);
                 vram_dirty = false;
             }

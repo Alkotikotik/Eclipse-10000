@@ -19,10 +19,14 @@ module RAM(
     logic [5:0] unused_bits;
     assign unused_bits = address[31:26]; //So compiler wouldn't compain
 
-    assign data_out = (mem_read) ? {ramm[address + 3],
-                                    ramm[address + 2],
-                                    ramm[address + 1],
-                                    ramm[address]} : 32'h0;
+    //Sync read, was async previosely which obviosely is impossible on the
+    //actual FPGA, unless LUTRAM ofc but its either BRAM or ddr3
+    always_ff @(posedge clk) begin
+        if (mem_read) data_out <= {ramm[address[25:0] + 3],
+                                   ramm[address[25:0] + 2],
+                                   ramm[address[25:0] + 1],
+                                   ramm[address[25:0]]};
+    end
 
     //IF needs instruction every cycle so read enable isn't even needed
     assign instr_data_out = {ramm[instr_address + 3],

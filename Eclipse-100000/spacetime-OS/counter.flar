@@ -241,7 +241,7 @@ func main(){
         counter1++;
         char[0] = counter0;
         if [counter1 > 200000]{
-            color *= 0xF;
+            color *=0xF;
             counter1 = 0;
             kprintr(x, 8, color, 0x0000, &char, 1);
             if [counter0 == prev_char]{

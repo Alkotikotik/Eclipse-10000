@@ -259,7 +259,6 @@ module CORE(
 
     //== MEM(memory) ==//
     //Work with memory - load, store
-    //
     logic [31:0] MEM_result;
     logic [7:0] MEM_gpr_dest;
     logic       MEM_gpr_write;
@@ -267,6 +266,8 @@ module CORE(
     logic       isMEM_valid;
 
     logic MEM_is_lomul, MEM_is_himul;
+    logic MEM_is_load, MEM_ram_cs, MEM_io_cs, MEM_vram_cs;
+    logic [31:0] MEM_io_data;
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -275,19 +276,42 @@ module CORE(
             MEM_result      <= GPRs_data_in;
             MEM_gpr_write   <= GPRsWrite;
             MEM_gpr_dest    <= gpr_rw0_sel;
-            MEM_kernel_mode <= KernelMode; // mode as of THIS instruction's own EX cycle
+            MEM_kernel_mode <= KernelMode;
             isMEM_valid     <= isEX_valid;
             MEM_is_lomul    <= (opcode == 6'b000111);
             MEM_is_himul    <= (opcode == 6'b001101);
+
+            MEM_is_load     <= (GPRsSrc == 3'b001);
+            MEM_ram_cs      <= RAM_cs;
+            MEM_io_cs       <= IO_cs;
+            MEM_vram_cs     <= VRAM_cs;
+            MEM_io_data     <= io_data_out;
         end
     end
 
-    //Specifically for mul
+    logic [31:0] mem_read_data;
+    always_comb begin
+        if (MEM_ram_cs)
+            mem_read_data = ram_data_out;
+        else if (MEM_io_cs)
+            mem_read_data = MEM_io_data;
+        else if (MEM_vram_cs)
+            mem_read_data = vram_data_read;
+        else
+            mem_read_data = 32'd0;
+    end
+
+    //Specifically for mul, actually no - not anymore for loads too
     logic [31:0] MEM_val;
     always_comb begin
-        if (MEM_is_lomul) MEM_val = mul_product[31:0];
-        else if (MEM_is_himul) MEM_val = mul_product[63:32];
-        else MEM_val = MEM_result;
+        if (MEM_is_lomul)
+            MEM_val = mul_product[31:0];
+        else if (MEM_is_himul)
+            MEM_val = mul_product[63:32];
+        else if (MEM_is_load)
+            MEM_val = mem_read_data;
+        else
+            MEM_val = MEM_result;
     end
 
 
@@ -454,7 +478,6 @@ module CORE(
     logic RAM_cs; //Chip select
     logic VRAM_cs;
     logic IO_cs;
-    logic [31:0] cpu_mem_data_out; //unified data output
     logic [15:0] mmio_timer_reg;
 
     logic ZeroDivException;
@@ -678,27 +701,23 @@ module CORE(
         endcase
     end
 
+    logic [31:0] io_data_out;
     always_comb begin
-        if (RAM_cs) begin
-            cpu_mem_data_out = ram_data_out;
-        end else if (IO_cs) begin
-            unique case (memTarget)
-                32'h04100000: cpu_mem_data_out = {24'd0, ENC_10K_KeyIn};
-                32'h04100004: cpu_mem_data_out = {31'd0, mod_state};
-                32'h04100008: cpu_mem_data_out = {16'd0, mmio_timer_reg};
-                32'h04100014: cpu_mem_data_out = SP;
-                32'h04100018: cpu_mem_data_out = KSP;
-                32'h0410001C: cpu_mem_data_out = KScratch;
-                32'h04100020: cpu_mem_data_out = ActiveSP;
-                32'h04100024: cpu_mem_data_out = LR;
-                default:      cpu_mem_data_out = 32'd0;
-            endcase
-        end else begin
-            cpu_mem_data_out = 32'd0; //fallback to unmapped space
-        end
+        unique case (memTarget)
+            32'h04100000: io_data_out = {24'd0, ENC_10K_KeyIn};
+            32'h04100004: io_data_out = {31'd0, mod_state};
+            32'h04100008: io_data_out = {16'd0, mmio_timer_reg};
+            32'h04100014: io_data_out = SP;
+            32'h04100018: io_data_out = KSP;
+            32'h0410001C: io_data_out = KScratch;
+            32'h04100020: io_data_out = ActiveSP;
+            32'h04100024: io_data_out = LR;
+            default:      io_data_out = 32'd0;
+        endcase
     end
-    assign GPRs_data_in = (GPRsSrc == 3'b001) ? cpu_mem_data_out :
-                  (GPRsSrc == 3'b010) ? EX_PC :
+
+    //No 3'b001 arm anymore, MEM fixes the load in one cycle later
+    assign GPRs_data_in = (GPRsSrc == 3'b010) ? EX_PC :
                   (GPRsSrc == 3'b011) ? sign_ext_imm18 :
                   (GPRsSrc == 3'b100) ? sign_ext_imm26 :
                   (GPRsSrc == 3'b101) ? memTarget : // SPLEA
@@ -779,6 +798,18 @@ module CORE(
         .instr_address(IF_PC),
         .instr_data_out(instr_fetch_data)
     );
+    logic [31:0] vram_data_read;
+
+    VRAM system_vram (
+        .clk(clk),
+        .address(vram_addr),
+        .data_in(ram_data_in_aligned),
+        .byte_enable(ram_byte_enable),
+        .mem_write(memWrite && VRAM_cs && isEX_valid),
+        .mem_read(memRead && VRAM_cs),
+        .data_out(vram_data_read)
+    );
+
     assign vram_addr     = memTarget - 32'h04000000;
     assign vram_data_out = FWD_rx0;
     assign vram_write = (memWrite && VRAM_cs && isEX_valid);
