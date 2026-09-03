@@ -132,3 +132,4 @@ XC7A100T Wukong board provides HDMI compatible display interface;
 XC7A100T Wukong board provides USB to UART serial port by using CH340N;
 XC7A100T Wukong board PCB size is: 9.96cm x 9.96cm;
 Default power source for board is: 2A@5V DC, the DC header type: DC-050, 5.5mmx2.1mm;
+
