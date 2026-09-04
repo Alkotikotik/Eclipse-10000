@@ -36,16 +36,18 @@ module CORE(
 
     assign stall     = 0;
     assign bubble    = 0;
-    assign PC_target = (is_EX_cond_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + (EX_64 ? 32'h8 : 32'h4) : PCNext;
+    assign PC_target = (is_EX_cond_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + (EX_64 ? 32'h8 : 32'h4)) : PCNext;
 
     //== IF(Instruction Fetch) ==//
     logic [31:0] IF_PC;
+    logic [31:0] IF_PC_plus4;
+    logic [31:0] IF_PC_plus8;
     logic [31:0] IF_PC_plus4_or8;
 
-    assign IF_PC_plus4  = IF_PC + 32'd4;
-    assign IF_PC_plus8  = IF_PC + 32'd8;
+    assign IF_PC_plus4 = IF_PC + 32'd4;
+    assign IF_PC_plus8 = IF_PC + 32'd8;
 
-    assign IF_PC_plus4_or8 = IF_64 ? IF_PC_p8 : IF_PC_p4;  //Easy - 32 or 64 bits
+    assign IF_PC_plus4_or8 = IF_64 ? IF_PC_plus8 : IF_PC_plus4;  //Easy - 32 or 64 bits
 
     logic [31:0] IF_PC_next;
     assign IF_PC_next = (instr_fetch_data[31:26]==6'b111111 || instr_fetch_data[31:26]==6'b111000 || instr_fetch_data[31:26]==6'b010000 || instr_fetch_data[31:26]==6'b111101 || IF_predicted_taken) ? IF_redirect_target : IF_PC_plus4_or8;
@@ -59,10 +61,10 @@ module CORE(
 
     logic [63:0] instr_fetch_duo;
     logic [31:0] instr_fetch_data; //from RAM's dedicated instruction port
-    logic [31:0] IF_IR1; //Second 32-bits for 64-bit instruction i hate word instruction its so long to type and annoying to spell, and shortened instr sucks too
+    logic [31:0] IF_IR_64; //Second 32-bits for 64-bit instruction i hate word instruction its so long to type and annoying to spell, and shortened instr sucks too
 
-    assign instr_fetch_data = IF_PC[2] ? instr_fetch_pair[63:32] : instr_fetch_pair[31:0];
-    assign IF_IR1 = instr_fetch_pair[63:32];   //64 instrs are 8 byte aligned
+    assign instr_fetch_data = IF_PC[2] ? instr_fetch_duo[63:32] : instr_fetch_duo[31:0];
+    assign IF_IR_64 = instr_fetch_duo[63:32];   //64 instrs are 8 byte aligned
     //So unconditional branches: JMP, CALL, RET, RETU are immediately resolved
     //in the IF stage, so no penatly for them whatsoever
     logic [31:0] IF_redirect_target;
@@ -86,7 +88,7 @@ module CORE(
     //If opcode is 000000 we check for sub-op of its 000000 too then its just
     //a NOP, if it isn't 000000 though, its a 64-bit instruction
     logic  IF_64; //That spells much cooler than IF_isInst64bit or some
-    assign IF_64 = ((instr_fetch_data[31:26] == 6'b000000) && (|instr_fetch_data[9:4]))
+    assign IF_64 = ((instr_fetch_data[31:26] == 6'b000000) && (|instr_fetch_data[9:4]));
 
     //== Branch prediction ==//
     //My implementation of gshare branch predictor, source McFalring's 1991 paper
@@ -182,6 +184,7 @@ module CORE(
     logic [11:0] ID_pht_idx;
     logic isID_valid;
     logic ID_predicted_taken;
+    logic [31:0] ID_IR_64;
     logic ID_64;
 
     always_ff @(posedge clk or posedge reset) begin
@@ -190,6 +193,7 @@ module CORE(
         end else if (!stall) begin
             ID_PC <= IF_PC;
             ID_64 <= IF_64;
+            ID_IR_64 <= IF_IR_64;
             ID_IR <= instr_fetch_data;
             ID_early_target <= IF_redirect_target;
             isID_valid <= 1'b1;
@@ -222,6 +226,7 @@ module CORE(
     //== EX(Execute) ==//
     //A lot of things happen here, full enum in CU.sv
     logic [31:0] EX_PC, EX_IR;
+    logic [31:0] EX_IR_64;
     logic [31:0] EX_early_target;
     logic [11:0] EX_pht_idx;
     logic [31:0] EX_rx0_val, EX_rx1_val;
@@ -236,6 +241,7 @@ module CORE(
             EX_PC <= ID_PC; //Handing instruction to the EX
             EX_IR <= ID_IR;
             EX_64 <= ID_64;
+            EX_IR_64 <= ID_IR_64;
             EX_rx0_val <= ID_rx0_val;
             EX_rx1_val <= ID_rx1_val;
 
@@ -248,6 +254,7 @@ module CORE(
 
     //====//
     logic [5:0] opcode;
+    logic [5:0] op_64;
     logic [7:0] rx0, rx1, rx2;
     logic [11:0] immediate;
     logic [31:0] j_imm_signed;
@@ -256,7 +263,7 @@ module CORE(
     assign rx0 = EX_IR[25:18];
     assign rx1 = EX_IR[17:10];
     assign rx2 = EX_IR[9:2];
-    assign 64_op = EX_IR[9:4];
+    assign op_64 = EX_IR[9:4];
     assign immediate = EX_IR[11:0];
     assign j_imm_signed = {{6{EX_IR[25]}}, EX_IR[25:0]};
 
@@ -749,14 +756,15 @@ module CORE(
     assign GPRs_data_in = (GPRsSrc == 3'b010) ? EX_PC :
                   (GPRsSrc == 3'b011) ? sign_ext_imm18 :
                   (GPRsSrc == 3'b100) ? sign_ext_imm26 :
-                  (GPRsSrc == 3'b101) ? memTarget : // SPLEA
+                  (GPRsSrc == 3'b101) ? memTarget : //SPRLEA
+                  (GPRsSrc == 3'b110) ? EX_IR_64 :
                   AluResult;
 
     CU control_unit (
         .clk(clk),
         .reset(reset),
         .opcode(opcode),
-        .64_op(64_op),
+        .op_64(op_64),
         .flags(compactedFlags),
         .mmio_timer_reg(mmio_timer_reg),
         .current_kernel_mode(KernelMode),
@@ -826,7 +834,7 @@ module CORE(
         .data_out(ram_data_out),
 
         .instr_address(IF_PC),
-        .instr_data_out(instr_fetch_data)
+        .instr_data_out(instr_fetch_duo)
     );
     logic [31:0] vram_data_read;
 

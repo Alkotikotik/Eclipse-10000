@@ -3,7 +3,7 @@ module CU(
     input logic reset,
 
     input logic [5:0] opcode,
-    input logic [5:0] 64_op,
+    input logic [5:0] op_64,
 
     input logic [3:0] flags, //4 flags(C, N, V, Z) compacted into 4bit variable
     input logic [15:0] mmio_timer_reg,
@@ -94,8 +94,14 @@ module CU(
         unique case (opcode[5:4])
             2'b00: begin // ALU R/B-type default, and bigass 64 bit decoder, for every 64bit instr
                 if (opcode == 6'b000000) begin
-                    unique case (64_op)
-                        6'b000000: ;
+                    unique case (op_64)
+                        6'b000000: ; //NOP
+                        6'b010001: begin
+                            GPRsSrc = 3'b110;
+                            GPRsWrite = 1;
+                        end
+                        default ;
+                    endcase
                 end else begin
                     aluSrcY = 2'b01;
                     aluOpSel = 2'b10;

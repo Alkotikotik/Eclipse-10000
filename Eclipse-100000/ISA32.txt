@@ -116,7 +116,7 @@ Privilege and Syscalls
 
 Format of 64-bit instructions
 
-
+010001 : LDI full 32bits in one instruction
 
 
 

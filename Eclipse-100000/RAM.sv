@@ -9,7 +9,9 @@ module RAM(
     output logic [31:0] data_out,
 
     //Driven by IF stage always active
-    input logic [31:0] instr_address,
+    /* verilator lint_off UNUSEDSIGNAL */
+    input logic [31:0] instr_address, //8byte aligned, last bits aren't used
+    /* verilator lint_on UNUSEDSIGNAL */
     output logic [63:0] instr_data_out
 );
     logic [7:0] ramm [0:67108863]; //64MB
@@ -29,7 +31,7 @@ module RAM(
     end
 
     logic [31:0] ia8;
-    assign ia8 = {instr_address[25:3], 3'b000};   // 8-byte aligned
+    assign ia8 = {6'h0, instr_address[25:3], 3'b000};   // 8-byte aligned
     //IF needs instruction every cycle so read enable isn't even needed
     assign instr_data_out = {ramm[ia8+7], ramm[ia8+6],
                             ramm[ia8+5], ramm[ia8+4],

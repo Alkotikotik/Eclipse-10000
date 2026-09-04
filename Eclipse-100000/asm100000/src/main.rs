@@ -4,6 +4,17 @@ use std::fs::File;
 use std::io::{self, BufRead, Write};
 use std::process;
 
+const LDI_SUBOP: u32 = 0b010001;
+
+fn is_long_instr(line: &str) -> bool {
+    let head = line
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_uppercase();
+    matches!(head.as_str(), "LDI")
+}
+
 fn parse_imm64(token: &str) -> i64 {
     let clean = token.trim_start_matches('~');
     if clean.starts_with("-0x") || clean.starts_with("-0X") {
@@ -30,6 +41,8 @@ fn main() -> io::Result<()> {
 
     let mut labels: HashMap<String, u32> = HashMap::new();
     let mut instrs: Vec<String> = Vec::new();
+    let mut instr_addrs: Vec<u32> = Vec::new();
+    let mut pending_labels: Vec<String> = Vec::new();
 
     let file = File::open(input_path)?;
     let reader = io::BufReader::new(file);
@@ -50,6 +63,7 @@ fn main() -> io::Result<()> {
 
                 while address_counter < target_address {
                     instrs.push("PAD".to_string());
+                    instr_addrs.push(address_counter);
                     address_counter += 4;
                 }
             }
@@ -58,11 +72,23 @@ fn main() -> io::Result<()> {
 
         if not_commented.starts_with('~') && not_commented.ends_with(':') {
             let label = not_commented[1..not_commented.len() - 1].to_string();
-            labels.insert(label, address_counter);
+            pending_labels.push(label);
         } else {
+            if is_long_instr(not_commented) && address_counter % 8 != 0 {
+                instrs.push("PAD".to_string());
+                instr_addrs.push(address_counter);
+                address_counter += 4;
+            }
+            for pending in pending_labels.drain(..) {
+                labels.insert(pending, address_counter);
+            }
             instrs.push(not_commented.to_string());
-            address_counter += 4;
+            instr_addrs.push(address_counter);
+            address_counter += if is_long_instr(not_commented) { 8 } else { 4 };
         }
+    }
+    for pending in pending_labels.drain(..) {
+        labels.insert(pending, address_counter);
     }
 
     // Exact Opcode Mappings matched to Control Unit Hardware Spec
@@ -90,6 +116,7 @@ fn main() -> io::Result<()> {
     opcodes.insert("SRA", 0b001010);
 
     opcodes.insert("LOAD", 0b010001);
+    opcodes.insert("LDI", 0b000000);
     opcodes.insert("LMA", 0b011111);
     opcodes.insert("LDR", 0b100011);
     opcodes.insert("STR", 0b100111);
@@ -132,7 +159,7 @@ fn main() -> io::Result<()> {
 
     // Second pass: Instruction construction
     for (current_address, inst_line) in instrs.iter().enumerate() {
-        let current_pc = (current_address as u32) * 4;
+        let current_pc = instr_addrs[current_address];
 
         let cleared = inst_line
             .replace("<-", " ")
@@ -171,6 +198,19 @@ fn main() -> io::Result<()> {
                 }
                 if tokens.len() > 2 {
                     immediate = parse_imm64(tokens[2]);
+                }
+            }
+            "LDI" => {
+                if tokens.len() > 1 {
+                    rx0 = parse_reg(tokens[1]);
+                }
+                if tokens.len() > 2 {
+                    let target = tokens[2].trim_start_matches('~');
+                    if let Some(&label_addr) = labels.get(target) {
+                        immediate = label_addr as i64;
+                    } else {
+                        immediate = parse_imm64(tokens[2]);
+                    }
                 }
             }
             "LMA" => {
@@ -287,12 +327,18 @@ fn main() -> io::Result<()> {
             "JMP" | "CALL" => {
                 if tokens.len() > 1 {
                     let target = tokens[1].trim_start_matches('~');
-                    if let Some(&label_addr) = labels.get(target) {
-                        let offset = (label_addr as i64) - ((current_pc + 4) as i64);
-                        immediate = offset;
+                    let absolute = if let Some(&label_addr) = labels.get(target) {
+                        label_addr as i64
                     } else {
-                        immediate = parse_imm64(tokens[1]);
+                        parse_imm64(tokens[1])
+                    };
+                    if absolute & 0x3 != 0 {
+                        panic!("Assembler Error: {} target {:#X} is not 4-byte aligned", instr, absolute);
                     }
+                    if absolute < 0 || absolute >= (1 << 28) {
+                        panic!("Assembler Error: {} target {:#X} is outside the 256MB range", instr, absolute);
+                    }
+                    immediate = absolute >> 2;
                 }
             }
             "SPRLDR" | "SPRSTR" | "SPRSET" | "SPRADD" | "SPRSUB" | "SPRLEA" => {
@@ -357,6 +403,11 @@ fn main() -> io::Result<()> {
                     | ((rx0 & 0xFF) << 18)
                     | ((immediate as u32) & 0x0003_FFFF)
             }
+            "LDI" => {
+                ((opcode & 0x3F) << 26)
+                    | ((rx0 & 0xFF) << 18)
+                    | ((LDI_SUBOP & 0x3F) << 4)
+            }
             _ => {
                 ((opcode & 0x3F) << 26)
                     | ((rx0 & 0xFF) << 18)
@@ -369,6 +420,13 @@ fn main() -> io::Result<()> {
         writeln!(output_file, "{:02X}", ((machine_code >> 8) & 0xFF) as u8)?;
         writeln!(output_file, "{:02X}", ((machine_code >> 16) & 0xFF) as u8)?;
         writeln!(output_file, "{:02X}", ((machine_code >> 24) & 0xFF) as u8)?;
+
+        if is_long_instr(&instr) {
+            writeln!(output_file, "{:02X}", (imm_u32 & 0xFF) as u8)?;
+            writeln!(output_file, "{:02X}", ((imm_u32 >> 8) & 0xFF) as u8)?;
+            writeln!(output_file, "{:02X}", ((imm_u32 >> 16) & 0xFF) as u8)?;
+            writeln!(output_file, "{:02X}", ((imm_u32 >> 24) & 0xFF) as u8)?;
+        }
     }
 
     Ok(())
