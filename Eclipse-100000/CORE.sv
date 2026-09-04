@@ -77,7 +77,6 @@ module CORE(
 
     //== Branch prediction ==//
     //My implementation of gshare branch predictor, source McFalring's 1991 paper
-
     //Idk who I explain it to but I just want to explain gshare branch predictor.
     //So Basically all branch predictors work on one main principle - branches
     //tends to do the same thing they did last time, so if it was taken last time - chances are it will ba taken this time
