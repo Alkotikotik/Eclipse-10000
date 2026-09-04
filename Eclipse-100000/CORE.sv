@@ -59,10 +59,21 @@ module CORE(
     //So unconditional branches: JMP, CALL, RET, RETU are immediately resolved
     //in the IF stage, so no penatly for them whatsoever
     logic [31:0] IF_redirect_target;
+    logic [5:0] IF_op;
+    assign IF_op = instr_fetch_data[31:26];
+
+    //One more important thing - JMP and CALL are now absolute jumps(same for
+    //conds later), because since, as already stated, labels are 4byte aligned
+    //and last 2bits are always zero, we can just shift the 28bit
+    //address(256MB) right by 2 in assembler, which would give us 256MB range
+    //in 32bit instructions, and its so goddamn beatiful.
     assign IF_redirect_target =
-        (instr_fetch_data[31:26] == 6'b111101) ? EPC :   // RETU
-        (instr_fetch_data[31:26] == 6'b010000) ? LR  :   // RET
-        (IF_PC + 32'd4 + {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]});
+        (IF_op == 6'b111101) ? EPC :                          // RETU
+        (IF_op == 6'b010000) ? LR  :                          // RET
+        (IF_op == 6'b111111 || IF_op == 6'b111000) ?          // JMP / CALL
+            {4'b0, instr_fetch_data[25:0], 2'b00} :           // absolute 28-bit
+        (IF_PC + 32'd4 +                                      // cond branch, still PC-rel but not for long
+            {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]});
 
     //== Branch prediction ==//
     //My implementation of gshare branch predictor, source McFalring's 1991 paper
