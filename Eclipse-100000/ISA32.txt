@@ -119,6 +119,10 @@ Format of 64-bit instructions
 010001 : LDI full 32bits in one instruction
 
 
+Fused cmp branches:
+110000 : BEQ rx0 <-> rx1 -> imm26 //compares and immediately jumps
+
+
 
 
 
