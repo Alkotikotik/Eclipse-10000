@@ -10,7 +10,7 @@ module RAM(
 
     //Driven by IF stage always active
     input logic [31:0] instr_address,
-    output logic [31:0] instr_data_out
+    output logic [63:0] instr_data_out
 );
     logic [7:0] ramm [0:67108863]; //64MB
     initial begin
@@ -28,11 +28,13 @@ module RAM(
                                    ramm[address[25:0]]};
     end
 
+    logic [31:0] ia8;
+    assign ia8 = {instr_address[25:3], 3'b000};   // 8-byte aligned
     //IF needs instruction every cycle so read enable isn't even needed
-    assign instr_data_out = {ramm[instr_address + 3],
-                            ramm[instr_address + 2],
-                            ramm[instr_address + 1],
-                            ramm[instr_address]};
+    assign instr_data_out = {ramm[ia8+7], ramm[ia8+6],
+                            ramm[ia8+5], ramm[ia8+4],
+                            ramm[ia8+3], ramm[ia8+2],
+                            ramm[ia8+1], ramm[ia8]};
 
     always_ff @(posedge clk) begin
         if (mem_write) begin

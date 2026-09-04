@@ -1,4 +1,4 @@
-Format of 32-bit instructions
+Format of 32-bit instructions 64bit lower
 
 R-Type (Standard ALU & System)
 [31:26]  Opcode     (6 bits)
@@ -112,6 +112,23 @@ Jumps & Subroutines
 Privilege and Syscalls
 010010 : SYS             // System Call Exception
 111101 : RETU           // Return to User Mode from Exception
+
+
+Format of 64-bit instructions
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 Target board:
 On-Board FPGA: XC7A100T-1FGG676C;
