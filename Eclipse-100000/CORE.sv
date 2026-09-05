@@ -326,6 +326,7 @@ module CORE(
     end
 
     logic [31:0] mem_read_data;
+    logic [31:0] vram_data_read;
     always_comb begin
         if (MEM_ram_cs)
             mem_read_data = ram_data_out;
@@ -836,7 +837,6 @@ module CORE(
         .instr_address(IF_PC),
         .instr_data_out(instr_fetch_duo)
     );
-    logic [31:0] vram_data_read;
 
     VRAM system_vram (
         .clk(clk),
