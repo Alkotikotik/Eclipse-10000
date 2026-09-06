@@ -1658,8 +1658,88 @@ impl<'a> Codegen<'a> {
             .any(|b| b.body.iter().any(|i| matches!(i, IRInst::Call { .. })))
     }
 
+    fn fold_slot_addrs(&mut self) {
+        let mut uses: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
+        for b in &self.cfg {
+            for inst in &b.body {
+                for u in inst.uses() {
+                    if let IROperand::Temp(t) = u {
+                        *uses.entry(t).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+        let single = |op: &IROperand| -> Option<usize> {
+            match op {
+                IROperand::Temp(t) if uses.get(t) == Some(&1) => Some(*t),
+                _ => None,
+            }
+        };
+
+        for b in &mut self.cfg {
+            let body = b.body.clone();
+            let mut out: Vec<IRInst> = Vec::with_capacity(body.len());
+            let mut i = 0usize;
+            while i < body.len() {
+                let base = match &body[i] {
+                    IRInst::LocalAddr { dest, offset } => Some((dest.clone(), *offset, true)),
+                    IRInst::GlobalAddr { dest, offset } => Some((dest.clone(), *offset, false)),
+                    _ => None,
+                };
+
+                if let Some((addr_temp, base_off, is_local)) = base {
+                    if single(&addr_temp).is_some() && i + 2 < body.len() {
+                        if let IRInst::Add { dest, left, right } = &body[i + 1] {
+                            let folded = if *left == addr_temp && is_const(right) {
+                                Some(const_val(right))
+                            } else if *right == addr_temp && is_const(left) {
+                                Some(const_val(left))
+                            } else {
+                                None
+                            };
+                            if let (Some(delta), Some(_)) = (folded, single(dest)) {
+                                let total = base_off as i64 + delta as i64;
+                                if total >= 0 && total <= 32767 {
+                                    let slot = if is_local {
+                                        IROperand::FrameSlot(total as usize)
+                                    } else {
+                                        IROperand::GlobalSlot(total as usize)
+                                    };
+                                    match &body[i + 2] {
+                                        IRInst::StorePtr { ptr_addr, src } if ptr_addr == dest => {
+                                            out.push(IRInst::StorePtr {
+                                                ptr_addr: slot,
+                                                src: src.clone(),
+                                            });
+                                            i += 3;
+                                            continue;
+                                        }
+                                        IRInst::LoadPtr { dest: d, ptr_addr } if ptr_addr == dest => {
+                                            out.push(IRInst::LoadPtr {
+                                                dest: d.clone(),
+                                                ptr_addr: slot,
+                                            });
+                                            i += 3;
+                                            continue;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                out.push(body[i].clone());
+                i += 1;
+            }
+            b.body = out;
+        }
+    }
+
     //Actual codegen time
     pub fn lower_func(&mut self) -> Vec<AsmInst> {
+        self.fold_slot_addrs();
         let mut compiled = Vec::new();
         let leaf = self.is_leaf();
         let blocks = self.cfg.clone();

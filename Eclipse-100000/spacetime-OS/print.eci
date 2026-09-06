@@ -2251,9 +2251,7 @@
 	ADD ry290 <- [rx28, rx30 0]
 	MOV rx28 <- ry290 0
 	SPRSTR rx28 -> [GP 8]
-	SPRLEA rx28 <- [SP 47]
-	ADD rx28 <- [rx28, rx31 0]
-	STR rz293 -> [rx28 0]
+	SPRSTR rz293 -> [SP 47]
 	LOAD rz292 <- 0
 	SPRLEA rx27 <- [SP 47]
 	SPRLDR rx28 <- [GP 8]

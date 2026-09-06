@@ -2094,9 +2094,7 @@
 ~Lab_while_start_0:
 	ADD rx29 <- [rx27, rx31 1]
 	MOV rx27 <- rx29 0
-	SPRLEA rx29 <- [SP 0]
-	ADD rx29 <- [rx29, rx31 0]
-	STR rz283 -> [rx29 0]
+	SPRSTR rz283 -> [SP 0]
 
 	IBSEU <-< [rx27 <-> 200000] >-> ~Lab_endif_3
 
