@@ -30,13 +30,13 @@ module RAM(
                                    ramm[address[25:0]]};
     end
 
-    logic [31:0] ia8;
-    assign ia8 = {6'h0, instr_address[25:3], 3'b000};   // 8-byte aligned
+    logic [31:0] ia4;
+    assign ia4 = {6'h0, instr_address[25:2], 2'b00};   // 4-byte aligned
     //IF needs instruction every cycle so read enable isn't even needed
-    assign instr_data_out = {ramm[ia8+7], ramm[ia8+6],
-                            ramm[ia8+5], ramm[ia8+4],
-                            ramm[ia8+3], ramm[ia8+2],
-                            ramm[ia8+1], ramm[ia8]};
+    assign instr_data_out = {ramm[ia4+7], ramm[ia4+6],
+                            ramm[ia4+5], ramm[ia4+4],
+                            ramm[ia4+3], ramm[ia4+2],
+                            ramm[ia4+1], ramm[ia4]};
 
     always_ff @(posedge clk) begin
         if (mem_write) begin

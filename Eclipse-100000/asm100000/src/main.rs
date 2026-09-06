@@ -42,7 +42,6 @@ fn main() -> io::Result<()> {
     let mut labels: HashMap<String, u32> = HashMap::new();
     let mut instrs: Vec<String> = Vec::new();
     let mut instr_addrs: Vec<u32> = Vec::new();
-    let mut pending_labels: Vec<String> = Vec::new();
 
     let file = File::open(input_path)?;
     let reader = io::BufReader::new(file);
@@ -72,23 +71,12 @@ fn main() -> io::Result<()> {
 
         if not_commented.starts_with('~') && not_commented.ends_with(':') {
             let label = not_commented[1..not_commented.len() - 1].to_string();
-            pending_labels.push(label);
+            labels.insert(label, address_counter);
         } else {
-            if is_long_instr(not_commented) && address_counter % 8 != 0 {
-                instrs.push("PAD".to_string());
-                instr_addrs.push(address_counter);
-                address_counter += 4;
-            }
-            for pending in pending_labels.drain(..) {
-                labels.insert(pending, address_counter);
-            }
             instrs.push(not_commented.to_string());
             instr_addrs.push(address_counter);
             address_counter += if is_long_instr(not_commented) { 8 } else { 4 };
         }
-    }
-    for pending in pending_labels.drain(..) {
-        labels.insert(pending, address_counter);
     }
 
     // Exact Opcode Mappings matched to Control Unit Hardware Spec

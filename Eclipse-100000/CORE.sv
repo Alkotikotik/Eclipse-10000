@@ -31,12 +31,12 @@ module CORE(
                         ((PCWrite &&
                         !(opcode == 6'b111111 || opcode == 6'b111000) &&
                         !((opcode == 6'b010000 || opcode == 6'b111101) && (EX_early_target == PCNext)) &&
-                        !(is_EX_cond_branch && EX_predicted_taken)) ||
-                        (is_EX_cond_branch && (EX_predicted_taken != was_branch_taken)));
+                        !(EX_branch && EX_predicted_taken)) ||
+                        (EX_branch && (EX_predicted_taken != was_branch_taken)));
 
     assign stall     = 0;
     assign bubble    = 0;
-    assign PC_target = (is_EX_cond_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + (EX_64 ? 32'h8 : 32'h4)) : PCNext;
+    assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + ((EX_64 || EX_branch) ? 32'h8 : 32'h4)) : PCNext;
 
     //== IF(Instruction Fetch) ==//
     logic [31:0] IF_PC;
@@ -47,7 +47,7 @@ module CORE(
     assign IF_PC_plus4 = IF_PC + 32'd4;
     assign IF_PC_plus8 = IF_PC + 32'd8;
 
-    assign IF_PC_plus4_or8 = IF_64 ? IF_PC_plus8 : IF_PC_plus4;  //Easy - 32 or 64 bits
+    assign IF_PC_plus4_or8 = (IF_64 || IF_branch) ? IF_PC_plus8 : IF_PC_plus4;  //Easy - 32 or 64 bits
 
     logic [31:0] IF_PC_next;
     assign IF_PC_next = (instr_fetch_data[31:26]==6'b111111 || instr_fetch_data[31:26]==6'b111000 || instr_fetch_data[31:26]==6'b010000 || instr_fetch_data[31:26]==6'b111101 || IF_predicted_taken) ? IF_redirect_target : IF_PC_plus4_or8;
@@ -61,10 +61,10 @@ module CORE(
 
     logic [63:0] instr_fetch_duo;
     logic [31:0] instr_fetch_data; //from RAM's dedicated instruction port
-    logic [31:0] IF_IR_64; //Second 32-bits for 64-bit instruction i hate word instruction its so long to type and annoying to spell, and shortened instr sucks too
+    logic [31:0] IF_IR_2; //Second 32-bits for 64-bit instruction i hate word instruction its so long to type and annoying to spell, and shortened instr sucks too
 
-    assign instr_fetch_data = IF_PC[2] ? instr_fetch_duo[63:32] : instr_fetch_duo[31:0];
-    assign IF_IR_64 = instr_fetch_duo[63:32];   //64 instrs are 8 byte aligned
+    assign instr_fetch_data = instr_fetch_duo[31:0];
+    assign IF_IR_2 = instr_fetch_duo[63:32];   //fetch is 4 byte aligned so this is always PC+4
     //So unconditional branches: JMP, CALL, RET, RETU are immediately resolved
     //in the IF stage, so no penatly for them whatsoever
     logic [31:0] IF_redirect_target;
@@ -76,19 +76,25 @@ module CORE(
     //and last 2bits are always zero, we can just shift the 28bit
     //address(256MB) right by 2 in assembler, which would give us 256MB range
     //in 32bit instructions, and its so goddamn beatiful.
-    assign IF_redirect_target =
-        (IF_op == 6'b111101) ? EPC :                          // RETU
-        (IF_op == 6'b010000) ? LR  :                          // RET
-        (IF_op == 6'b111111 || IF_op == 6'b111000) ?          // JMP / CALL
-            {4'b0, instr_fetch_data[25:0], 2'b00} :           // absolute 28-bit
-        (IF_PC + 32'd4 +                                      // cond branch, still PC-rel but not for long
-            {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]});
+    always_comb begin
+        unique case (IF_op)
+            6'b111101: IF_redirect_target = EPC; //RETU
+            6'b010000: IF_redirect_target = LR; //RET
+            6'b111111, 6'b111000: IF_redirect_target = {4'b0, instr_fetch_data[25:0], 2'b00}; //JMP / CALL
+            6'b110000: IF_redirect_target = {4'b0, IF_IR_2[25:0], 2'b00}; //64bit branches
+            default: IF_redirect_target = IF_PC + 32'd4 +
+                     {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]};
+        endcase
+    end
 
     //== 64bit instructions ==//
     //If opcode is 000000 we check for sub-op of its 000000 too then its just
     //a NOP, if it isn't 000000 though, its a 64-bit instruction
-    logic  IF_64; //That spells much cooler than IF_isInst64bit or some
+    logic  IF_64; //That spells much cooler than IF_isInst64bit or some, so im ready to sacrafire readability for this no one's gonna read it anyways
     assign IF_64 = ((instr_fetch_data[31:26] == 6'b000000) && (|instr_fetch_data[9:4]));
+
+    logic  IF_branch; //Separate escape code for 64bit branch instructions
+    assign IF_branch = ((instr_fetch_data[31:26] == 6'b110000) && (|instr_fetch_data[9:5]));
 
     //== Branch prediction ==//
     //My implementation of gshare branch predictor, source McFalring's 1991 paper
@@ -128,18 +134,6 @@ module CORE(
         pht_out <= PHT[pht_read_idx];
     end
 
-    logic  is_IF_cond_branch;
-    assign is_IF_cond_branch =  (instr_fetch_data[31:26] == 6'b110101) || (instr_fetch_data[31:26] == 6'b110011) ||
-                                (instr_fetch_data[31:26] == 6'b110110) || (instr_fetch_data[31:26] == 6'b110001) ||
-                                (instr_fetch_data[31:26] == 6'b111100) || (instr_fetch_data[31:26] == 6'b110100) ||
-                                (instr_fetch_data[31:26] == 6'b111001) || (instr_fetch_data[31:26] == 6'b110010) ||
-                                (instr_fetch_data[31:26] == 6'b111011) || (instr_fetch_data[31:26] == 6'b111010)  ;
-
-    logic  is_EX_cond_branch;
-    assign is_EX_cond_branch =  (opcode==6'b110101)||(opcode==6'b110011)||(opcode==6'b110110)||(opcode==6'b110001)||
-                                (opcode==6'b111100)||(opcode==6'b110100)||(opcode==6'b111001)||(opcode==6'b110010)||
-                                (opcode==6'b111011)||(opcode==6'b111010);
-
     //We gotta check whether branch was actually taken or not
     logic  was_branch_taken;
     assign was_branch_taken = PCWrite && (PCSrc == 4'b0000);
@@ -148,7 +142,7 @@ module CORE(
     //00 || 01 - predict not taken
     //10 || 11 - predict taken
     logic  IF_predicted_taken;
-    assign IF_predicted_taken = is_IF_cond_branch && pht_out[1];
+    assign IF_predicted_taken = IF_branch && pht_out[1];
 
     function automatic [1:0] updated_pht(input [1:0] prev_pht, input taken);
         if (taken) begin
@@ -170,7 +164,7 @@ module CORE(
             //Default is weakly taken simply because branches are usually taken
             //then not, though if particular one isn't its just 1 time calibration
             for (integer i = 0; i < 4096; i = i + 1) PHT[i] <= 2'b10;
-        end else if (isEX_valid && is_EX_cond_branch) begin
+        end else if (isEX_valid && EX_branch) begin
             PHT[EX_pht_idx] <= updated_pht(PHT[EX_pht_idx], was_branch_taken);
             GHR <= {GHR[10:0], was_branch_taken};
         end
@@ -183,8 +177,9 @@ module CORE(
     logic [31:0] ID_early_target;
     logic [11:0] ID_pht_idx;
     logic isID_valid;
+    logic ID_branch;
     logic ID_predicted_taken;
-    logic [31:0] ID_IR_64;
+    logic [31:0] ID_IR_2;
     logic ID_64;
 
     always_ff @(posedge clk or posedge reset) begin
@@ -193,7 +188,8 @@ module CORE(
         end else if (!stall) begin
             ID_PC <= IF_PC;
             ID_64 <= IF_64;
-            ID_IR_64 <= IF_IR_64;
+            ID_IR_2 <= IF_IR_2;
+            ID_branch <= IF_branch;
             ID_IR <= instr_fetch_data;
             ID_early_target <= IF_redirect_target;
             isID_valid <= 1'b1;
@@ -226,12 +222,13 @@ module CORE(
     //== EX(Execute) ==//
     //A lot of things happen here, full enum in CU.sv
     logic [31:0] EX_PC, EX_IR;
-    logic [31:0] EX_IR_64;
+    logic [31:0] EX_IR_2;
     logic [31:0] EX_early_target;
     logic [11:0] EX_pht_idx;
     logic [31:0] EX_rx0_val, EX_rx1_val;
     logic EX_predicted_taken;
     logic isEX_valid;
+    logic EX_branch;
     logic EX_64;
 
     always_ff @(posedge clk or posedge reset) begin
@@ -241,9 +238,11 @@ module CORE(
             EX_PC <= ID_PC; //Handing instruction to the EX
             EX_IR <= ID_IR;
             EX_64 <= ID_64;
-            EX_IR_64 <= ID_IR_64;
+            EX_IR_2 <= ID_IR_2;
             EX_rx0_val <= ID_rx0_val;
             EX_rx1_val <= ID_rx1_val;
+            EX_branch <= ID_branch;
+
 
             EX_early_target <= ID_early_target;
             isEX_valid <= isID_valid;
@@ -255,6 +254,7 @@ module CORE(
     //====//
     logic [5:0] opcode;
     logic [5:0] op_64;
+    logic [4:0] branch_op; //32 possible branches
     logic [7:0] rx0, rx1, rx2;
     logic [11:0] immediate;
     logic [31:0] j_imm_signed;
@@ -264,6 +264,7 @@ module CORE(
     assign rx1 = EX_IR[17:10];
     assign rx2 = EX_IR[9:2];
     assign op_64 = EX_IR[9:4];
+    assign branch_op = EX_IR[9:5];
     assign immediate = EX_IR[11:0];
     assign j_imm_signed = {{6{EX_IR[25]}}, EX_IR[25:0]};
 
@@ -304,15 +305,59 @@ module CORE(
     //That way we don't have to add imm every time on branch, in fact we never
     //have to add imm if we are comparing to the varibale, which shortens
     //critical path, and as a bonus compiler wouldn't need to use rx31 as
-    //a scratch and add imm to it, we can just use big imm19
-    assign branch_y = does_branch_imm ? branch_imm_signed : FWD_rx1;
+    //a buffer and add imm to it, we can just use big imm19
+    logic [31:0] branch_imm19;
+    //Nice way to sign ext
+    assign branch_imm19 = {{13{rx1[7]}}, rx1, EX_IR[4:0], EX_IR_2[31:26]};
 
-    //Why didn't I just make it this way from the start?
-    assign branch_eq = (branch_x == branch_y);
+    assign branch_y = (branch_op[4]) ? branch_imm19 : FWD_rx1;
+
+    logic [31:0] branch_mask;
+    always_comb begin
+        unique case (rx0[2:0])
+            3'b001, 3'b010:                 branch_mask = 32'h0000FFFF;
+            3'b011, 3'b100, 3'b101, 3'b110: branch_mask = 32'h000000FF;
+            default:                        branch_mask = 32'hFFFFFFFF;
+        endcase
+    end
+
+    assign branch_eq = (((branch_x ^ branch_y) & branch_mask) == 32'b0);
     assign branch_less_unsigned = (branch_x < branch_y);
-    assign branch_less_signed = ($signed(branch_x) < $signed(branch_y));
+    //fwd_slice zero extends so signed compares on rz/ry need re extending, as
+    //usual troubles with fragmented, but I love them nontheless
+    function automatic [31:0] br_sext(input [2:0] off, input [31:0] v);
+        unique case (off)
+            3'b001, 3'b010:                 br_sext = {{16{v[15]}}, v[15:0]};
+            3'b011, 3'b100, 3'b101, 3'b110: br_sext = {{24{v[7]}},  v[7:0]};
+            default:                        br_sext = v;
+        endcase
+    endfunction
 
+    logic [31:0] branch_xs, branch_ys;
+    assign branch_xs = br_sext(rx0[2:0], branch_x);
+    assign branch_ys = (branch_op[4]) ? branch_imm19 : br_sext(rx1[2:0], FWD_rx1);
+    assign branch_less_signed = ($signed(branch_xs) < $signed(branch_ys));
 
+    logic branch_cond_met;
+
+    always_comb begin
+        case (branch_op)
+            5'b00001, 5'b10001: branch_cond_met = branch_eq;  //BEQ/IBEQ
+            5'b00010, 5'b10010: branch_cond_met = !branch_eq; //BNE/IBNE
+
+            5'b00011: branch_cond_met = !branch_less_unsigned && !branch_eq; // BGU
+            5'b00100: branch_cond_met = branch_less_unsigned;                // BSU
+            5'b00111: branch_cond_met = !branch_less_unsigned;               // BGEU
+            5'b01000: branch_cond_met = branch_less_unsigned || branch_eq;   // BSEU
+
+            5'b00101, 5'b10011: branch_cond_met = !branch_less_signed && !branch_eq;   // BGS/IBG
+            5'b00110, 5'b10100: branch_cond_met = branch_less_signed;                  // BSS/IBS
+            5'b01001, 5'b10101: branch_cond_met = !branch_less_signed;                 // BGES/IBGE
+            5'b01010, 5'b10110: branch_cond_met = branch_less_signed || branch_eq;     // BSES/IBSE
+
+            default: branch_cond_met = 0;
+        endcase
+    end
 
     //== MEM(memory) ==//
     //Work with memory - load, store
@@ -527,9 +572,6 @@ module CORE(
     logic [63:0] mul_product;
     logic [1:0] aluOpSel;
     logic [5:0] AluOpcode;
-    logic flagsWrite;
-    logic OverflowFlag, NegativeFlag, ZeroFlag, CarryFlag;
-    logic [3:0] compactedFlags;
 
     logic [31:0] ram_data_out;
 
@@ -667,13 +709,11 @@ module CORE(
             memLimit   <= 32'hFFFFFFFF;
             mmio_timer_reg <= 16'd10000;
 
-            compactedFlags <= 4'b0000;
         end else begin
             mod_state <= ENC_10K_ModArr;
 
             if (isEX_valid) begin
                 if (EPCWrite) EPC <= EX_PC + 32'd4;
-                if (flagsWrite) compactedFlags <= {CarryFlag, NegativeFlag, OverflowFlag, ZeroFlag};
                 KernelMode <= isKernelMode;
 
                 if (isCallState && opcode == 6'b111000) begin
@@ -779,7 +819,7 @@ module CORE(
                   (GPRsSrc == 3'b011) ? sign_ext_imm18 :
                   (GPRsSrc == 3'b100) ? sign_ext_imm26 :
                   (GPRsSrc == 3'b101) ? memTarget : //SPRLEA
-                  (GPRsSrc == 3'b110) ? EX_IR_64 :
+                  (GPRsSrc == 3'b110) ? EX_IR_2 :
                   AluResult;
 
     CU control_unit (
@@ -787,7 +827,8 @@ module CORE(
         .reset(reset),
         .opcode(opcode),
         .op_64(op_64),
-        .flags(compactedFlags),
+        .branch_op(branch_op),
+        .branch_cond_met(branch_cond_met),
         .mmio_timer_reg(mmio_timer_reg),
         .current_kernel_mode(KernelMode),
         .memViolation(memViolation),
@@ -805,7 +846,6 @@ module CORE(
         .GPRsSrc(GPRsSrc),
         .aluOpSel(aluOpSel),
         .isCallState(isCallState),
-        .flagsWrite(flagsWrite),
         .SPRWrite(SPRWrite),
         .SPRSrc(SPRSrc)
     );
@@ -815,15 +855,9 @@ module CORE(
         .x(AluMuxX),
         .y(AluMuxY),
         .opcode(AluOpcode),
-        .op_size(rx0[2:0]),
 
         .result(AluResult),
         .mul_product(mul_product),
-
-        .OverflowFlag(OverflowFlag),
-        .CarryFlag(CarryFlag),
-        .NegativeFlag(NegativeFlag),
-        .ZeroFlag(ZeroFlag),
 
         .ZeroDivException(ZeroDivException)
     );

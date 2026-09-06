@@ -4,8 +4,9 @@ module CU(
 
     input logic [5:0] opcode,
     input logic [5:0] op_64,
+    input logic [4:0] branch_op,
+    input logic branch_cond_met,
 
-    input logic [3:0] flags, //4 flags(C, N, V, Z) compacted into 4bit variable
     input logic [15:0] mmio_timer_reg,
 
     input logic current_kernel_mode,
@@ -30,7 +31,6 @@ module CU(
 
     output logic [1:0] aluOpSel,
     output logic isCallState,
-    output logic flagsWrite,
 
     output logic SPRWrite,
     output logic [2:0] SPRSrc
@@ -42,9 +42,6 @@ module CU(
 
     logic [15:0] counter;
     logic timer_interrupt_pending;
-
-    logic C, N, V, Z;
-    assign {C, N, V, Z} = flags;
 
     logic [7:0] prev_key_in;
     logic key_interrupt_pending;
@@ -84,7 +81,6 @@ module CU(
         aluSrcX = 0; aluSrcY = 2'b00;
         PCSrc = 4'b0000; GPRsSrc = 3'b000;
         aluOpSel = 2'b00;
-        flagsWrite = 0;
         isCallState = 0;
         SPRWrite = 0; SPRSrc = 3'b000;
         PCWrite = 0;
@@ -113,20 +109,9 @@ module CU(
                 aluSrcY = 2'b10;
                 aluOpSel = 2'b00;
                 PCSrc = 4'b0000;
-                unique case (opcode)
-                    6'b110101: PCWrite = ((N == V) && !Z); // BGS
-                    6'b110011: PCWrite = (C && !Z);       // BGU
-                    6'b110110: PCWrite = (N != V);       // BSS
-                    6'b110001: PCWrite = Z;             // BEQ
-                    6'b111100: PCWrite = !Z;           // BNE
-                    6'b110100: PCWrite = !C;          // BSU
-                    6'b111001: PCWrite = (N == V);
-                    6'b110010: PCWrite = C;
-                    6'b111011: PCWrite = ((N != V) || Z);
-                    6'b111010: PCWrite = (!C || Z);
-
-                    default:   PCWrite = 0;         //Default(just need comment here)
-                endcase
+                if (opcode == 6'b110000 && (|branch_op)) begin //64bit fused branches
+                    PCWrite = branch_cond_met;
+                end
             end
             2'b01: begin // LOAD-imm / LMA
                 if (opcode == 6'b010001 || opcode == 6'b011111) begin
@@ -164,12 +149,6 @@ module CU(
             6'b110111: begin //JR
                 PCSrc   = 4'b0111;
                 PCWrite = 1;
-            end
-            6'b110000: begin // CMP
-                aluSrcX = 0;
-                aluSrcY = 2'b01; aluOpSel = 2'b10;
-                flagsWrite = 1;
-                GPRsWrite = 0;
             end
             6'b111111: begin //JMP
                 aluSrcX = 1; aluSrcY = 2'b10; aluOpSel = 2'b00;

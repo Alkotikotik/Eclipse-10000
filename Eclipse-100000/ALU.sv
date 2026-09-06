@@ -3,15 +3,9 @@ module ALU (
     input  logic [31:0] x,
     input  logic [31:0] y,
     input  logic [5:0] opcode,
-    input  logic [2:0] op_size,
 
     output logic [31:0] result,
     output logic [63:0] mul_product,
-
-    output logic OverflowFlag,
-    output logic NegativeFlag,
-    output logic ZeroFlag,
-    output logic CarryFlag,
 
     output logic ZeroDivException
 
@@ -31,13 +25,15 @@ module ALU (
     //critical path
     //==Adder==//
     logic is_sub_op;
-    assign is_sub_op = (opcode == 6'b000011 || opcode == 6'b110000);
+    assign is_sub_op = (opcode == 6'b000011);
     logic [31:0] add_y;
     assign add_y = is_sub_op ? ~y : y;
 
     logic [8:0]  add_s0;  //rz0, [8] is the rz carry
     logic [8:0]  add_s1;  //rz1, [8] is the ry carry
+    /* verilator lint_off UNUSEDSIGNAL */
     logic [16:0] add_s2;  //ry1, [16] is the rx carry
+    /* verilator lint_on UNUSEDSIGNAL */
 
     assign add_s0 = {1'b0, x[7:0]}   + {1'b0, add_y[7:0]}   + {8'b0,  is_sub_op};
     assign add_s1 = {1'b0, x[15:8]}  + {1'b0, add_y[15:8]}  + {8'b0,  add_s0[8]};
@@ -85,9 +81,8 @@ module ALU (
             6'b001000: result = sh_result; //SHL
             6'b001100: result = sh_result; //SHR
             6'b001010: result = sh_result; //SRA for singed shift right iirc
-            6'b110000: result = add_result; //CMP
             6'b000100: result = y; //MOV
-            //Replace later for FPGA
+            //Replace later for FPGA for quick div gonna do it soon
             6'b000101: begin // DIV
                 if (y == 32'b0) begin
                     ZeroDivException = 1;
@@ -114,41 +109,6 @@ module ALU (
                 end
             end
             default: result = 32'b0;
-        endcase
-    end
-
-    always_comb begin
-        unique case (op_size)
-            3'b011, 3'b100, 3'b101, 3'b110: begin //rz
-                CarryFlag = add_s0[8];
-                ZeroFlag     = (result[7:0] == 8'b0);
-                NegativeFlag = result[7];
-                if (is_sub_op) begin
-                    OverflowFlag = (x[7] != y[7]) && (result[7] != x[7]);
-                end else begin
-                    OverflowFlag = (x[7] == y[7]) && (result[7] != x[7]);
-                end
-            end
-            3'b001, 3'b010: begin //ry
-                CarryFlag = add_s1[8];
-                ZeroFlag     = (result[15:0] == 16'b0);
-                NegativeFlag = result[15];
-                if (is_sub_op) begin
-                    OverflowFlag = (x[15] != y[15]) && (result[15] != x[15]);
-                end else begin
-                    OverflowFlag = (x[15] == y[15]) && (result[15] != x[15]);
-                end
-            end
-            default: begin //rx
-                CarryFlag = add_s2[16];
-                ZeroFlag     = (result == 32'b0);
-                NegativeFlag = result[31];
-                if (is_sub_op) begin
-                    OverflowFlag = (x[31] != y[31]) && (result[31] != x[31]);
-                end else begin
-                    OverflowFlag = (x[31] == y[31]) && (result[31] != x[31]);
-                end
-            end
         endcase
     end
 

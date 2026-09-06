@@ -118,9 +118,25 @@ Format of 64-bit instructions
 
 010001 : LDI full 32bits in one instruction
 
+Fused cmp branches reg:
+00001 : BEQ  rx0 <-> rx1 -> imm26 //compares and immediately jumps
+00010 : BNE  rx0 <-> rx1 -> imm26
+00011 : BGU  rx0 <-> rx1 -> imm26
+00100 : BSU  rx0 <-> rx1 -> imm26
+00101 : BGS  rx0 <-> rx1 -> imm26
+00110 : BSS  rx0 <-> rx1 -> imm26
+00111 : BGEU rx0 <-> rx1 -> imm26
+01000 : BSEU rx0 <-> rx1 -> imm26
+01001 : BGES rx0 <-> rx1 -> imm26
+01010 : BSES rx0 <-> rx1 -> imm26
 
-Fused cmp branches:
-110000 : BEQ rx0 <-> rx1 -> imm26 //compares and immediately jumps
+Fused cmp branches imm:
+10001 : IBEQ rx0 <-> imm19 -> imm26 //Automatically compares to signed
+10010 : IBNE rx0 <-> imm19 -> imm26
+10011 : IBG  rx0 <-> imm19 -> imm26
+10100 : IBS  rx0 <-> imm19 -> imm26
+10101 : IBGE rx0 <-> imm19 -> imm26
+10110 : IBSE rx0 <-> imm19 -> imm26
 
 
 
