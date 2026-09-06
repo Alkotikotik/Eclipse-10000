@@ -45,7 +45,7 @@ rz212 mid-high 8 bits of rx21
 //VRAM & Screen
 There is dedicated 1MB of VRAM at 04000000 - 0x040FFFFF, the screen resolution is 480p. The pixel format is standard RGBA4444, taking up exactly 2bytes or u16
 
-By default stack lives at 03FFFFF0
+By default stack lives at 0x03FFFFF0
 //Opcodes
 ALU Instructions (R-Type)
 000100 : MOV    rx0, rx1
@@ -67,7 +67,6 @@ ALU Instructions (B-Type)
 001011 : MOD    rx0, rx1, rx2 +- imm2
 001001 : SDIV   rx0, rx1, rx2 +- imm2
 
-
 Memory Instructions
 010001 : LOAD   rx0, imm18             //Loads imm into rx0
 011111 : LMA    imm26                 //Loads Massive into rx31(signed imm26)
@@ -86,22 +85,6 @@ Special type operations (S-Type)
 101100 : SPRSUB rx0, SPR, imm16     // SPR = rx0 - imm16
 101101 : SPRLEA rx0, SPR, imm16    // rx0 = location of selected SPR
 
-CMP:
-110000 : CMP rx0 <-> (rx1 +- imm10)
-
-Unsigned branching
-110001 : BEQ imm26 //Likely ~Label
-111100 : BNE imm26
-110011 : BGU imm26
-110100 : BSU imm26
-110010 : BGEU imm26 //branch greater equal
-111010 : BSEU imm26 //branch smaller equal
-
-Signed branching
-110101 : BGS imm26
-110110 : BSS imm26
-111001 : BGES imm26
-111011 : BSES imm26
 
 Jumps & Subroutines
 111111 : JMP imm26        // Unconditional Jump to imm26 address/label
@@ -115,10 +98,36 @@ Privilege and Syscalls
 
 
 Format of 64-bit instructions
+Split in 2 words, first word is essentially same as regular 32-bit instructions, but [9:4] is sub-op indicating 64bit operation
+G-type (General) <<
+First word:
+[31:26] 000000 (escape opcode to 64-bit instructions)
+[25:18] rx0        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[17:10] rx1        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[9:4]   sub-op     (6-bit opcode indicating 64-bit instruction)
+[3:0]   spare
+Second word:
+[31:0]  really instruction dependent, doesn't fit into individual types
+>>
 
-010001 : LDI full 32bits in one instruction
+Loads:
+[31:0] imm32
+010001 : LDI //full 32bits in one instruction
 
-Fused cmp branches reg:
+Fused CMP and branch, separated into pure register and pure immediate forms, in order to avoid useless wait for ALU in pure register form
+
+Register Form <<
+First word:
+[31:26] 110000 (escape opcode to 64-bit instructions)
+[25:18] rx0        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[17:10] rx1        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[9:5]   sub-op     (6-bit opcode indicating 64-bit instruction)
+[4:0]   unused
+Second word:
+[31:26] unused
+[25:0]  imm26 (branch target)
+>>
+
 00001 : BEQ  rx0 <-> rx1 -> imm26 //compares and immediately jumps
 00010 : BNE  rx0 <-> rx1 -> imm26
 00011 : BGU  rx0 <-> rx1 -> imm26
@@ -130,7 +139,18 @@ Fused cmp branches reg:
 01001 : BGES rx0 <-> rx1 -> imm26
 01010 : BSES rx0 <-> rx1 -> imm26
 
-Fused cmp branches imm:
+Immediate form <<
+First word:
+[31:26] 110000 (escape opcode to 64-bit instructions)
+[25:18] rx0     (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
+[17:10] imm8    (Most significant bits of full imm19)
+[9:5]   sub-op  (6-bit opcode indicating 64-bit instruction)
+[4:0]   imm5    (Somewhat significant bits of full imm19)
+Second word:
+[31:26] unused  (Least significant bits of imm19)
+[25:0]  imm26 (branch target)
+>>
+
 10001 : IBEQ rx0 <-> imm19 -> imm26 //Automatically compares to signed
 10010 : IBNE rx0 <-> imm19 -> imm26
 10011 : IBG  rx0 <-> imm19 -> imm26

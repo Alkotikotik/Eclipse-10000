@@ -6,13 +6,35 @@ use std::process;
 
 const LDI_SUBOP: u32 = 0b010001;
 
+fn branch_info(mnemonic: &str) -> Option<(u32, bool)> {
+    Some(match mnemonic {
+        "BEQ"  => (0b00001, false),
+        "BNE"  => (0b00010, false),
+        "BGU"  => (0b00011, false),
+        "BSU"  => (0b00100, false),
+        "BGEU" => (0b00111, false),
+        "BSEU" => (0b01000, false),
+        "BGS"  => (0b00101, false),
+        "BSS"  => (0b00110, false),
+        "BGES" => (0b01001, false),
+        "BSES" => (0b01010, false),
+        "IBEQ" => (0b10001, true),
+        "IBNE" => (0b10010, true),
+        "IBG"  => (0b10011, true),
+        "IBS"  => (0b10100, true),
+        "IBGE" => (0b10101, true),
+        "IBSE" => (0b10110, true),
+        _ => return None,
+    })
+}
+
 fn is_long_instr(line: &str) -> bool {
     let head = line
         .split_whitespace()
         .next()
         .unwrap_or("")
         .to_uppercase();
-    matches!(head.as_str(), "LDI")
+    head == "LDI" || branch_info(&head).is_some()
 }
 
 fn parse_imm64(token: &str) -> i64 {
@@ -109,21 +131,10 @@ fn main() -> io::Result<()> {
     opcodes.insert("LDR", 0b100011);
     opcodes.insert("STR", 0b100111);
 
-    opcodes.insert("CMP", 0b110000);
-
-    // Unsigned Branching
-    opcodes.insert("BEQ", 0b110001);
-    opcodes.insert("BNE", 0b111100);
-    opcodes.insert("BGU", 0b110011);
-    opcodes.insert("BSU", 0b110100);
-
-    // Signed Branching
-    opcodes.insert("BGS", 0b110101);
-    opcodes.insert("BSS", 0b110110);
-    opcodes.insert("BGEU", 0b110010);
-    opcodes.insert("BSEU", 0b111010);
-    opcodes.insert("BGES", 0b111001);
-    opcodes.insert("BSES", 0b111011);
+    for name in ["BEQ", "BNE", "BGU", "BSU", "BGEU", "BSEU", "BGS", "BSS", "BGES", "BSES",
+                 "IBEQ", "IBNE", "IBG", "IBS", "IBGE", "IBSE"] {
+        opcodes.insert(name, 0b110000);
+    }
 
     // Control Flow & Sysem
     opcodes.insert("JMP", 0b111111);
@@ -178,6 +189,8 @@ fn main() -> io::Result<()> {
         let mut rx0: u32 = 0;
         let mut rx1: u32 = 0;
         let mut immediate: i64 = 0;
+        let mut branch_target: i64 = 0;
+        let mut word1: Option<u32> = None;
 
         match instr.as_str() {
             "LOAD" => {
@@ -295,16 +308,31 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-            "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" | "BGEU" | "BSEU" | "BGES"
-            | "BSES" => {
-                if tokens.len() > 1 {
-                    let target = tokens[1].trim_start_matches('~');
-                    if let Some(&label_addr) = labels.get(target) {
-                        let offset = (label_addr as i64) - ((current_pc + 4) as i64);
-                        immediate = offset;
-                    } else {
-                        immediate = parse_imm64(tokens[1]);
+            m if branch_info(m).is_some() => {
+                let (_, uses_imm) = branch_info(m).unwrap();
+                if tokens.len() < 4 {
+                    panic!("Assembler Error: {} needs 3 operands, got {:?}", instr, &tokens[1..]);
+                }
+                rx0 = parse_reg(tokens[1]);
+                if uses_imm {
+                    immediate = parse_imm64(tokens[2]);
+                    if !(-262144..=262143).contains(&immediate) {
+                        panic!("Assembler Error: {} literal {} does not fit in signed imm19", instr, immediate);
                     }
+                } else {
+                    rx1 = parse_reg(tokens[2]);
+                }
+                let target = tokens[3].trim_start_matches('~');
+                branch_target = if let Some(&label_addr) = labels.get(target) {
+                    label_addr as i64
+                } else {
+                    parse_imm64(tokens[3])
+                };
+                if branch_target & 0x3 != 0 {
+                    panic!("Assembler Error: {} target {:#X} is not 4-byte aligned", instr, branch_target);
+                }
+                if branch_target < 0 || branch_target >= (1 << 28) {
+                    panic!("Assembler Error: {} target {:#X} is outside the 256MB range", instr, branch_target);
                 }
             }
             "JR" => {
@@ -376,9 +404,21 @@ fn main() -> io::Result<()> {
 
         let machine_code: u32 = match instr.as_str() {
             "LMA" => ((opcode & 0x3F) << 26) | ((immediate as u32) & 0x03FF_FFFF),
-            "JMP" | "CALL" | "BEQ" | "BNE" | "BGU" | "BSU" | "BGS" | "BSS" | "BGEU"
-            | "BSEU" | "BGES" | "BSES" => {
+            "JMP" | "CALL" => {
                 ((opcode & 0x3F) << 26) | (imm_u32 & 0x03FF_FFFF)
+            }
+            m if branch_info(m).is_some() => {
+                let (bop, uses_imm) = branch_info(m).unwrap();
+                let i = imm_u32 & 0x0007_FFFF;
+                let hi  = if uses_imm { (i >> 11) & 0xFF } else { rx1 & 0xFF };
+                let mid = if uses_imm { (i >> 6) & 0x1F } else { 0 };
+                let lo  = if uses_imm { i & 0x3F } else { 0 };
+                word1 = Some((lo << 26) | (((branch_target as u32) >> 2) & 0x03FF_FFFF));
+                ((opcode & 0x3F) << 26)
+                    | ((rx0 & 0xFF) << 18)
+                    | (hi << 10)
+                    | ((bop & 0x1F) << 5)
+                    | mid
             }
             "SPRLDR" | "SPRSTR" | "SPRSET" | "SPRADD" | "SPRSUB" | "SPRLEA" => {
                 ((opcode & 0x3F) << 26)
@@ -392,6 +432,7 @@ fn main() -> io::Result<()> {
                     | ((immediate as u32) & 0x0003_FFFF)
             }
             "LDI" => {
+                word1 = Some(imm_u32);
                 ((opcode & 0x3F) << 26)
                     | ((rx0 & 0xFF) << 18)
                     | ((LDI_SUBOP & 0x3F) << 4)
@@ -409,11 +450,11 @@ fn main() -> io::Result<()> {
         writeln!(output_file, "{:02X}", ((machine_code >> 16) & 0xFF) as u8)?;
         writeln!(output_file, "{:02X}", ((machine_code >> 24) & 0xFF) as u8)?;
 
-        if is_long_instr(&instr) {
-            writeln!(output_file, "{:02X}", (imm_u32 & 0xFF) as u8)?;
-            writeln!(output_file, "{:02X}", ((imm_u32 >> 8) & 0xFF) as u8)?;
-            writeln!(output_file, "{:02X}", ((imm_u32 >> 16) & 0xFF) as u8)?;
-            writeln!(output_file, "{:02X}", ((imm_u32 >> 24) & 0xFF) as u8)?;
+        if let Some(w1) = word1 {
+            writeln!(output_file, "{:02X}", (w1 & 0xFF) as u8)?;
+            writeln!(output_file, "{:02X}", ((w1 >> 8) & 0xFF) as u8)?;
+            writeln!(output_file, "{:02X}", ((w1 >> 16) & 0xFF) as u8)?;
+            writeln!(output_file, "{:02X}", ((w1 >> 24) & 0xFF) as u8)?;
         }
     }
 

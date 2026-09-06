@@ -21,7 +21,6 @@ constexpr int WINDOW_HEIGHT = 1080;
 
 constexpr int SIM_BATCH_CYCLES = 50000;
 
-
 static volatile std::sig_atomic_t g_stop = 0;
 void handle_sigint(int) { g_stop = 1; }
 uint8_t sdl_scancode_to_charset(SDL_Scancode sc);
@@ -111,7 +110,7 @@ int main(int argc, char **argv) {
             if (top->rootp->CORE__DOT__isWB_valid) {
                 g_retired_instructions++;
             }
-            if (top->rootp->CORE__DOT__isEX_valid && top->rootp->CORE__DOT__is_EX_cond_branch) {
+            if (top->rootp->CORE__DOT__isEX_valid && top->rootp->CORE__DOT__EX_branch) {
                 g_cond_branches++;
                 bool predicted_taken = top->rootp->CORE__DOT__EX_predicted_taken;
                 bool actually_taken = top->rootp->CORE__DOT__was_branch_taken;
