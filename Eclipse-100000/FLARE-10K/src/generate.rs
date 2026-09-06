@@ -1,5 +1,5 @@
 //Last step
-use crate::codegen::{AsmInst, AsmOperand};
+use crate::codegen::AsmInst;
 use std::fmt::Write;
 
 pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error> {
@@ -76,26 +76,18 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error
                 writeln!(assembly, "\tSPRLEA {} <- [{:?} {}]", rx0, spr, imm16)?
             }
             AsmInst::SprSet(rx0, spr) => writeln!(assembly, "\tSPRSET {} -> {:?}", rx0, spr)?,
-            AsmInst::Push(rx0) => writeln!(assembly, "\tPUSH <- {}", rx0)?,
-            AsmInst::Pop(rx0) => writeln!(assembly, "\tPOP -> {}", rx0)?,
+            AsmInst::Push(rx0)        => writeln!(assembly, "\tPUSH <- {}", rx0)?,
+            AsmInst::Pop(rx0)         => writeln!(assembly, "\tPOP -> {}", rx0)?,
 
-            AsmInst::Cmp(rx0, rx1, imm10) => writeln!(assembly, "\tCMP {} <-> [{}, {}]", rx0, rx1, imm10)?,
-            AsmInst::Beq(lbl) => writeln!(assembly, "\tBEQ -> {}\n", lbl)?,
-            AsmInst::Bne(lbl) => writeln!(assembly, "\tBNE -> {}\n", lbl)?,
-            AsmInst::Bgu(lbl) => writeln!(assembly, "\tBGU -> {}\n", lbl)?,
-            AsmInst::Bsu(lbl) => writeln!(assembly, "\tBSU -> {}\n", lbl)?,
-            AsmInst::Bgs(lbl) => writeln!(assembly, "\tBGS -> {}\n", lbl)?,
-            AsmInst::Bss(lbl) => writeln!(assembly, "\tBSS -> {}\n", lbl)?,
-            AsmInst::Bgeu(lbl) => writeln!(assembly, "\tBGEU -> {}\n", lbl)?,
-            AsmInst::Bseu(lbl) => writeln!(assembly, "\tBSEU -> {}\n", lbl)?,
-            AsmInst::Bges(lbl) => writeln!(assembly, "\tBGES -> {}\n", lbl)?,
-            AsmInst::Bses(lbl) => writeln!(assembly, "\tBSES -> {}\n", lbl)?,
-            AsmInst::Jmp(lbl) => writeln!(assembly, "\tJMP -> {}\n", lbl)?,
-            AsmInst::Jr(rx0) => writeln!(assembly, "\tJR  -> {}", rx0)?,
-            AsmInst::Call(lbl) => writeln!(assembly, "\tCALL {}\n", lbl)?,
+            //Idk that looks very nice imo
+            AsmInst::Branch(m, rx0, op2, lbl) => writeln!(assembly, "\n\t{} <-< [{} <-> {}] >-> {}\n", m, rx0, op2, lbl)?,
+
+            AsmInst::Jmp(lbl)    => writeln!(assembly, "\tJMP -> {}\n", lbl)?,
+            AsmInst::Jr(rx0)     => writeln!(assembly, "\tJR  -> {}", rx0)?,
+            AsmInst::Call(lbl)   => writeln!(assembly, "\tCALL {}\n", lbl)?,
             AsmInst::Inline(asm) => writeln!(assembly, "\t{}", asm)?,
-            AsmInst::Label(lbl) => writeln!(assembly, "\n{}:", lbl)?,
-            AsmInst::Ret => writeln!(assembly, "\tRET")?,
+            AsmInst::Label(lbl)  => writeln!(assembly, "\n{}:", lbl)?,
+            AsmInst::Ret         => writeln!(assembly, "\tRET")?,
         }
     }
     Ok(assembly)

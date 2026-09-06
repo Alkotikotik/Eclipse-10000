@@ -151,12 +151,16 @@ Second word:
 [25:0]  imm26 (branch target)
 >>
 
-10001 : IBEQ rx0 <-> imm19 -> imm26 //Automatically compares to signed
-10010 : IBNE rx0 <-> imm19 -> imm26
-10011 : IBG  rx0 <-> imm19 -> imm26
-10100 : IBS  rx0 <-> imm19 -> imm26
-10101 : IBGE rx0 <-> imm19 -> imm26
-10110 : IBSE rx0 <-> imm19 -> imm26
+10001 : IBEQ  rx0 <-> imm19 -> imm26
+10010 : IBNE  rx0 <-> imm19 -> imm26
+10111 : IBGU  rx0 <-> imm19 -> imm26
+11000 : UBSU  rx0 <-> imm19 -> imm26
+10011 : IBGS  rx0 <-> imm19 -> imm26
+10100 : IBSS  rx0 <-> imm19 -> imm26
+10101 : IBGES rx0 <-> imm19 -> imm26
+10110 : IBSES rx0 <-> imm19 -> imm26
+11001 : IBGEU rx0 <-> imm19 -> imm26
+11010 : IBSEU rx0 <-> imm19 -> imm26
 
 
 

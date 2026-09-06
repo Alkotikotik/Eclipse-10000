@@ -130,17 +130,7 @@ pub enum AsmInst {
     Push(AsmOperand),
     Pop(AsmOperand),
 
-    Cmp(AsmOperand, AsmOperand, AsmOperand),
-    Beq(String),
-    Bne(String),
-    Bgu(String), //unsigned
-    Bsu(String),
-    Bgs(String), //signed
-    Bss(String),
-    Bgeu(String),
-    Bseu(String),
-    Bges(String),
-    Bses(String),
+    Branch(&'static str, AsmOperand, AsmOperand, String),
 
     Jmp(String),
     Jr(AsmOperand),
@@ -558,6 +548,46 @@ impl InterferenceGraph {
             })
             .unwrap_or(0)
     }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum BrCond { Eq, Ne, Ls, Lse, Gt, Gte }
+
+fn swap_cond(c: BrCond) -> BrCond {
+    match c {
+        BrCond::Eq => BrCond::Eq,
+        BrCond::Ne => BrCond::Ne,
+        BrCond::Ls => BrCond::Gt,
+        BrCond::Gt => BrCond::Ls,
+        BrCond::Lse => BrCond::Gte,
+        BrCond::Gte => BrCond::Lse,
+    }
+}
+
+fn branch_mnemonic(c: BrCond, signed: bool, imm: bool) -> Option<&'static str> {
+    Some(match (c, signed, imm) {
+        (BrCond::Eq, _, false) => "BEQ",
+        (BrCond::Eq, _, true) => "IBEQ",
+        (BrCond::Ne, _, false) => "BNE",
+        (BrCond::Ne, _, true) => "IBNE",
+        (BrCond::Ls, true, false) => "BSS",
+        (BrCond::Ls, true, true) => "IBS",
+        (BrCond::Ls, false, false) => "BSU",
+        (BrCond::Ls, false, true) => "IBSU",
+        (BrCond::Lse, true, false) => "BSES",
+        (BrCond::Lse, true, true) => "IBSE",
+        (BrCond::Lse, false, false) => "BSEU",
+        (BrCond::Lse, false, true) => "IBSEU",
+        (BrCond::Gt, true, false) => "BGS",
+        (BrCond::Gt, true, true) => "IBG",
+        (BrCond::Gt, false, false) => "BGU",
+        (BrCond::Gt, false, true) => "IBGU",
+        (BrCond::Gte, true, false) => "BGES",
+        (BrCond::Gte, true, true) => "IBGE",
+        (BrCond::Gte, false, false) => "BGEU",
+        (BrCond::Gte, false, true) => "IBGEU",
+        _ => return None,
+    })
 }
 
 fn rx31() -> AsmOperand {
@@ -2021,44 +2051,55 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn lower_cmp(&mut self, left: &IROperand, right: &IROperand, out: &mut Vec<AsmInst>) {
-        let mut used_rx30 = false;
-        let mut used_rx31 = false;
+    fn emit_branch(
+        &mut self,
+        cond: BrCond,
+        signed: bool,
+        left: &IROperand,
+        right: &IROperand,
+        target: String,
+        out: &mut Vec<AsmInst>,
+    ) {
+        if is_const(right) && fits(const_val(right) as i64, 19, true) {
+            if let Some(m) = branch_mnemonic(cond, signed, true) {
+                let l = if is_const(left) {
+                    load_const(rx30_reg(), const_val(left), out);
+                    reg_op(rx30_reg())
+                } else {
+                    self.operand_to_asm(left)
+                };
+                out.push(AsmInst::Branch(m, l, AsmOperand::Imm26(const_val(right)), target));
+                return;
+            }
+        }
 
-        let l_op = if is_const(left) {
+        if is_const(left) && !is_const(right) && fits(const_val(left) as i64, 19, true) {
+            if let Some(m) = branch_mnemonic(swap_cond(cond), signed, true) {
+                let r = self.operand_to_asm(right);
+                out.push(AsmInst::Branch(m, r, AsmOperand::Imm26(const_val(left)), target));
+                return;
+            }
+        }
+
+        let m = branch_mnemonic(cond, signed, false).unwrap();
+        let mut used_rx30 = false;
+        let l = if is_const(left) {
             load_const(rx30_reg(), const_val(left), out);
             used_rx30 = true;
             reg_op(rx30_reg())
         } else {
             self.operand_to_asm(left)
         };
-
-        if is_const(right) && fits(const_val(right) as i64, 10, true) {
-            out.push(AsmInst::Cmp(
-                l_op,
-                rx31(),
-                AsmOperand::Imm10(const_val(right) as i16),
-            ));
-            if used_rx30 {
-                out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));
-            }
-            return;
-        }
-
-        let r_op = if is_const(right) {
-            load_const(rx31_reg(), const_val(right), out);
-            used_rx31 = true;
-            rx31()
+        let right_const = is_const(right);
+        let r = if right_const {
+            let scratch = if used_rx30 { rx31_reg() } else { rx30_reg() };
+            load_const(scratch, const_val(right), out);
+            reg_op(scratch)
         } else {
             self.operand_to_asm(right)
         };
-
-        out.push(AsmInst::Cmp(l_op, r_op, AsmOperand::Imm10(0)));
-
-        if used_rx30 {
-            out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));
-        }
-        if used_rx31 {
+        out.push(AsmInst::Branch(m, l, r, target));
+        if used_rx30 && right_const {
             out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
         }
     }
@@ -2340,8 +2381,7 @@ impl<'a> Codegen<'a> {
                 right,
                 target,
             } => {
-                self.lower_cmp(left, right, out);
-                out.push(AsmInst::Beq(target.clone()));
+                self.emit_branch(BrCond::Eq, false, left, right, target.clone(), out);
             }
 
             IRInst::Equal {
@@ -2349,8 +2389,7 @@ impl<'a> Codegen<'a> {
                 right,
                 target,
             } => {
-                self.lower_cmp(left, right, out);
-                out.push(AsmInst::Bne(target.clone()));
+                self.emit_branch(BrCond::Ne, false, left, right, target.clone(), out);
             }
 
             IRInst::AntiMore {
@@ -2360,18 +2399,8 @@ impl<'a> Codegen<'a> {
                 signed,
                 isEq
             } => {
-                self.lower_cmp(left, right, out);
-                if *isEq {
-                    if *signed {
-                        out.push(AsmInst::Bss(target.clone()));
-                    } else {
-                        out.push(AsmInst::Bsu(target.clone()));
-                    }
-                } else if *signed {
-                    out.push(AsmInst::Bses(target.clone()));
-                } else {
-                    out.push(AsmInst::Bseu(target.clone()));
-                }
+                let cond = if *isEq { BrCond::Ls } else { BrCond::Lse };
+                self.emit_branch(cond, *signed, left, right, target.clone(), out);
             }
 
             IRInst::AntiLess {
@@ -2381,18 +2410,8 @@ impl<'a> Codegen<'a> {
                 signed,
                 isEq,
             } => {
-                self.lower_cmp(left, right, out);
-                if *isEq {
-                    if *signed {
-                        out.push(AsmInst::Bgs(target.clone()));
-                    } else {
-                        out.push(AsmInst::Bgu(target.clone()));
-                    }
-                } else if *signed {
-                    out.push(AsmInst::Bges(target.clone()));
-                } else {
-                    out.push(AsmInst::Bgeu(target.clone()));
-                }
+                let cond = if *isEq { BrCond::Gt } else { BrCond::Gte };
+                self.emit_branch(cond, *signed, left, right, target.clone(), out);
             }
 
             IRInst::InlineAsm(asm) => {

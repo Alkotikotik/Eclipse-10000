@@ -345,10 +345,10 @@ module CORE(
             5'b00001, 5'b10001: branch_cond_met = branch_eq;  //BEQ/IBEQ
             5'b00010, 5'b10010: branch_cond_met = !branch_eq; //BNE/IBNE
 
-            5'b00011: branch_cond_met = !branch_less_unsigned && !branch_eq; // BGU
-            5'b00100: branch_cond_met = branch_less_unsigned;                // BSU
-            5'b00111: branch_cond_met = !branch_less_unsigned;               // BGEU
-            5'b01000: branch_cond_met = branch_less_unsigned || branch_eq;   // BSEU
+            5'b00011, 5'b10111: branch_cond_met = !branch_less_unsigned && !branch_eq; // BGU/IBGU
+            5'b00100, 5'b11000: branch_cond_met = branch_less_unsigned;                // BSU/IBSU
+            5'b00111, 5'b11001: branch_cond_met = !branch_less_unsigned;               // BGEU/IBGEU
+            5'b01000, 5'b11010: branch_cond_met = branch_less_unsigned || branch_eq;   // BSEU/IBSUE
 
             5'b00101, 5'b10011: branch_cond_met = !branch_less_signed && !branch_eq;   // BGS/IBG
             5'b00110, 5'b10100: branch_cond_met = branch_less_signed;                  // BSS/IBS

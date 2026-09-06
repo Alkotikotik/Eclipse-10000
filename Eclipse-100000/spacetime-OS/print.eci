@@ -2243,8 +2243,8 @@
 
 
 ~Lab_while_start_0:
-	CMP rz292 <-> [rx31, 1]
-	BNE -> ~Lab_endif_3
+
+	IBNE <-< [rz292 <-> 1] >-> ~Lab_endif_3
 
 	SPRLDR rx28 <- [GP 8]
 	LOAD rx30 <- 10
@@ -2279,8 +2279,8 @@
 
 ~kprintr:
 	LOAD rx22 <- 0
-	CMP rx22 <-> [rz30, 0]
-	BGEU -> ~Lab_for_end_5
+
+	BGEU <-< [rx22 <-> rz30] >-> ~Lab_for_end_5
 
 
 ~Lab_for_start_4:
@@ -2294,8 +2294,8 @@
 	LOAD rx30 <- 4000
 	ADD rx28 <- [rx30, rx28 0]
 	STR rz290 -> [rx28 0]
-	CMP rx27 <-> [rx31, 255]
-	BNE -> ~Lab_endif_7
+
+	IBNE <-< [rx27 <-> 255] >-> ~Lab_endif_7
 
 	RET
 
@@ -2304,8 +2304,8 @@
 	SHL [rx28, rx31 4]
 	MOV rx25 <- rx28 0
 	LOAD rx26 <- 0
-	CMP rx26 <-> [rx31, 16]
-	BGEU -> ~Lab_for_end_9
+
+	IBGEU <-< [rx26 <-> 16] >-> ~Lab_for_end_9
 
 
 ~Lab_for_start_8:
@@ -2325,8 +2325,8 @@
 	ADD rx28 <- [rx28, rx27 0]
 	MOV rx27 <- rx28 0
 	LOAD rx23 <- 0
-	CMP rx23 <-> [rx31, 8]
-	BGEU -> ~Lab_for_end_11
+
+	IBGEU <-< [rx23 <-> 8] >-> ~Lab_for_end_11
 
 
 ~Lab_for_start_10:
@@ -2335,8 +2335,8 @@
 	ADD rx28 <- [rx27, rx28 0]
 	MOV rz290 <- rz241 0
 	AND [rz290, rz240 0]
-	CMP rz290 <-> [rz240, 0]
-	BNE -> ~Lab_else_12
+
+	BNE <-< [rz290 <-> rz240] >-> ~Lab_else_12
 
 	STR ry10 -> [rx28 0]
 	JMP -> ~Lab_endif_13
@@ -2351,15 +2351,15 @@
 	MOV rz240 <- rz290 0
 	ADD rx28 <- [rx23, rx31 1]
 	MOV rx23 <- rx28 0
-	CMP rx23 <-> [rx31, 8]
-	BSU -> ~Lab_for_start_10
+
+	IBSU <-< [rx23 <-> 8] >-> ~Lab_for_start_10
 
 
 ~Lab_for_end_11:
 	ADD rx28 <- [rx26, rx31 1]
 	MOV rx26 <- rx28 0
-	CMP rx26 <-> [rx31, 16]
-	BSU -> ~Lab_for_start_8
+
+	IBSU <-< [rx26 <-> 16] >-> ~Lab_for_start_8
 
 
 ~Lab_for_end_9:
@@ -2368,8 +2368,8 @@
 	MOV ry00 <- ry290 0
 	ADD rx28 <- [rx22, rx31 1]
 	MOV rx22 <- rx28 0
-	CMP rx22 <-> [rz30, 0]
-	BSU -> ~Lab_for_start_4
+
+	BSU <-< [rx22 <-> rz30] >-> ~Lab_for_start_4
 
 
 ~Lab_for_end_5:
@@ -2390,14 +2390,14 @@
 	LOAD ry301 <- 1040
 	STR rx1 -> [rx30 0]
 	XOR [rx30, rx30 0]
-	CMP rx1 <-> [rx31, 0]
-	BNE -> ~Lab_endif_15
 
-	CMP rz293 <-> [rx31, 11]
-	BSU -> ~Lab_endif_17
+	IBNE <-< [rx1 <-> 0] >-> ~Lab_endif_15
 
-	CMP rz293 <-> [rx31, 36]
-	BGU -> ~Lab_endif_19
+
+	IBSU <-< [rz293 <-> 11] >-> ~Lab_endif_17
+
+
+	IBGU <-< [rz293 <-> 36] >-> ~Lab_endif_19
 
 	MOV rx28 <- rz293 0
 	MOV rx0 <- rx28 0

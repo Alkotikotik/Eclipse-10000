@@ -24,6 +24,10 @@ fn branch_info(mnemonic: &str) -> Option<(u32, bool)> {
         "IBS"  => (0b10100, true),
         "IBGE" => (0b10101, true),
         "IBSE" => (0b10110, true),
+        "IBGU" => (0b10111, true),
+        "IBSU" => (0b11000, true),
+        "IBGEU" => (0b11001, true),
+        "IBSEU" => (0b11010, true),
         _ => return None,
     })
 }
@@ -132,7 +136,8 @@ fn main() -> io::Result<()> {
     opcodes.insert("STR", 0b100111);
 
     for name in ["BEQ", "BNE", "BGU", "BSU", "BGEU", "BSEU", "BGS", "BSS", "BGES", "BSES",
-                 "IBEQ", "IBNE", "IBG", "IBS", "IBGE", "IBSE"] {
+                 "IBEQ", "IBNE", "IBG", "IBS", "IBGE", "IBSE",
+                 "IBGU", "IBSU", "IBGEU", "IBSEU"] {
         opcodes.insert(name, 0b110000);
     }
 
@@ -167,6 +172,7 @@ fn main() -> io::Result<()> {
             .replace(",", " ")
             .replace("->", " ")
             .replace(">", " ")
+            .replace("<", " ")
             .replace("+", " ");
 
         let tokens: Vec<&str> = cleared.split_whitespace().collect();
