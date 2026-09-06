@@ -28,7 +28,8 @@ module CORE(
     logic  [31:0] PC_target;
 
     assign demolish  =  isEX_valid &&
-                        ((PCWrite &&
+                        (irq_taken ||
+                        (PCWrite &&
                         !(opcode == 6'b111111 || opcode == 6'b111000) &&
                         !((opcode == 6'b010000 || opcode == 6'b111101) && (EX_early_target == PCNext)) &&
                         !(EX_branch && EX_predicted_taken)) ||
@@ -558,6 +559,7 @@ module CORE(
 
     logic KernelMode;
     logic EPCWrite;
+    logic irq_taken;
     logic isKernelMode;
     logic mod_state;
 
@@ -713,11 +715,11 @@ module CORE(
             mod_state <= ENC_10K_ModArr;
 
             if (isEX_valid) begin
-                if (EPCWrite) EPC <= EX_PC + 32'd4;
+                if (EPCWrite) EPC <= irq_taken ? EX_PC : (EX_PC + ((EX_64 || EX_branch) ? 32'd8 : 32'd4));
                 KernelMode <= isKernelMode;
 
                 if (isCallState && opcode == 6'b111000) begin
-                    LR <= EX_PC + (EX_64 ? 32'h8 : 32'h4);
+                    LR <= EX_PC + ((EX_64 || EX_branch) ? 32'h8 : 32'h4);
                 end
 
                 if (SPRWrite) begin
@@ -837,6 +839,7 @@ module CORE(
         .PCWrite(PCWrite),
         .GPRsWrite(GPRsWrite),
         .EPCWrite(EPCWrite),
+        .irq_taken(irq_taken),
         .isKernelMode(isKernelMode),
         .memRead(memRead),
         .memWrite(memWrite),

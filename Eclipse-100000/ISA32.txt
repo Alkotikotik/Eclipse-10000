@@ -85,7 +85,6 @@ Special type operations (S-Type)
 101100 : SPRSUB rx0, SPR, imm16     // SPR = rx0 - imm16
 101101 : SPRLEA rx0, SPR, imm16    // rx0 = location of selected SPR
 
-
 Jumps & Subroutines
 111111 : JMP imm26        // Unconditional Jump to imm26 address/label
 110111 : JR rx0          // Unconditional Jump to rx0

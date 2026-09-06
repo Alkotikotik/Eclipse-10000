@@ -19,6 +19,7 @@ module CU(
     output logic GPRsWrite,
 
     output logic EPCWrite,
+    output logic irq_taken,
     output logic isKernelMode,
 
     output logic memRead,
@@ -86,6 +87,7 @@ module CU(
         PCWrite = 0;
         timer_interrupt_taken = 0;
         key_interrupt_taken = 0;
+        irq_taken = 0;
 
         unique case (opcode[5:4])
             2'b00: begin // ALU R/B-type default, and bigass 64 bit decoder, for every 64bit instr
@@ -205,13 +207,17 @@ module CU(
         //Interrupt override whatever was in the current EX now checking on
         //every cycle instead of only between states, also it is gated by
         //!PCWrite so in base of branch nothing would break
-        if (isEX_valid && !isKernelMode && !PCWrite) begin
+        if (isEX_valid && !isKernelMode) begin
             if (timer_interrupt_pending) begin
                 EPCWrite = 1; isKernelMode = 1; PCSrc = 4'b0100; PCWrite = 1;
                 timer_interrupt_taken = 1;
+                irq_taken = 1;
+                GPRsWrite = 0; memWrite = 0; SPRWrite = 0;
             end else if (key_interrupt_pending) begin
                 EPCWrite = 1; isKernelMode = 1; PCSrc = 4'b1000; PCWrite = 1;
                 key_interrupt_taken = 1;
+                irq_taken = 1;
+                GPRsWrite = 0; memWrite = 0; SPRWrite = 0;
             end
         end
 
