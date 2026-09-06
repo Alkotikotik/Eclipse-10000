@@ -16,7 +16,7 @@ Where sub specifier is
 | 001, 010| ry0, ry1 |
 | 011, 100, 101, 110 | rz0, rz1, rz2, rz3 |
 
-Note that rx31 and rx30 are soft-reserved by the compiler - compiler uses them for storing temporary variables, or usually as 0-register
+Note that rx31 and rx30 are soft-reserved by the compiler - compiler uses them for storing temporary variables, or usually as 0-register.
 
 Notice how with that pattern 32 combinations are unused:)
 

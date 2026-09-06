@@ -127,7 +127,7 @@ module CORE(
     logic [11:0] pht_read_idx;
     //Last 12 bits of imm26 13:2 because last two bits are always 0 since labels are 4 byte aligned
     //IF_PC_next because BRAM read happens on the next clock cycle to the request
-    assign pht_read_idx = IF_PC_next[13:2] ^ GHR;
+    assign pht_read_idx = IF_PC_next[14:3] ^ GHR;
     /* verilator lint_off UNUSEDSIGNAL */
     logic [1:0] pht_out; //Actual counter for particular branch, only lowest bit isn't really read
     /* verilator lint_off UNUSEDSIGNAL */
@@ -277,8 +277,6 @@ module CORE(
     logic [31:0] sign_ext_imm18;
     assign sign_ext_imm18 = { {14{EX_IR[17]}}, EX_IR[17:0] };
 
-    logic [31:0] sign_ext_imm26;
-    assign sign_ext_imm26 = { {6{EX_IR[25]}}, EX_IR[25:0] };
 
     logic [31:0] sign_ext_imm16;
     assign sign_ext_imm16 = { {16{EX_IR[15]}}, EX_IR[15:0] };
@@ -589,7 +587,7 @@ module CORE(
     logic [3:0] ram_byte_enable;
     logic [31:0] ram_data_in_aligned;
 
-    assign gpr_rw0_sel = (opcode == 6'b011111) ? (8'd31 << 3) : //LMA rx31
+    assign gpr_rw0_sel =
                 //3 register ALU type
                 (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111 || opcode == 6'b000101 || opcode == 6'b001011 || opcode == 6'b001001) ? rx2 :
                 rx0;
@@ -819,7 +817,6 @@ module CORE(
     //No 3'b001 arm anymore, MEM fixes the load in one cycle later
     assign GPRs_data_in = (GPRsSrc == 3'b010) ? EX_PC :
                   (GPRsSrc == 3'b011) ? sign_ext_imm18 :
-                  (GPRsSrc == 3'b100) ? sign_ext_imm26 :
                   (GPRsSrc == 3'b101) ? memTarget : //SPRLEA
                   (GPRsSrc == 3'b110) ? EX_IR_2 :
                   AluResult;

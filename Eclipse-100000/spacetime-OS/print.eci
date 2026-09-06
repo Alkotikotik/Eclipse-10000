@@ -24,8 +24,7 @@
 	SPRSUB rx31 ->SP<- 1036
 	SPRLEA rx30 <- [SP 0]
 	SPRSET rx30 -> GP
-	LOAD ry300 <- 0
-	LOAD ry301 <- 1024
+	LMA rx30 <- 67108864
 	SPRSTR rx30 -> [GP 0]
 	LOAD rx30 <- 640
 	SPRSTR rx30 -> [GP 4]
@@ -2374,18 +2373,15 @@
 	RET
 
 ~HandleKey:
-	LOAD ry00 <- 0
-	LOAD ry01 <- 1040
+	LMA rx0 <- 68157440
 	LDR rx28 <- [rx0 0]
 	MOV rx1 <- rx28 0
 	MOV rz290 <- rx1 0
 	MOV rz293 <- rz290 0
-	LOAD ry00 <- 4
-	LOAD ry01 <- 1040
+	LMA rx0 <- 68157444
 	LDR rx28 <- [rx0 0]
 	MOV rx1 <- rx28 0
-	LOAD ry300 <- 16
-	LOAD ry301 <- 1040
+	LMA rx30 <- 68157456
 	STR rx1 -> [rx30 0]
 	XOR [rx30, rx30 0]
 

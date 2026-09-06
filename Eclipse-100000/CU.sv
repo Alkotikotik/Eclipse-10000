@@ -94,7 +94,7 @@ module CU(
                 if (opcode == 6'b000000) begin
                     unique case (op_64)
                         6'b000000: ; //NOP
-                        6'b010001: begin
+                        6'b010001: begin //LMA
                             GPRsSrc = 3'b110;
                             GPRsWrite = 1;
                         end
@@ -115,10 +115,10 @@ module CU(
                     PCWrite = branch_cond_met;
                 end
             end
-            2'b01: begin // LOAD-imm / LMA
-                if (opcode == 6'b010001 || opcode == 6'b011111) begin
+            2'b01: begin // LOAD-imm
+                if (opcode == 6'b010001) begin
                     GPRsWrite = 1;
-                    GPRsSrc = (opcode == 6'b011111) ? 3'b100 : 3'b011; // LMA vs LOAD rx0,imm18
+                    GPRsSrc = 3'b011; // LOAD rx0,imm18
                 end
             end
             2'b10: ;

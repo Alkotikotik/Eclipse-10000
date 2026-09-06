@@ -117,7 +117,7 @@ pub enum AsmInst {
     Sra(AsmOperand, AsmOperand, AsmOperand),
 
     Load(AsmOperand, AsmOperand),
-    Lma(AsmOperand),                         //Up to 25bits loads into rx31
+    Lma(AsmOperand, AsmOperand),             //Full 32bit immediate into any register
     Ldr(AsmOperand, AsmOperand, AsmOperand), // dest, base, offset
     Str(AsmOperand, AsmOperand, AsmOperand), // src, base, offset
 
@@ -665,24 +665,9 @@ fn load_const(dest: Register, value: i32, out: &mut Vec<AsmInst>) {
             //If it fits into 18 bits use regular load
             out.push(AsmInst::Load(reg_op(dest), AsmOperand::Imm18(value)));
         }
-        RegType::B32 if fits(value as i64, 26, true) => {
-            //If it fits between 18-26 bits we use LMA and then mov the value to dest
-            out.push(AsmInst::Lma(AsmOperand::Imm26(value)));
-            if dest.id != 31 {
-                //If we actually wanted it in rx31, jic tbh tho
-                out.push(AsmInst::Mov(reg_op(dest), rx31(), AsmOperand::Imm10(0)));
-                out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
-            }
-        }
         RegType::B32 => {
-            // If it doesn't fit even in 26 bits, we utilize register
-            // fragmentation by loading lower 16 bits into ry310 higher into ry311 and result
-            // will just be in rx31, genuis, love register fragmentation, wait why the hell are we
-            // loading it into rx31? We can just load it in any register, gotta fix it later
-            let lo = (value as u32 & 0xFFFF) as i32;
-            let hi = ((value as u32 >> 16) & 0xFFFF) as i32;
-            out.push(AsmInst::Load(half_op(dest, 0), AsmOperand::Imm18(lo)));
-            out.push(AsmInst::Load(half_op(dest, 2), AsmOperand::Imm18(hi)));
+            //Anything wider than imm18 is one LMA now, any register, full 32 bits
+            out.push(AsmInst::Lma(reg_op(dest), AsmOperand::Imm26(value)));
         }
         _ => out.push(AsmInst::Load(reg_op(dest), AsmOperand::Imm18(value))), // 16/8-bit value always fit in imm18
     }
@@ -2293,7 +2278,7 @@ impl<'a> Codegen<'a> {
             AsmInst::Load(AsmOperand::Reg(Reg::TheRealOne(r)), _) if r.reg_type == RegType::B32 => {
                 r.id == target_id
             }
-            AsmInst::Lma(_) => target_id == 31,
+            AsmInst::Lma(AsmOperand::Reg(Reg::TheRealOne(r)), _) => r.id == target_id,
             _ => false,
         }
     }

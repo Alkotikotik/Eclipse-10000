@@ -24,8 +24,7 @@
 	SPRSUB rx31 ->SP<- 1032
 	SPRLEA rx30 <- [SP 0]
 	SPRSET rx30 -> GP
-	LOAD ry300 <- 0
-	LOAD ry301 <- 1024
+	LMA rx30 <- 67108864
 	SPRSTR rx30 -> [GP 0]
 	LOAD rx30 <- 640
 	SPRSTR rx30 -> [GP 4]

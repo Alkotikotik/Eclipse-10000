@@ -51,7 +51,7 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error
 
             AsmInst::Not(op) => writeln!(assembly, "\tNOT {}", op)?,
             AsmInst::Load(dest, imm18) => writeln!(assembly, "\tLOAD {} <- {}", dest, imm18)?,
-            AsmInst::Lma(imm26) => writeln!(assembly, "\tLMA {}", imm26)?,
+            AsmInst::Lma(rx0, imm32) => writeln!(assembly, "\tLMA {} <- {}", rx0, imm32)?,
 
             AsmInst::Ldr(dest, base, offset) => {
                 writeln!(assembly, "\tLDR {} <- [{} {}]", dest, base, offset)?

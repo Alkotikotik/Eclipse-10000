@@ -69,7 +69,6 @@ ALU Instructions (B-Type)
 
 Memory Instructions
 010001 : LOAD   rx0, imm18             //Loads imm into rx0
-011111 : LMA    imm26                 //Loads Massive into rx31(signed imm26)
 100011 : LDR    rx0, (rx1 +- imm10)  // Load from memory
 100111 : STR    rx0, (rx1 +- imm10) // Store rx0 at location specified by (rx1 +-imm10)
 
@@ -111,7 +110,7 @@ Second word:
 
 Loads:
 [31:0] imm32
-010001 : LDI //full 32bits in one instruction
+010001 : LMA //Load MASSIVE 32bits in one instruction
 
 Fused CMP and branch, separated into pure register and pure immediate forms, in order to avoid useless wait for ALU in pure register form
 

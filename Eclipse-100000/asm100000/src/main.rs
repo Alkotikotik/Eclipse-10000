@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{self, BufRead, Write};
 use std::process;
 
-const LDI_SUBOP: u32 = 0b010001;
+const LMA_SUBOP: u32 = 0b010001;
 
 fn branch_info(mnemonic: &str) -> Option<(u32, bool)> {
     Some(match mnemonic {
@@ -38,7 +38,7 @@ fn is_long_instr(line: &str) -> bool {
         .next()
         .unwrap_or("")
         .to_uppercase();
-    head == "LDI" || branch_info(&head).is_some()
+    head == "LMA" || branch_info(&head).is_some()
 }
 
 fn parse_imm64(token: &str) -> i64 {
@@ -130,8 +130,7 @@ fn main() -> io::Result<()> {
     opcodes.insert("SRA", 0b001010);
 
     opcodes.insert("LOAD", 0b010001);
-    opcodes.insert("LDI", 0b000000);
-    opcodes.insert("LMA", 0b011111);
+    opcodes.insert("LMA", 0b000000);
     opcodes.insert("LDR", 0b100011);
     opcodes.insert("STR", 0b100111);
 
@@ -207,7 +206,7 @@ fn main() -> io::Result<()> {
                     immediate = parse_imm64(tokens[2]);
                 }
             }
-            "LDI" => {
+            "LMA" => {
                 if tokens.len() > 1 {
                     rx0 = parse_reg(tokens[1]);
                 }
@@ -217,16 +216,6 @@ fn main() -> io::Result<()> {
                         immediate = label_addr as i64;
                     } else {
                         immediate = parse_imm64(tokens[2]);
-                    }
-                }
-            }
-            "LMA" => {
-                if tokens.len() > 1 {
-                    let target = tokens[1].trim_start_matches('~');
-                    if let Some(&label_addr) = labels.get(target) {
-                        immediate = label_addr as i64;
-                    } else {
-                        immediate = parse_imm64(tokens[1]);
                     }
                 }
             }
@@ -409,7 +398,6 @@ fn main() -> io::Result<()> {
         let imm_u32 = immediate as u32;
 
         let machine_code: u32 = match instr.as_str() {
-            "LMA" => ((opcode & 0x3F) << 26) | ((immediate as u32) & 0x03FF_FFFF),
             "JMP" | "CALL" => {
                 ((opcode & 0x3F) << 26) | (imm_u32 & 0x03FF_FFFF)
             }
@@ -437,11 +425,11 @@ fn main() -> io::Result<()> {
                     | ((rx0 & 0xFF) << 18)
                     | ((immediate as u32) & 0x0003_FFFF)
             }
-            "LDI" => {
+            "LMA" => {
                 word1 = Some(imm_u32);
                 ((opcode & 0x3F) << 26)
                     | ((rx0 & 0xFF) << 18)
-                    | ((LDI_SUBOP & 0x3F) << 4)
+                    | ((LMA_SUBOP & 0x3F) << 4)
             }
             _ => {
                 ((opcode & 0x3F) << 26)
