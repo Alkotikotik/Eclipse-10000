@@ -293,13 +293,34 @@ module CORE(
         endcase
     end
 
+    //== Comparator ==//
+    //Moved the compare module from ALU to here, for 1) shorten critical path,
+    //2) convinience
+    logic [31:0] branch_x, branch_y;
+    logic        branch_eq, branch_less_unsigned, branch_less_signed;
+
+    assign branch_x = FWD_rx0;
+    //2 opcodes for every branch - the one that uses imm, and other uses register
+    //That way we don't have to add imm every time on branch, in fact we never
+    //have to add imm if we are comparing to the varibale, which shortens
+    //critical path, and as a bonus compiler wouldn't need to use rx31 as
+    //a scratch and add imm to it, we can just use big imm19
+    assign branch_y = does_branch_imm ? branch_imm_signed : FWD_rx1;
+
+    //Why didn't I just make it this way from the start?
+    assign branch_eq = (branch_x == branch_y);
+    assign branch_less_unsigned = (branch_x < branch_y);
+    assign branch_less_signed = ($signed(branch_x) < $signed(branch_y));
+
+
+
     //== MEM(memory) ==//
     //Work with memory - load, store
     logic [31:0] MEM_result;
-    logic [7:0] MEM_gpr_dest;
-    logic       MEM_gpr_write;
-    logic       MEM_kernel_mode;
-    logic       isMEM_valid;
+    logic [7:0]  MEM_gpr_dest;
+    logic        MEM_gpr_write;
+    logic        MEM_kernel_mode;
+    logic        isMEM_valid;
 
     logic MEM_is_lomul, MEM_is_himul;
     logic MEM_is_load, MEM_ram_cs, MEM_io_cs, MEM_vram_cs;
