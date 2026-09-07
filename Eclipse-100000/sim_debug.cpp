@@ -18,7 +18,6 @@ constexpr uint32_t VRAM_SIZE = INTERNAL_WIDTH * INTERNAL_HEIGHT * 2; // RGBA4444
 constexpr int WINDOW_WIDTH = 1920;
 constexpr int WINDOW_HEIGHT = 1080;
 
-
 static volatile std::sig_atomic_t g_stop = 0;
 void handle_sigint(int) { g_stop = 1; }
 

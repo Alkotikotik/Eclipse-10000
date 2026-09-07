@@ -1722,9 +1722,102 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    //Actual codegen time
+    //So umm for some "interesting" reason it was doing bs like that 
+    //MOV rz280 <- rz290
+    //SUB rz280 <- [rz280, rx31 1]
+    //MOV rz290 <- rz280
+    //I almost got a stroke when I read it, so that should do the trick, Unfortunately there is
+    //still some bs like that in branches but imma solve that later
+    fn fold_regfield_rmw(&mut self) {
+        let mut uses: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
+        for b in &self.cfg {
+            for inst in &b.body {
+                for u in inst.uses() {
+                    if let IROperand::Temp(t) = u {
+                        *uses.entry(t).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+        let single = |op: &IROperand| -> bool {
+            matches!(op, IROperand::Temp(t) if uses.get(t) == Some(&1))
+        };
+
+        let mut retarget: Vec<(IROperand, Register)> = Vec::new();
+
+        for b in &self.cfg {
+            let body = &b.body;
+            for i in 0..body.len().saturating_sub(2) {
+                let (t1, sv, off, size) = match &body[i] {
+                    IRInst::RegFieldRead {
+                        dest,
+                        struct_var,
+                        byte_offset,
+                        byte_size,
+                    } => (dest, struct_var, *byte_offset, *byte_size),
+                    _ => continue,
+                };
+
+                let (t2, left, right) = match &body[i + 1] {
+                    IRInst::Add { dest, left, right }
+                    | IRInst::Sub { dest, left, right }
+                    | IRInst::Mul { dest, left, right }
+                    | IRInst::Shl { dest, left, right }
+                    | IRInst::Shr { dest, left, right }
+                    | IRInst::Xor { dest, left, right }
+                    | IRInst::Or { dest, left, right }
+                    | IRInst::And { dest, left, right }
+                    | IRInst::Div {
+                        dest, left, right, ..
+                    }
+                    | IRInst::Mod {
+                        dest, left, right, ..
+                    } => (dest, left, right),
+                    _ => continue,
+                };
+
+                let writes_back = match &body[i + 2] {
+                    IRInst::RegFieldWrite {
+                        src,
+                        struct_var,
+                        byte_offset,
+                        byte_size,
+                    } => src == t2 && struct_var == sv && *byte_offset == off && *byte_size == size,
+                    _ => false,
+                };
+
+                if !writes_back || left != t1 || right == t1 || right == t2 {
+                    continue;
+                }
+                if !single(t1) || !single(t2) {
+                    continue;
+                }
+
+                if let Some(Location::Register(reg)) = self.allocations.get(sv) {
+                    let field = Register {
+                        id: reg.id,
+                        reg_type: match size {
+                            1 => RegType::B8,
+                            2 => RegType::B16,
+                            _ => RegType::B32,
+                        },
+                        sub_index: reg.sub_index + off as u8,
+                    };
+                    retarget.push((t1.clone(), field));
+                    retarget.push((t2.clone(), field));
+                }
+            }
+        }
+
+        for (op, reg) in retarget {
+            self.allocations.insert(op, Location::Register(reg));
+        }
+    }
+
+    //Actual codegen time, basically just call everything i've been bulding
     pub fn lower_func(&mut self) -> Vec<AsmInst> {
         self.fold_slot_addrs();
+        self.fold_regfield_rmw();
         let mut compiled = Vec::new();
         let leaf = self.is_leaf();
         let blocks = self.cfg.clone();
