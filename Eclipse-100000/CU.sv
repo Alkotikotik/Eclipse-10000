@@ -98,6 +98,14 @@ module CU(
                             GPRsSrc = 3'b110;
                             GPRsWrite = 1;
                         end
+                        6'b010000: begin
+                            memWrite = 1;
+                        end
+                        6'b011111: begin
+                            memRead = 1;
+                            GPRsSrc = 3'b001;
+                            GPRsWrite = 1;
+                        end
                         default ;
                     endcase
                 end else begin

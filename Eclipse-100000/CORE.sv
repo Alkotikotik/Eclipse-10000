@@ -19,7 +19,7 @@ module CORE(
     //obviosely varies by program being executed.
     //That is about 2.8 times faster than my multi-cycle design(~= 2.9CPI) as
     //well as higher estimated clock frequency due to shorter critical path
-    //3 cycles per instruction to 5
+    //3 cycles per instruction to 5, we'll see about that I gotta optimze it.
     //====//
 
     logic  demolish;   //Removes current instructions on the branch misprediction/branch
@@ -205,12 +205,13 @@ module CORE(
     //So the regfile read is moved to the ID, saves up on critical path and ID
     //is almost empty anyways so I might as well fill it as much as possible
     logic [7:0]  ID_rx0, ID_rx1; //Selector
-    logic [31:0] ID_rx0_val, ID_rx1_val;
+    logic [31:0] ID_rx0_val, ID_rx1_val, ID_rx2_val;
 
     assign ID_rx0 = ID_IR[25:18];
     assign ID_rx1 = ID_IR[17:10];
+    //No rx2 I just use ID_IR_2[something:something]
 
-    logic ID_wb_hit0, ID_wb_hit1;
+    logic ID_wb_hit0, ID_wb_hit1, ID_wb_hit2;
 
     //For later when memory would take actual clock cycles to reach
     /* verilator lint_off UNUSEDSIGNAL */
@@ -226,7 +227,7 @@ module CORE(
     logic [31:0] EX_IR_2;
     logic [31:0] EX_early_target;
     logic [11:0] EX_pht_idx;
-    logic [31:0] EX_rx0_val, EX_rx1_val;
+    logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
     logic EX_predicted_taken;
     logic isEX_valid;
     logic EX_branch;
@@ -242,6 +243,7 @@ module CORE(
             EX_IR_2 <= ID_IR_2;
             EX_rx0_val <= ID_rx0_val;
             EX_rx1_val <= ID_rx1_val;
+            EX_rx2_val <= ID_rx2_val;
             EX_branch <= ID_branch;
 
 
@@ -256,7 +258,7 @@ module CORE(
     logic [5:0] opcode;
     logic [5:0] op_64;
     logic [4:0] branch_op; //32 possible branches
-    logic [7:0] rx0, rx1, rx2;
+    logic [7:0] rx0, rx1, rx2, rxi; //rxi for LDX/STX, a lot of special stuff for it, But I love them nontheless(for that reason too)
     logic [11:0] immediate;
     logic [31:0] j_imm_signed;
 
@@ -264,6 +266,7 @@ module CORE(
     assign rx0 = EX_IR[25:18];
     assign rx1 = EX_IR[17:10];
     assign rx2 = EX_IR[9:2];
+    assign rxi = EX_IR_2[31:24];
     assign op_64 = EX_IR[9:4];
     assign branch_op = EX_IR[9:5];
     assign immediate = EX_IR[11:0];
@@ -292,6 +295,16 @@ module CORE(
             2'b11: sign_ext_imm2 = -32'sd1;
         endcase
     end
+
+
+    logic[31:0] LDX_base, LDX_idx, LDX_imm29; //Just enough to cover all 256MB signed
+
+    assign LDX_base = (rx1[7:3] == 5'd31) ? 32'b0 : FWD_rx1_full; //Theoretically it is base +- imm29, but usually base is 0 so rx31
+    //I don't even know why Im making it that way because in case RAM would
+    //become more than 256MB basically whole architecture would be cooked, but whatever. Oh wait I remembered - its for accesses 
+    //That are unknown at the compile-time, literally thought of that like 4 hours ago
+    assign LDX_idx = FWD_rxi << EX_IR_2[23:22];
+    assign LDX_imm29 = {{3{EX_IR[12]}}, EX_IR[12:10], EX_IR[3:0], EX_IR_2[21:0]};
 
     //== Comparator ==//
     //Moved the compare module from ALU to here, for 1) shorten critical path,
@@ -448,8 +461,8 @@ module CORE(
     //Two selectors that differ only in the offset still name the exact same physical
     //register, so comparing the whole 8bit selector breaks everything.
     //The fix is only match using base_id and apply offset only at the end
-    logic [31:0] FWD_rx0, FWD_rx1;
-    logic MEM_fwd0, WB_fwd0, MEM_fwd1, WB_fwd1;
+    logic [31:0] FWD_rx0, FWD_rx1, FWD_rx1_full, FWD_rxi;
+    logic MEM_fwd0, WB_fwd0, MEM_fwd1, WB_fwd1, MEM_fwd2, WB_fwd2;
 
     //This checks whether the write in MEM/WB touches the register this read wants
     //Also account for rx0, rx1 banking
@@ -461,6 +474,10 @@ module CORE(
                       (rx1[7:3] > 5'd1 || MEM_kernel_mode == KernelMode);
     assign WB_fwd1  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rx1[7:3]) &&
                       (rx1[7:3] > 5'd1 || WB_kernel_mode  == KernelMode);
+    assign MEM_fwd2 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rxi[7:3]) &&
+                      (rxi[7:3] > 5'd1 || MEM_kernel_mode == KernelMode);
+    assign WB_fwd2  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rxi[7:3]) &&
+                      (rxi[7:3] > 5'd1 || WB_kernel_mode  == KernelMode);
 
 
     //So yeah this is just verilator function, they are automatic because it
@@ -498,18 +515,21 @@ module CORE(
                              !(WB_gpr_dest[7:3] <= 5'd1 && WB_kernel_mode);
     assign ID_wb_hit0 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx0[7:3]);
     assign ID_wb_hit1 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx1[7:3]);
+    assign ID_wb_hit2 = wb_writes_array && (WB_gpr_dest[7:3] == ID_IR_2[31:27]);
 
     always_comb begin
         ID_rx0_val = ID_wb_hit0 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out0, WB_result) : GPRs_data_out0;
         ID_rx1_val = ID_wb_hit1 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out1, WB_result) : GPRs_data_out1;
+        ID_rx2_val = ID_wb_hit2 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out2, WB_result) : GPRs_data_out2;
     end
 
     //So at ID we don't know if instruction should be executed in kernel mode
     //yet, so we always just get the KGPRs and then in EX deduce whether we
     //use GPRs or KGPRs
-    logic [31:0] EX_gpr0, EX_gpr1;
+    logic [31:0] EX_gpr0, EX_gpr1, EX_gpr2;
     assign EX_gpr0 = (rx0[7:3] <= 5'd1 && KernelMode) ? (rx0[3] ? KGPR1 : KGPR0) : EX_rx0_val;
     assign EX_gpr1 = (rx1[7:3] <= 5'd1 && KernelMode) ? (rx1[3] ? KGPR1 : KGPR0) : EX_rx1_val;
+    assign EX_gpr2 = (rxi[7:3] <= 5'd1 && KernelMode) ? (rxi[3] ? KGPR1 : KGPR0) : EX_rx2_val;
 
 
     //Here automatic comes in play, function gets called more than ones in
@@ -522,10 +542,18 @@ module CORE(
     end
 
     always_comb begin
-        FWD_rx1 = EX_gpr1;
-        if (WB_fwd1)  FWD_rx1 = fwd_merge(WB_gpr_dest[2:0],  FWD_rx1, WB_result);
-        if (MEM_fwd1) FWD_rx1 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx1, MEM_val);
-        FWD_rx1 = fwd_slice(rx1[2:0], FWD_rx1);
+        FWD_rx1_full = EX_gpr1;
+        if (WB_fwd1)  FWD_rx1_full = fwd_merge(WB_gpr_dest[2:0],  FWD_rx1_full, WB_result);
+        if (MEM_fwd1) FWD_rx1_full = fwd_merge(MEM_gpr_dest[2:0], FWD_rx1_full, MEM_val);
+    end
+
+    assign FWD_rx1 = fwd_slice(rx1[2:0], FWD_rx1_full);
+
+    always_comb begin
+        FWD_rxi = EX_gpr2;
+        if (WB_fwd2)  FWD_rxi = fwd_merge(WB_gpr_dest[2:0],  FWD_rxi, WB_result);
+        if (MEM_fwd2) FWD_rxi = fwd_merge(MEM_gpr_dest[2:0], FWD_rxi, MEM_val);
+        FWD_rxi = fwd_slice(rxi[2:0], FWD_rxi);
     end
 
     //Declarations
@@ -561,7 +589,7 @@ module CORE(
     logic isKernelMode;
     logic mod_state;
 
-    logic [31:0] GPRs_data_out0, GPRs_data_out1;
+    logic [31:0] GPRs_data_out0, GPRs_data_out1, GPRs_data_out2;
     logic [31:0] KGPR0, KGPR1;
     logic [31:0] GPRs_data_in;
     logic [7:0]  gpr_rw0_sel;
@@ -603,6 +631,7 @@ module CORE(
 
     always_comb begin
         unique case (opcode)
+            6'b000000: memTarget = (LDX_base + LDX_imm29) + LDX_idx;
             6'b100100: memTarget = (ActiveSP - {29'd0, push_pop_bytes}); // PUSH
             6'b100101: memTarget = ActiveSP;                            // POP
             6'b101000,
@@ -871,11 +900,13 @@ module CORE(
         //the forwarding block above does the slicing after it merges
         //Again - read in ID
         .rr0(ID_rx0[7:3]),
-        .rr1(ID_rx1[7:3]),
+        .rr1(ID_rx1[7:3]), //Natevily base
+        .rr2(ID_IR_2[31:27]), //Index selector
         .rw0(WB_gpr_dest),
         .data_in(WB_result),
         .data_out0(GPRs_data_out0),
         .data_out1(GPRs_data_out1),
+        .data_out2(GPRs_data_out2),
         .KGPR0(KGPR0),
         .KGPR1(KGPR1)
     );

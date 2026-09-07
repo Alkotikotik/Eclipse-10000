@@ -5,6 +5,8 @@ use std::io::{self, BufRead, Write};
 use std::process;
 
 const LMA_SUBOP: u32 = 0b010001;
+const STX_SUBOP: u32 = 0b010000;
+const LDX_SUBOP: u32 = 0b011111;
 
 fn branch_info(mnemonic: &str) -> Option<(u32, bool)> {
     Some(match mnemonic {
@@ -38,7 +40,7 @@ fn is_long_instr(line: &str) -> bool {
         .next()
         .unwrap_or("")
         .to_uppercase();
-    head == "LMA" || branch_info(&head).is_some()
+    head == "LMA" || head == "LDX" || head == "STX" || branch_info(&head).is_some()
 }
 
 fn parse_imm64(token: &str) -> i64 {
@@ -133,6 +135,8 @@ fn main() -> io::Result<()> {
     opcodes.insert("LMA", 0b000000);
     opcodes.insert("LDR", 0b100011);
     opcodes.insert("STR", 0b100111);
+    opcodes.insert("LDX", 0b000000);
+    opcodes.insert("STX", 0b000000);
 
     for name in ["BEQ", "BNE", "BGU", "BSU", "BGEU", "BSEU", "BGS", "BSS", "BGES", "BSES",
                  "IBEQ", "IBNE", "IBG", "IBS", "IBGE", "IBSE",
@@ -193,6 +197,8 @@ fn main() -> io::Result<()> {
 
         let mut rx0: u32 = 0;
         let mut rx1: u32 = 0;
+        let mut index_reg: u32 = 0;
+        let mut scale: u32 = 0;
         let mut immediate: i64 = 0;
         let mut branch_target: i64 = 0;
         let mut word1: Option<u32> = None;
@@ -217,6 +223,32 @@ fn main() -> io::Result<()> {
                     } else {
                         immediate = parse_imm64(tokens[2]);
                     }
+                }
+            }
+            "LDX" | "STX" => {
+                if tokens.len() < 5 {
+                    panic!("Assembler Error: {} needs value, base, index and shift, got {:?}", instr, &tokens[1..]);
+                }
+                rx0 = parse_reg(tokens[1]);
+                let base_sel = parse_reg(tokens[2]);
+                if base_sel & 0b111 != 0 {
+                    panic!("Assembler Error: {} base '{}' must be a full rx register", instr, tokens[2]);
+                }
+                rx1 = base_sel >> 3;
+                index_reg = parse_reg(tokens[3]);
+                scale = parse_imm64(tokens[4]) as u32;
+                if scale > 3 {
+                    panic!("Assembler Error: {} shift {} must be 0..3", instr, scale);
+                }
+                immediate = if tokens.len() > 6 && tokens[5] == "-" {
+                    -parse_imm64(tokens[6])
+                } else if tokens.len() > 5 {
+                    parse_imm64(tokens[5])
+                } else {
+                    0
+                };
+                if !(-268435456..=268435455).contains(&immediate) {
+                    panic!("Assembler Error: {} offset {} does not fit in signed imm29", instr, immediate);
                 }
             }
             "LDR" | "STR" => {
@@ -424,6 +456,17 @@ fn main() -> io::Result<()> {
                 ((opcode & 0x3F) << 26)
                     | ((rx0 & 0xFF) << 18)
                     | ((immediate as u32) & 0x0003_FFFF)
+            }
+            "LDX" | "STX" => {
+                let subop = if instr == "LDX" { LDX_SUBOP } else { STX_SUBOP };
+                let i = imm_u32 & 0x1FFF_FFFF;
+                word1 = Some(((index_reg & 0xFF) << 24) | ((scale & 0x3) << 22) | (i & 0x003F_FFFF));
+                ((opcode & 0x3F) << 26)
+                    | ((rx0 & 0xFF) << 18)
+                    | ((rx1 & 0x1F) << 13)
+                    | (((i >> 26) & 0x7) << 10)
+                    | ((subop & 0x3F) << 4)
+                    | ((i >> 22) & 0xF)
             }
             "LMA" => {
                 word1 = Some(imm_u32);

@@ -4,6 +4,7 @@ module GPRs (
     input logic reg_write,
     input logic [4:0] rr0,
     input logic [4:0] rr1,
+    input logic [4:0] rr2,
 
     input logic [7:0]  rw0,
     input logic [31:0] data_in,
@@ -12,6 +13,7 @@ module GPRs (
 
     output logic [31:0] data_out0,
     output logic [31:0] data_out1,
+    output logic [31:0] data_out2,
 
     //Just flip-flops
     output logic [31:0] KGPR0,
@@ -54,7 +56,8 @@ module GPRs (
     logic [31:0] write_mask;
     logic [31:0] shifted_data_in;
 
-    //Pretty much the same thing as before
+    //Pretty much the same thing as before, writing only to particular lanes
+    //based on exact fragmented/full register using bit masking
     always_comb begin
         unique case (offset_w0)
             3'b000: begin //rx
@@ -125,6 +128,7 @@ module GPRs (
 
     assign data_out0 = {gpr3[rr0], gpr2[rr0], gpr1[rr0], gpr0[rr0]};
     assign data_out1 = {gpr3[rr1], gpr2[rr1], gpr1[rr1], gpr0[rr1]};
+    assign data_out2 = {gpr3[rr2], gpr2[rr2], gpr1[rr2], gpr0[rr2]};
 
     assign KGPR0 = KGPRs[0];
     assign KGPR1 = KGPRs[1];

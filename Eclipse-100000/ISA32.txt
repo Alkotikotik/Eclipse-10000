@@ -97,7 +97,7 @@ Privilege and Syscalls
 
 Format of 64-bit instructions
 Split in 2 words, first word is essentially same as regular 32-bit instructions, but [9:4] is sub-op indicating 64bit operation
-G-type (General) <<
+G-type (General) <<==
 First word:
 [31:26] 000000 (escape opcode to 64-bit instructions)
 [25:18] rx0        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
@@ -106,15 +106,31 @@ First word:
 [3:0]   spare
 Second word:
 [31:0]  really instruction dependent, doesn't fit into individual types
->>
+==>>
 
 Loads:
 [31:0] imm32
 010001 : LMA //Load MASSIVE 32bits in one instruction
 
-Fused CMP and branch, separated into pure register and pure immediate forms, in order to avoid useless wait for ALU in pure register form
+X-type (STX/LDX) <<==
+First word:
+[31:26] 000000 (escape opcode to 64-bit instructions)
+[25:18] rx0
+[17:13] rb1    (register base, only full registers can be used)
+[12:10] imm[28:26]
+[9:4]   sub-op
+[3:0]   imm[25:22]
+Second word:
+[31:24] rx2    (index selector)
+[23:22] scale  (0-3)
+[21:0]  imm[21:0]
 
-Register Form <<
+STX/LDX
+010000 : STX rx0 >-> [rx1, rx2 << val + addr] <-< //Stores rx0 at rx1 + ((rx2 << val) + addr)
+011111 : LDX rx0 <-< [rx1, rx2 << val + addr] >->
+
+Fused CMP and branch, separated into pure register and pure immediate forms, in order to avoid useless wait for ALU in pure register form
+Register Form <<==
 First word:
 [31:26] 110000 (escape opcode to 64-bit instructions)
 [25:18] rx0        (8 bits: 5-bit Reg ID + 3-bit Size/Offset)
@@ -124,7 +140,7 @@ First word:
 Second word:
 [31:26] unused
 [25:0]  imm26 (branch target)
->>
+==>>
 
 00001 : BEQ  rx0 <-> rx1 -> imm26 //compares and immediately jumps
 00010 : BNE  rx0 <-> rx1 -> imm26
