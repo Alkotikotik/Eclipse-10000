@@ -1,13 +1,11 @@
 [+]Dynamic branch prediction
 [+]Resolve unconditional branching in ID
-[+] Variable sized instructions using branching opcodes with imm28(256MB)
+[+]Variable sized instructions using branching opcodes with imm28(256MB)
 [/]SPARC style LR shifting
 [/]L1 cache, data/instruction as well as WB cache with similar to forwarding mechanism
 [/]SIMD - 32 unused GPRs encoding combinations, use them for SIMD registers
 [/]Add multi-core
 [/]Switch to 1024x600 display
-
-[-]RET automatically pops 3 GPRs
 
 
 Verilator commands:

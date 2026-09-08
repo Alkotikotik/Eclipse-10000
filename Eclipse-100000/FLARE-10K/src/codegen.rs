@@ -1766,9 +1766,9 @@ impl<'a> Codegen<'a> {
     //MOV rz280 <- rz290
     //SUB rz280 <- [rz280, rx31 1]
     //MOV rz290 <- rz280
-    //I almost got a stroke when I read it, so that should do the trick, Unfortunately there is
-    //still some bs like that in branches but imma solve that later
-    fn fold_regfield_rmw(&mut self) {
+    //I almost got a stroke when I read it, so that should do the trick. Also same thing applies to
+    //the branch stuff sometimes, and I basically expanded that function to support it as well
+    fn fold_coalesce(&mut self) {
         let mut uses: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
         for b in &self.cfg {
             for inst in &b.body {
@@ -1779,72 +1779,94 @@ impl<'a> Codegen<'a> {
                 }
             }
         }
+        //Check if temp is single
         let single = |op: &IROperand| -> bool {
             matches!(op, IROperand::Temp(t) if uses.get(t) == Some(&1))
+        };
+
+        //Whether temp fits into that another register
+        let fits = |allocs: &HashMap<IROperand, Location>, t: &IROperand, dst: Register| -> bool {
+            match allocs.get(t) {
+                Some(Location::Register(tr)) => dst.reg_type.get_size() <= tr.reg_type.get_size(),
+                _ => false,
+            }
         };
 
         let mut retarget: Vec<(IROperand, Register)> = Vec::new();
 
         for b in &self.cfg {
             let body = &b.body;
-            for i in 0..body.len().saturating_sub(2) {
-                let (t1, sv, off, size) = match &body[i] {
-                    IRInst::RegFieldRead {
-                        dest,
-                        struct_var,
-                        byte_offset,
-                        byte_size,
-                    } => (dest, struct_var, *byte_offset, *byte_size),
-                    _ => continue,
-                };
-
-                let (t2, left, right) = match &body[i + 1] {
+            for i in 0..body.len() {
+                let (t2, left, right) = match &body[i] {
                     IRInst::Add { dest, left, right }
                     | IRInst::Sub { dest, left, right }
                     | IRInst::Mul { dest, left, right }
                     | IRInst::Shl { dest, left, right }
                     | IRInst::Shr { dest, left, right }
                     | IRInst::Xor { dest, left, right }
-                    | IRInst::Or { dest, left, right }
+                    | IRInst::Or  { dest, left, right }
                     | IRInst::And { dest, left, right }
-                    | IRInst::Div {
-                        dest, left, right, ..
-                    }
-                    | IRInst::Mod {
-                        dest, left, right, ..
-                    } => (dest, left, right),
+                    | IRInst::Div { dest, left, right, ..}
+                    | IRInst::Mod { dest, left, right, ..}
+                    => (dest, left, right),
                     _ => continue,
                 };
 
-                let writes_back = match &body[i + 2] {
+                if i + 1 >= body.len() || !single(t2) {
+                    continue;
+                }
+
+                match &body[i + 1] {
                     IRInst::RegFieldWrite {
                         src,
                         struct_var,
                         byte_offset,
                         byte_size,
-                    } => src == t2 && struct_var == sv && *byte_offset == off && *byte_size == size,
-                    _ => false,
-                };
+                    } if src == t2 => {
+                        if i == 0 {
+                            continue;
+                        }
+                        let (off, size) = (*byte_offset, *byte_size);
+                        let t1 = match &body[i - 1] {
+                            IRInst::RegFieldRead {
+                                dest,
+                                struct_var: sv,
+                                byte_offset: o,
+                                byte_size: s,
+                            } if sv == struct_var && *o == off && *s == size => dest,
+                            _ => continue,
+                        };
+                        if left != t1 || right == t1 || right == t2 || !single(t1) {
+                            continue;
+                        }
+                        if let Some(Location::Register(reg)) = self.allocations.get(struct_var) {
+                            let field = Register {
+                                id: reg.id,
+                                reg_type: match size {
+                                    1 => RegType::B8,
+                                    2 => RegType::B16,
+                                    _ => RegType::B32,
+                                },
+                                sub_index: reg.sub_index + off as u8,
+                            };
+                            if fits(&self.allocations, t1, field)
+                                && fits(&self.allocations, t2, field)
+                            {
+                                retarget.push((t1.clone(), field));
+                                retarget.push((t2.clone(), field));
+                            }
+                        }
+                    }
 
-                if !writes_back || left != t1 || right == t1 || right == t2 {
-                    continue;
-                }
-                if !single(t1) || !single(t2) {
-                    continue;
-                }
+                    IRInst::Cpy { dest, src } if src == t2 => {
+                        if let Some(Location::Register(cr)) = self.allocations.get(dest) {
+                            if fits(&self.allocations, t2, *cr) {
+                                retarget.push((t2.clone(), *cr));
+                            }
+                        }
+                    }
 
-                if let Some(Location::Register(reg)) = self.allocations.get(sv) {
-                    let field = Register {
-                        id: reg.id,
-                        reg_type: match size {
-                            1 => RegType::B8,
-                            2 => RegType::B16,
-                            _ => RegType::B32,
-                        },
-                        sub_index: reg.sub_index + off as u8,
-                    };
-                    retarget.push((t1.clone(), field));
-                    retarget.push((t2.clone(), field));
+                    _ => {}
                 }
             }
         }
@@ -1857,7 +1879,7 @@ impl<'a> Codegen<'a> {
     //Actual codegen time, basically just call everything i've been bulding
     pub fn lower_func(&mut self) -> Vec<AsmInst> {
         self.fold_slot_addrs();
-        self.fold_regfield_rmw();
+        self.fold_coalesce();
         let mut compiled = Vec::new();
         let leaf = self.is_leaf();
         let blocks = self.cfg.clone();

@@ -2091,15 +2091,13 @@
 	LOAD ry280 <- 8
 
 ~Lab_while_start_0:
-	ADD rx29 <- [rx27, rx31 1]
-	MOV rx27 <- rx29 0
+	ADD rx27 <- [rx27, rx31 1]
 	SPRSTR rz283 -> [SP 0]
 
 	IBSEU <-< [rx27 <-> 200000] >-> ~Lab_endif_3
 
 	LOAD rx30 <- 15
-	MUL ry290 <- [ry260, rx30 0]
-	MOV ry260 <- ry290 0
+	MUL ry260 <- [ry260, rx30 0]
 	LOAD rx27 <- 0
 	SPRLEA rx29 <- [SP 0]
 	PUSH <- ry260
@@ -2124,17 +2122,14 @@
 	BNE <-< [rz283 <-> rz282] >-> ~Lab_else_4
 
 	LOAD rz283 <- 0
-	ADD rz290 <- [rz282, rx31 1]
-	MOV rz282 <- rz290 0
+	ADD rz282 <- [rz282, rx31 1]
 	LOAD rx30 <- 10
-	ADD ry290 <- [ry280, rx30 0]
-	MOV ry280 <- ry290 0
+	ADD ry280 <- [ry280, rx30 0]
 	JMP -> ~Lab_endif_5
 
 
 ~Lab_else_4:
-	ADD rz290 <- [rz283, rx31 1]
-	MOV rz283 <- rz290 0
+	ADD rz283 <- [rz283, rx31 1]
 
 ~Lab_endif_5:
 
@@ -2172,9 +2167,8 @@
 	RET
 
 ~Lab_endif_9:
-	MOV rx29 <- rx27 0
-	SHL [rx29, rx31 4]
-	MOV rx26 <- rx29 0
+	MOV rx26 <- rx27 0
+	SHL [rx26, rx31 4]
 	LOAD rx27 <- 0
 
 	IBGEU <-< [rx27 <-> 16] >-> ~Lab_for_end_11
@@ -2193,8 +2187,7 @@
 	MOV rx28 <- ry290 0
 	SHL [rx28, rx31 1]
 	SPRLDR rx29 <- [GP 0]
-	ADD rx29 <- [rx29, rx28 0]
-	MOV rx28 <- rx29 0
+	ADD rx28 <- [rx29, rx28 0]
 	LOAD rx24 <- 0
 
 	IBGEU <-< [rx24 <-> 8] >-> ~Lab_for_end_13
@@ -2203,8 +2196,7 @@
 ~Lab_for_start_12:
 	MOV rx29 <- rx24 0
 	SHL [rx29, rx31 1]
-	ADD rx29 <- [rx28, rx29 0]
-	MOV rx22 <- rx29 0
+	ADD rx22 <- [rx28, rx29 0]
 	MOV rz290 <- rz251 0
 	AND [rz290, rz250 0]
 
@@ -2218,28 +2210,22 @@
 	STR ry11 -> [rx22 0]
 
 ~Lab_endif_15:
-	MOV rz290 <- rz250 0
-	SHR [rz290, rx31 1]
-	MOV rz250 <- rz290 0
-	ADD rx29 <- [rx24, rx31 1]
-	MOV rx24 <- rx29 0
+	SHR [rz250, rx31 1]
+	ADD rx24 <- [rx24, rx31 1]
 
 	IBSU <-< [rx24 <-> 8] >-> ~Lab_for_start_12
 
 
 ~Lab_for_end_13:
-	ADD rx29 <- [rx27, rx31 1]
-	MOV rx27 <- rx29 0
+	ADD rx27 <- [rx27, rx31 1]
 
 	IBSU <-< [rx27 <-> 16] >-> ~Lab_for_start_10
 
 
 ~Lab_for_end_11:
 	LOAD rx30 <- 10
-	ADD ry290 <- [ry00, rx30 0]
-	MOV ry00 <- ry290 0
-	ADD rx29 <- [rx23, rx31 1]
-	MOV rx23 <- rx29 0
+	ADD ry00 <- [ry00, rx30 0]
+	ADD rx23 <- [rx23, rx31 1]
 
 	BSU <-< [rx23 <-> rz30] >-> ~Lab_for_start_6
 
