@@ -1361,7 +1361,23 @@ impl IR {
             other => panic!("Cannot index into type {:?}", other),
         };
         let elem_size = self.get_type_size(&elem_ty);
-        let index_op  = self.reduce_expr(index);
+        let index_op = self.reduce_expr(index);
+
+        let const_index = match &index_op {
+            IROperand::SignedConstant(v)   => Some(*v as i64),
+            IROperand::UnsignedConstant(v) => Some(*v as i64),
+            _ => None,
+        };
+
+        if let Some(k) = const_index {
+            let addr = self.new_temp();
+            self.emit(IRInst::Add {
+                dest: addr.clone(),
+                left: base_addr,
+                right: IROperand::UnsignedConstant((k * elem_size as i64) as u32),
+            });
+            return Err(addr);
+        }
 
         //If its power of 2, we can use ldx/stx
         match elem_size {

@@ -301,6 +301,26 @@ impl IRInst {
                 }
             }
 
+            IRInst::LoadIndexed { base, index, .. } => {
+                if base.is_var() {
+                    ls.push(base.clone());
+                }
+                if index.is_var() {
+                    ls.push(index.clone());
+                }
+            }
+            IRInst::StoreIndexed { base, index, src, .. } => {
+                if base.is_var() {
+                    ls.push(base.clone());
+                }
+                if index.is_var() {
+                    ls.push(index.clone());
+                }
+                if src.is_var() {
+                    ls.push(src.clone());
+                }
+            }
+
             IRInst::RegFieldRead { struct_var, .. } => {
                 if struct_var.is_var() {
                     ls.push(struct_var.clone());
@@ -363,6 +383,7 @@ impl IRInst {
             | IRInst::Cpy { dest, .. }
             | IRInst::Cast { dest, .. }
             | IRInst::LoadPtr { dest, .. }
+            | IRInst::LoadIndexed{ dest, ..}
             | IRInst::LocalAddr { dest, .. }
             | IRInst::GlobalAddr { dest, .. } => {
                 if dest.is_var() {
@@ -903,6 +924,22 @@ fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst 
         IRInst::StorePtr { ptr_addr, src } => IRInst::StorePtr {
             ptr_addr: sub(ptr_addr),
             src: sub(src),
+        },
+
+        IRInst::LoadIndexed {dest, base, index, scale, offset} => IRInst::LoadIndexed{
+            dest: sub(dest),
+            base: sub(base),
+            index: sub(index),
+            scale,
+            offset,
+        },
+        IRInst::StoreIndexed {base, index, scale, offset, src} => IRInst::StoreIndexed{
+            base: sub(base),
+            index: sub(index),
+            scale,
+            offset,
+            src: sub(src),
+
         },
         IRInst::AntiEqual {
             left,
@@ -2100,6 +2137,43 @@ impl<'a> Codegen<'a> {
         }
     }
 
+    //STX/LDX
+    fn lower_indexed(
+        &self,
+        value: &IROperand,
+        base: &IROperand,
+        index: &IROperand,
+        scale: u8,
+        offset: i32,
+        is_load: bool,
+        out: &mut Vec<AsmInst>,
+    ) {
+        let index_asm = self.operand_to_asm(index);
+        let base_asm = self.operand_to_asm(base);
+        let mut used_rx30 = false;
+
+        //I might have already said it, nontheless I will repeat:
+        //If we are loading contsant like arr[i] = 67; 67 is const and we first have to load it into
+        //rx30 then use it, then XOR it with itself. This is only for store, so for STX, btw
+        let value_asm = if !is_load && is_const(value) {
+            load_const(rx30_reg(), const_val(value), out);
+            used_rx30 = true;
+            reg_op(rx30_reg())
+        } else {
+            self.operand_to_asm(value)
+        };
+
+        out.push(if is_load {
+            AsmInst::Ldx(value_asm, base_asm, index_asm, scale, offset)
+        } else {
+            AsmInst::Stx(value_asm, base_asm, index_asm, scale, offset)
+        });
+
+        if used_rx30 {
+            out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));
+        }
+    }
+
     //R-type, so 2 operand like xor, or etc, its rx0 = rx0 OP (rx1 + imm10)
     fn lower_rtype_alu(
         &mut self,
@@ -2734,6 +2808,10 @@ impl<'a> Codegen<'a> {
 
                 out.push(AsmInst::Ret);
             }
+            IRInst::LoadIndexed { dest, base, index, scale, offset } =>
+                self.lower_indexed(dest, base, index, *scale, *offset, true, out),
+            IRInst::StoreIndexed { base, index, scale, offset, src } =>
+                self.lower_indexed(src, base, index, *scale, *offset, false, out),
         }
     }
 }

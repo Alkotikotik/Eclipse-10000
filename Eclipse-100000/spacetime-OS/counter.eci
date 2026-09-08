@@ -2183,8 +2183,7 @@
 ~Lab_for_start_10:
 	ADD rx28 <- [rx26, rx27 0]
 	SPRLEA rx29 <- [GP 8]
-	ADD rx29 <- [rx29, rx28 0]
-	LDR rz290 <- [rx29 0]
+	LDX rz290 <-< [rx29, rx28 << 0 + 0]
 	MOV rz251 <- rz290 0
 	LOAD rz250 <- 128
 	ADD ry280 <- [ry01, rx27 0]
