@@ -102,6 +102,21 @@ pub enum IRInst {
         src: IROperand,
     },
 
+    LoadIndexed { //LDX
+        dest: IROperand,
+        base: IROperand,
+        index: IROperand,
+        scale: u8,
+        offset: i32, //Actually 29bits signed
+    },
+    StoreIndexed { //STX
+        base: IROperand,
+        index: IROperand,
+        scale: u8,
+        offset: i32,
+        src: IROperand,
+    },
+
     RegFieldRead {
         //Fields of regarches are accessed using sub-registers, even though IR doesn't
         //know about it
@@ -616,14 +631,15 @@ impl IR {
 
             Expr::Ref(mem) => self.lower_lvalue(mem),
 
-            Expr::Index {array, index} => {
+            Expr::Index { array, index } => {
                 let result_ty = self.infer_type(expr);
-                let addr = self.compute_index_addr(array, index);
                 let dest = self.new_temp_typed(result_ty);
-                self.emit(IRInst::LoadPtr {
-                    dest: dest.clone(),
-                    ptr_addr: addr,
-                });
+                match self.index_parts(array, index) {
+                    Ok((base, idx, scale)) => self.emit(IRInst::LoadIndexed { //LDX/STX
+                        dest: dest.clone(), base, index: idx, scale, offset: 0 }),
+                    Err(addr) => self.emit(IRInst::LoadPtr { //Regular
+                        dest: dest.clone(), ptr_addr: addr }),
+                }
                 dest
             }
 
@@ -802,6 +818,19 @@ impl IR {
                             ptr_addr: ptr_op,
                             src: r_op.clone(),
                         });
+                        r_op
+                    }
+                    Expr::Index { array, index } => {
+                        //So im doing this whole LDX/STX thing to reduce array access to 1
+                        //instruction in most cases, so it will go from 3-5 instruction to 1,
+                        //however if its run-time array we still have to use 2 instruction, which is
+                        //fine I mainly did LDX/STX bc I just wanted to, not for pure performance
+                        match self.index_parts(array, index) {
+                            Ok((base, idx, scale)) => self.emit(IRInst::StoreIndexed { //LDX
+                                base, index: idx, scale, offset: 0, src: r_op.clone() }),
+                            Err(addr) => self.emit(IRInst::StorePtr { //Regular
+                                ptr_addr: addr, src: r_op.clone() }),
+                        }
                         r_op
                     }
                     _ => {
@@ -1322,39 +1351,49 @@ impl IR {
         }
     }
 
-    fn compute_index_addr(&mut self, array: &Expr, index: &Expr) -> IROperand {
+    //Expansion for ldx/stx
+    fn index_parts(&mut self, array: &Expr, index: &Expr) -> Result<(IROperand, IROperand, u8), IROperand>
+    {
         let array_ty = self.infer_type(array);
         let (elem_ty, base_addr) = match array_ty {
             Type::Array(elem_ty, _) => (*elem_ty, self.lower_lvalue(array)),
-            Type::Ptr(elem_ty) => (*elem_ty, self.reduce_expr(array)),
+            Type::Ptr(elem_ty)      => (*elem_ty, self.reduce_expr(array)),
             other => panic!("Cannot index into type {:?}", other),
         };
-
         let elem_size = self.get_type_size(&elem_ty);
-        let index_op = self.reduce_expr(index);
+        let index_op  = self.reduce_expr(index);
 
-        if elem_size == 1 {
-            let addr = self.new_temp();
-            self.emit(IRInst::Add {
-                dest: addr.clone(),
-                left: base_addr,
-                right: index_op,
-            });
-            addr
-        } else {
-            let offset = self.new_temp();
-            self.emit(IRInst::Mul {
-                dest: offset.clone(),
-                left: index_op,
-                right: IROperand::UnsignedConstant(elem_size as u32),
-            });
-            let addr = self.new_temp();
-            self.emit(IRInst::Add {
-                dest: addr.clone(),
-                left: base_addr,
-                right: offset,
-            });
-            addr
+        //If its power of 2, we can use ldx/stx
+        match elem_size {
+            1 => Ok((base_addr, index_op, 0)), //All types are power of 2: u8/i8/bool
+            2 => Ok((base_addr, index_op, 1)), //u16/i16
+            4 => Ok((base_addr, index_op, 2)), //u32/i32
+            8 => Ok((base_addr, index_op, 3)), //u64/i64 useless for types but in case its array of
+              //structs of size 8bytes like two u32s it actually might come in handy
+            _ => { //If it isn't one of those values, we can't use ldx and just do the usual thing
+                let offset = self.new_temp();
+                self.emit(IRInst::Mul { dest: offset.clone(), left: index_op,
+                    right: IROperand::UnsignedConstant(elem_size as u32) });
+                let addr = self.new_temp();
+                self.emit(IRInst::Add { dest: addr.clone(), left: base_addr, right: offset });
+                Err(addr) //Actually its not Error, its all good I just kinda misuse it
+            }                                                                                                                                  }
+    }
+
+    fn compute_index_addr(&mut self, array: &Expr, index: &Expr) -> IROperand {
+        match self.index_parts(array, index) {
+            Err(addr) => addr, //Misuse for this exact thing
+            Ok((base, idx, scale)) => {
+                let scaled = if scale == 0 { idx } else {
+                    let t = self.new_temp();
+                    self.emit(IRInst::Mul { dest: t.clone(), left: idx,
+                        right: IROperand::UnsignedConstant(1u32 << scale) });
+                    t
+                };
+                let addr = self.new_temp();
+                self.emit(IRInst::Add { dest: addr.clone(), left: base, right: scaled });
+                addr
+            }
         }
     }
 }

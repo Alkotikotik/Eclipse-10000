@@ -60,6 +60,13 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error
                 writeln!(assembly, "\tSTR {} -> [{} {}]", dest, base, offset)?
             }
 
+            AsmInst::Ldx(dest, base, idx, shift, offset) => {
+                writeln!(assembly, "\tLDX {} <-< [{}, {} << {} + {}]", dest, base, idx, shift, offset)?
+            }
+            AsmInst::Stx(dest, base, idx, shift, offset) => {
+                writeln!(assembly, "\tSTX {} >-> [{}, {} << {} + {}]", dest, base, idx, shift, offset)?
+            }
+
             AsmInst::SprLdr(rx0, spr, imm16) => {
                 writeln!(assembly, "\tSPRLDR {} <- [{:?} {}]", rx0, spr, imm16)?
             }

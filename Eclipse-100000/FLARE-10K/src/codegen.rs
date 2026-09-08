@@ -121,6 +121,9 @@ pub enum AsmInst {
     Ldr(AsmOperand, AsmOperand, AsmOperand), // dest, base, offset
     Str(AsmOperand, AsmOperand, AsmOperand), // src, base, offset
 
+    Ldx(AsmOperand, AsmOperand, AsmOperand, u8, i32),
+    Stx(AsmOperand, AsmOperand, AsmOperand, u8, i32),
+
     SprLdr(AsmOperand, Spr, AsmOperand),
     SprStr(AsmOperand, Spr, AsmOperand),
     SprAdd(AsmOperand, Spr, AsmOperand),
