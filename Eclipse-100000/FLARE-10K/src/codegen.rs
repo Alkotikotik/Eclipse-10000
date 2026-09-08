@@ -1722,7 +1722,7 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    //So umm for some "interesting" reason it was doing bs like that 
+    //So umm for some "interesting" reason it was doing bs like that:
     //MOV rz280 <- rz290
     //SUB rz280 <- [rz280, rx31 1]
     //MOV rz290 <- rz280
