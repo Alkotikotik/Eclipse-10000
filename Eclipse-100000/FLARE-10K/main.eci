@@ -1,35 +1,119 @@
+#ORG 60
+~JmpBoot:
+	JMP ~boot
+	
+#ORG 100   >_ 0x64 Syscall Vector
+	RETU
+	
+#ORG 104   >_ 0x68 Timer Vector
+	RETU
+	
+#ORG 108   >_ 0x6C Key Interrupt Vector
+	JMP ~HandleKey
+	>_RETU
+	
+#ORG 112   >_ 0x70 Memory Fault Vector
+	RETU
+~boot:
 ~Init_000:
 	XOR [rx31, rx31]
 	XOR [rx30, rx30]
 
 ~main:
-	SPRSUB rx31 ->SP<- 16
-	LOAD rx30 <- 0
-	SPRSTR rx30 -> [SP 0]
+	LMA rx26 <- 67108864
+	LOAD rx30 <- 4096
+	LOAD rx31 <- 11
+	STR rx31 -> [rx30 0]
 	XOR [rx30, rx30 0]
-	LOAD rx30 <- 0
-	SPRSTR rx30 -> [SP 4]
-	XOR [rx30, rx30 0]
-	LOAD rx30 <- 0
-	SPRSTR rx30 -> [SP 8]
-	XOR [rx30, rx30 0]
-	LOAD rx30 <- 0
-	SPRSTR rx30 -> [SP 12]
-	XOR [rx30, rx30 0]
-	LOAD rz280 <- 0
+	XOR [rx31, rx31 0]
+	LOAD rx29 <- 0
+	LOAD rz290 <- 15
+	LOAD rz291 <- 0
+	LOAD rz292 <- 0
+	LOAD rz293 <- 15
+	LOAD rz250 <- 0
 
-	IBGU <-< [rz280 <-> 4] >-> ~Lab_for_end_1
+~Lab_while_start_0:
+	LOAD rx30 <- 4092
+	LOAD rx31 <- 12
+	STR rx31 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	XOR [rx31, rx31 0]
+	MOV rz280 <- rz290 0
+	MOV rx27 <- rz280 0
+	SHL [rx27, rx31 12]
+	MOV rz280 <- rz291 0
+	MOV rx28 <- rz280 0
+	SHL [rx28, rx31 8]
+	OR  [rx27, rx28 0]
+	MOV rz280 <- rz292 0
+	MOV rx28 <- rz280 0
+	SHL [rx28, rx31 4]
+	OR  [rx27, rx28 0]
+	MOV rz280 <- rz293 0
+	MOV rx31 <- rz280 0
+	MOV rx28 <- rx27 0
+	OR  [rx28, rx31 0]
+	XOR [rx31, rx31 0]
+	STR rx28 -> [rx26 0]
+	ADD rx26 <- [rx26, rx31 2]
+
+	IBNE <-< [rz250 <-> 0] >-> ~Lab_else_2
+
+	SUB rz290 <- [rz290, rx31 1]
+	ADD rz291 <- [rz291, rx31 1]
+	MOV rz280 <- rz291 0
+
+	IBNE <-< [rz280 <-> 15] >-> ~Lab_endif_5
+
+	LOAD rz250 <- 1
+
+~Lab_endif_5:
+	JMP -> ~Lab_endif_3
 
 
-~Lab_for_start_0:
-	SPRLEA rx29 <- [SP 0]
-	STX rz280 >-> [rx29, rz280 << 2 + 0]
-	ADD rz290 <- [rz280, rx31 1]
+~Lab_else_2:
+
+	IBNE <-< [rz250 <-> 1] >-> ~Lab_else_6
+
+	SUB rz291 <- [rz291, rx31 1]
+	ADD rz292 <- [rz292, rx31 1]
+	MOV rz280 <- rz292 0
+
+	IBNE <-< [rz280 <-> 15] >-> ~Lab_endif_9
+
+	LOAD rz250 <- 2
+
+~Lab_endif_9:
+	JMP -> ~Lab_endif_7
+
+
+~Lab_else_6:
+
+	IBNE <-< [rz250 <-> 2] >-> ~Lab_endif_11
+
+	SUB rz292 <- [rz292, rx31 1]
+	ADD rz290 <- [rz290, rx31 1]
 	MOV rz280 <- rz290 0
 
-	IBSEU <-< [rz280 <-> 4] >-> ~Lab_for_start_0
+	IBNE <-< [rz280 <-> 15] >-> ~Lab_endif_13
+
+	LOAD rz250 <- 0
+
+~Lab_endif_13:
+
+~Lab_endif_11:
+
+~Lab_endif_7:
+
+~Lab_endif_3:
+	LOAD rx30 <- 4088
+	LOAD rx31 <- 13
+	STR rx31 -> [rx30 0]
+	XOR [rx30, rx30 0]
+	XOR [rx31, rx31 0]
+	JMP -> ~Lab_while_start_0
 
 
-~Lab_for_end_1:
-	SPRADD rx31 ->SP<- 16
+~Lab_while_end_1:
 	RET

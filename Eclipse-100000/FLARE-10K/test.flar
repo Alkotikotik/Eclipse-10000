@@ -1,8 +1,0 @@
-func main(){
-    u32 arr[4];
-
-    for [u32 i; i <= 4; i++]{
-        arr[i] = i;
-        [4000 + i * 4] = arr[i];
-    }
-}

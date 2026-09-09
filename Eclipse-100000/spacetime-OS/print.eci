@@ -2297,9 +2297,8 @@
 	RET
 
 ~Lab_endif_7:
-	MOV rx28 <- rx27 0
-	SHL [rx28, rx31 4]
-	MOV rx25 <- rx28 0
+	MOV rx25 <- rx27 0
+	SHL [rx25, rx31 4]
 	LOAD rx26 <- 0
 
 	IBGEU <-< [rx26 <-> 16] >-> ~Lab_for_end_9
@@ -2318,8 +2317,7 @@
 	MOV rx27 <- ry290 0
 	SHL [rx27, rx31 1]
 	SPRLDR rx28 <- [GP 0]
-	ADD rx28 <- [rx28, rx27 0]
-	MOV rx27 <- rx28 0
+	ADD rx27 <- [rx28, rx27 0]
 	LOAD rx23 <- 0
 
 	IBGEU <-< [rx23 <-> 8] >-> ~Lab_for_end_11
@@ -2342,28 +2340,22 @@
 	STR ry11 -> [rx28 0]
 
 ~Lab_endif_13:
-	MOV rz290 <- rz240 0
-	SHR [rz290, rx31 1]
-	MOV rz240 <- rz290 0
-	ADD rx28 <- [rx23, rx31 1]
-	MOV rx23 <- rx28 0
+	SHR [rz240, rx31 1]
+	ADD rx23 <- [rx23, rx31 1]
 
 	IBSU <-< [rx23 <-> 8] >-> ~Lab_for_start_10
 
 
 ~Lab_for_end_11:
-	ADD rx28 <- [rx26, rx31 1]
-	MOV rx26 <- rx28 0
+	ADD rx26 <- [rx26, rx31 1]
 
 	IBSU <-< [rx26 <-> 16] >-> ~Lab_for_start_8
 
 
 ~Lab_for_end_9:
 	LOAD rx30 <- 10
-	ADD ry290 <- [ry00, rx30 0]
-	MOV ry00 <- ry290 0
-	ADD rx28 <- [rx22, rx31 1]
-	MOV rx22 <- rx28 0
+	ADD ry00 <- [ry00, rx30 0]
+	ADD rx22 <- [rx22, rx31 1]
 
 	BSU <-< [rx22 <-> rz30] >-> ~Lab_for_start_4
 
@@ -2395,8 +2387,7 @@
 	MOV rx28 <- rz293 0
 	MOV rx0 <- rx28 0
 	LOAD rx30 <- 26
-	ADD rx28 <- [rx0, rx30 0]
-	MOV rx0 <- rx28 0
+	ADD rx0 <- [rx0, rx30 0]
 	MOV rz290 <- rx0 0
 	MOV rz293 <- rz290 0
 

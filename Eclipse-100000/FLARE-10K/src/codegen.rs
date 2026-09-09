@@ -1762,6 +1762,97 @@ impl<'a> Codegen<'a> {
         }
     }
 
+    //Very similar to previous function
+    fn fold_abs_index(&mut self) {
+        let mut uses: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
+        for b in &self.cfg {
+            for inst in &b.body {
+                for u in inst.uses() {
+                    if let IROperand::Temp(t) = u {
+                        *uses.entry(t).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+        let single = |op: &IROperand| -> bool {
+            matches!(op, IROperand::Temp(t) if uses.get(t) == Some(&1))
+        };
+
+        for b in &mut self.cfg {
+            let body = b.body.clone();
+            let mut out: Vec<IRInst> = Vec::with_capacity(body.len());
+            let mut i = 0usize;
+            while i < body.len() {
+                if i + 2 < body.len() {
+                    if let Some(folded) =
+                        Self::abs_index_fold(&body[i], &body[i + 1], &body[i + 2], &single)
+                    {
+                        out.push(folded);
+                        i += 3;
+                        continue;
+                    }
+                }
+                out.push(body[i].clone());
+                i += 1;
+            }
+            b.body = out;
+        }
+    }
+
+    fn abs_index_fold(
+        a: &IRInst,
+        b: &IRInst,
+        c: &IRInst,
+        single: &impl Fn(&IROperand) -> bool,
+    ) -> Option<IRInst> {
+        let (t1, idx, k) = match a {
+            IRInst::Mul { dest, left, right } if is_const(right) => (dest, left, const_val(right)),
+            IRInst::Mul { dest, left, right } if is_const(left) => (dest, right, const_val(left)),
+            _ => return None,
+        };
+        if is_const(idx) || !single(t1) {
+            return None;
+        }
+        let scale = match k {
+            1 => 0u8,
+            2 => 1,
+            4 => 2,
+            8 => 3,
+            _ => return None,
+        };
+
+        let (t2, base) = match b {
+            IRInst::Add { dest, left, right } if left == t1 && is_const(right) => {
+                (dest, const_val(right))
+            }
+            IRInst::Add { dest, left, right } if right == t1 && is_const(left) => {
+                (dest, const_val(left))
+            }
+            _ => return None,
+        };
+        if !single(t2) || !(-268435456..=268435455).contains(&(base as i64)) {
+            return None;
+        }
+
+        match c {
+            IRInst::StorePtr { ptr_addr, src } if ptr_addr == t2 => Some(IRInst::StoreIndexed {
+                base: IROperand::SignedConstant(base),
+                index: idx.clone(),
+                scale,
+                offset: 0,
+                src: src.clone(),
+            }),
+            IRInst::LoadPtr { dest, ptr_addr } if ptr_addr == t2 => Some(IRInst::LoadIndexed {
+                dest: dest.clone(),
+                base: IROperand::SignedConstant(base),
+                index: idx.clone(),
+                scale,
+                offset: 0,
+            }),
+            _ => None,
+        }
+    }
+
     //So umm for some "interesting" reason it was doing bs like that:
     //MOV rz280 <- rz290
     //SUB rz280 <- [rz280, rx31 1]
@@ -1879,6 +1970,7 @@ impl<'a> Codegen<'a> {
     //Actual codegen time, basically just call everything i've been bulding
     pub fn lower_func(&mut self) -> Vec<AsmInst> {
         self.fold_slot_addrs();
+        self.fold_abs_index();
         self.fold_coalesce();
         let mut compiled = Vec::new();
         let leaf = self.is_leaf();
@@ -2171,7 +2263,14 @@ impl<'a> Codegen<'a> {
         out: &mut Vec<AsmInst>,
     ) {
         let index_asm = self.operand_to_asm(index);
-        let base_asm = self.operand_to_asm(base);
+
+        //Accept constant base
+        let (base_asm, offset) = if is_const(base) {
+            (rx31(), offset + const_val(base))
+        } else {
+            (self.operand_to_asm(base), offset)
+        };
+
         let mut used_rx30 = false;
 
         //I might have already said it, nontheless I will repeat:
