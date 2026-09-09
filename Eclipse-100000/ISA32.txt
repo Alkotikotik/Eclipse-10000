@@ -161,7 +161,7 @@ First word:
 [9:5]   sub-op  (6-bit opcode indicating 64-bit instruction)
 [4:0]   imm5    (Somewhat significant bits of full imm19)
 Second word:
-[31:26] unused  (Least significant bits of imm19)
+[31:26] imm6  (Least significant bits of imm19)
 [25:0]  imm26 (branch target)
 >>
 
