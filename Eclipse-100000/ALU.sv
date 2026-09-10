@@ -196,15 +196,15 @@ module ALU (
 
     //Thats a whole ass main logic
     /* verilator lint_off UNUSEDSIGNAL */
-    logic [33:0] sub1, sub2, sub3;
+    logic [34:0] sub1, sub2, sub3;
     /* verilator lint_on UNUSEDSIGNAL */
     logic [1:0]  count_fits;
 
-    assign sub1 = {2'b00, remainder} - {2'b00, sd}; //subtract sds from remainder
-    assign sub2 = {2'b00, remainder} - {1'b0, sd, 1'b0}; //Thats sd2 btw
-    assign sub3 = {2'b00, remainder} - sd3; //My brother looking at that said that im sub 3...
+    assign sub1 = {3'b000, remainder} - {3'b000, sd}; //subtract sds from remainder
+    assign sub2 = {3'b000, remainder} - {2'b00, sd, 1'b0}; //Thats sd2 btw
+    assign sub3 = {3'b000, remainder} - {1'b0, sd3}; //My brother looking at that said that im sub 3...
 
-    assign count_fits = ~sub3[33] ? 2'd3 : ~sub2[33] ? 2'd2 : ~sub1[33] ? 2'd1 : 2'd0;
+    assign count_fits = ~sub3[34] ? 2'd3 : ~sub2[34] ? 2'd2 : ~sub1[34] ? 2'd1 : 2'd0;
 
 
     always_ff @(posedge clk or posedge reset) begin

@@ -2286,11 +2286,7 @@
 	MOV rx27 <- rz290 0
 	ADD rx28 <- [rx2, rx22 0]
 	LDR rz290 <- [rx28 0]
-	LOAD rx30 <- 4
-	MUL rx28 <- [rx22, rx30 0]
-	LOAD rx30 <- 4000
-	ADD rx28 <- [rx30, rx28 0]
-	STR rz290 -> [rx28 0]
+	STX rz290 >-> [rx31, rx22 << 2 + 4000]
 
 	IBNE <-< [rx27 <-> 255] >-> ~Lab_endif_7
 

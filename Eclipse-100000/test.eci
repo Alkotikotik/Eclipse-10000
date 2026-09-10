@@ -1,5 +1,6 @@
 ~main:
-    LOAD rx0 <- -666
-    LOAD rx1 <- -11
-    SDIV  rx0 <- rx0, rx1
-    STX rx0 -> [rx31, rx31 << 0, 4000]
+    LOAD ry00 <- -666
+    LOAD rz03 <- 11
+    SDIV ry00 <- ry00, rz03
+    STX ry00 -> [rx31, rx31 << 0, 4000]
+
