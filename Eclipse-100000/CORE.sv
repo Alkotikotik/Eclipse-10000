@@ -461,7 +461,7 @@ module CORE(
     //Two selectors that differ only in the offset still name the exact same physical
     //register, so comparing the whole 8bit selector breaks everything.
     //The fix is only match using base_id and apply offset only at the end
-    logic [31:0] FWD_rx0, FWD_rx1, FWD_rx1_full, FWD_rxi;
+    logic [31:0] FWD_rx0, FWD_rx1, FWD_rx1_full, FWD_rxi, FWD_rx0_signed, FWD_rx1_signed;
     logic MEM_fwd0, WB_fwd0, MEM_fwd1, WB_fwd1, MEM_fwd2, WB_fwd2;
 
     //This checks whether the write in MEM/WB touches the register this read wants
@@ -478,6 +478,11 @@ module CORE(
                       (rxi[7:3] > 5'd1 || MEM_kernel_mode == KernelMode);
     assign WB_fwd2  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rxi[7:3]) &&
                       (rxi[7:3] > 5'd1 || WB_kernel_mode  == KernelMode);
+    //Just snuck up in here, so it previosely just zero extended fragmented registers
+    //Now if opcode is one of where its vital, we just sign extend it,
+    //precisely that fixed: SRA and SDIV
+    assign FWD_rx0_signed = (opcode == 6'b001010) || (opcode == 6'b001001) ? br_sext(rx0[2:0], FWD_rx0) : FWD_rx0;
+    assign FWD_rx1_signed = (opcode == 6'b001001) ? br_sext(rx1[2:0], FWD_rx1) : FWD_rx1;
 
 
     //So yeah this is just verilator function, they are automatic because it
@@ -667,7 +672,7 @@ module CORE(
     end
 
     //Muxes
-    assign AluMuxX = (aluSrcX == 1'b1) ? (EX_PC + 32'd4) : FWD_rx0;
+    assign AluMuxX = (aluSrcX == 1'b1) ? (EX_PC + 32'd4) : FWD_rx0_signed;
 
     always_comb begin
         unique case (aluSrcY)
@@ -681,7 +686,7 @@ module CORE(
                     6'b000101,
                     6'b001001,
                     6'b001011:
-                        AluMuxY = FWD_rx1 + sign_ext_imm2;
+                        AluMuxY = FWD_rx1_signed + sign_ext_imm2;
 
                     default:   AluMuxY = FWD_rx1 + zero_ext_imm10; // 2-operand logic
                 endcase

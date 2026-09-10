@@ -97,6 +97,9 @@ module ALU (
 
     logic [31:0] remainder;
     logic [31:0] quotinent;
+    logic is_neg_remainder;
+    logic is_neg_quotinent;
+
     logic [31:0] sd; //Shifted Divisor
     logic [33:0] sd3;
 
@@ -104,33 +107,44 @@ module ALU (
     logic       div_working;
     logic       div_finished;
 
-    logic div_req;
+    logic  div_req;
     assign div_req = is_div && isDiv_valid;
 
-    logic div_start;
+    logic  div_start;
     assign div_start = div_req && !div_working && !div_finished;
     assign div_stall = div_req && !div_finished;
+
+    logic  is_signed_div;
+    assign is_signed_div = (opcode == 6'b001001);
+
+    logic  is_mod_op;
+    assign is_mod_op = (opcode == 6'b001011);
+
+    logic [31:0] x_nice, y_nice; //Its how to name it, it basically just works for everything - 
+    //Full registers, fragmeted, signed, unsigned etc
+    assign x_nice = (is_signed_div && x[31]) ? (~x + 32'd1) : x;
+    assign y_nice = (is_signed_div && y[31]) ? (~y + 32'd1) : y;
 
     //We split each signal into 8 4bit slices and check whether they are 0
     logic [4:0] clz_x;
     logic [4:0] clz_y;
 
-    assign clz_x[4:2] = (|x[31:28]) ? 3'b000 :
-                        (|x[27:24]) ? 3'b001 :
-                        (|x[23:20]) ? 3'b010 :
-                        (|x[19:16]) ? 3'b011 :
-                        (|x[15:12]) ? 3'b100 :
-                        (|x[11:8])  ? 3'b101 :
-                        (|x[7:4])   ? 3'b110 :
+    assign clz_x[4:2] = (|x_nice[31:28]) ? 3'b000 :
+                        (|x_nice[27:24]) ? 3'b001 :
+                        (|x_nice[23:20]) ? 3'b010 :
+                        (|x_nice[19:16]) ? 3'b011 :
+                        (|x_nice[15:12]) ? 3'b100 :
+                        (|x_nice[11:8])  ? 3'b101 :
+                        (|x_nice[7:4])   ? 3'b110 :
                         3'b111;
 
-    assign clz_y[4:2] = (|y[31:28]) ? 3'b000 :
-                        (|y[27:24]) ? 3'b001 :
-                        (|y[23:20]) ? 3'b010 :
-                        (|y[19:16]) ? 3'b011 :
-                        (|y[15:12]) ? 3'b100 :
-                        (|y[11:8])  ? 3'b101 :
-                        (|y[7:4])   ? 3'b110 :
+    assign clz_y[4:2] = (|y_nice[31:28]) ? 3'b000 :
+                        (|y_nice[27:24]) ? 3'b001 :
+                        (|y_nice[23:20]) ? 3'b010 :
+                        (|y_nice[19:16]) ? 3'b011 :
+                        (|y_nice[15:12]) ? 3'b100 :
+                        (|y_nice[11:8])  ? 3'b101 :
+                        (|y_nice[7:4])   ? 3'b110 :
                         3'b111;
 
     //veril***r checks for bits and a lot are unused in that design
@@ -140,14 +154,14 @@ module ALU (
     /* verilator lint_on UNUSEDSIGNAL */
     always_comb begin
         unique case (clz_x[4:2])
-            3'd0: sub_clz_x = x[31:28];
-            3'd1: sub_clz_x = x[27:24];
-            3'd2: sub_clz_x = x[23:20];
-            3'd3: sub_clz_x = x[19:16];
-            3'd4: sub_clz_x = x[15:12];
-            3'd5: sub_clz_x = x[11:8];
-            3'd6: sub_clz_x = x[7:4];
-            3'd7: sub_clz_x = x[3:0];
+            3'd0: sub_clz_x = x_nice[31:28];
+            3'd1: sub_clz_x = x_nice[27:24];
+            3'd2: sub_clz_x = x_nice[23:20];
+            3'd3: sub_clz_x = x_nice[19:16];
+            3'd4: sub_clz_x = x_nice[15:12];
+            3'd5: sub_clz_x = x_nice[11:8];
+            3'd6: sub_clz_x = x_nice[7:4];
+            3'd7: sub_clz_x = x_nice[3:0];
         endcase
     end
 
@@ -158,14 +172,14 @@ module ALU (
     /* verilator lint_on UNUSEDSIGNAL */
     always_comb begin
         unique case (clz_y[4:2])
-            3'd0: sub_clz_y = y[31:28];
-            3'd1: sub_clz_y = y[27:24];
-            3'd2: sub_clz_y = y[23:20];
-            3'd3: sub_clz_y = y[19:16];
-            3'd4: sub_clz_y = y[15:12];
-            3'd5: sub_clz_y = y[11:8];
-            3'd6: sub_clz_y = y[7:4];
-            3'd7: sub_clz_y = y[3:0];
+            3'd0: sub_clz_y = y_nice[31:28];
+            3'd1: sub_clz_y = y_nice[27:24];
+            3'd2: sub_clz_y = y_nice[23:20];
+            3'd3: sub_clz_y = y_nice[19:16];
+            3'd4: sub_clz_y = y_nice[15:12];
+            3'd5: sub_clz_y = y_nice[11:8];
+            3'd6: sub_clz_y = y_nice[7:4];
+            3'd7: sub_clz_y = y_nice[3:0];
         endcase
     end
 
@@ -177,14 +191,12 @@ module ALU (
     assign div_shift = {1'b0, clz_y} - {1'b0, clz_x}; //[5] if y > x
 
     logic [31:0] sd_init;
-    assign sd_init = y << {div_shift[4:1], 1'b0};
+    assign sd_init = y_nice << {div_shift[4:1], 1'b0};
 
 
     //Thats a whole ass main logic
     /* verilator lint_off UNUSEDSIGNAL */
-    logic [33:0] sub1;
-    logic [33:0] sub2;
-    logic [33:0] sub3;
+    logic [33:0] sub1, sub2, sub3;
     /* verilator lint_on UNUSEDSIGNAL */
     logic [1:0]  count_fits;
 
@@ -200,8 +212,10 @@ module ALU (
             div_working  <= 1'b0;
             div_finished <= 1'b0;
         end else if (div_start) begin
-            remainder <= x;
+            remainder <= x_nice;
             quotinent <= 32'b0;
+            is_neg_quotinent <= is_signed_div && (x[31] ^ y[31]);
+            is_neg_remainder <= is_signed_div && x[31];
             sd <= sd_init;
             sd3 <= {2'b00, sd_init} + {1'b0, sd_init, 1'b0};
             div_cycles_left <= div_shift[4:1];
@@ -227,6 +241,10 @@ module ALU (
         end
     end
 
+    logic [31:0] div_raw, div_out;
+    assign div_raw = is_mod_op ? remainder : quotinent;
+    assign div_out = (is_mod_op ? is_neg_remainder : is_neg_quotinent) ? (~div_raw + 32'd1) : div_raw;
+
 
     //Doesn't care about clk
     always_comb begin
@@ -251,7 +269,7 @@ module ALU (
                     ZeroDivException = 1;
                     result = 32'b0;
                 end else begin
-                    result = quotinent;
+                    result = div_out;
                 end
             end
 
@@ -260,7 +278,7 @@ module ALU (
                     ZeroDivException = 1'b1;
                     result = 32'b0;
                 end else begin
-                    result = remainder;
+                    result = div_out;
                 end
             end
             6'b001001: begin // SDIV (signed)
@@ -268,9 +286,10 @@ module ALU (
                     ZeroDivException = 1;
                     result = 32'b0;
                 end else begin
-                    result = $signed(x) / $signed(y);
+                    result = div_out;
                 end
             end
+            //no SMOD unfortunately duo to the lack of encoding space
             default: result = 32'b0;
         endcase
     end

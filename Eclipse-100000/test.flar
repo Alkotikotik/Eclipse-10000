@@ -1,8 +1,8 @@
 func main(){
     u32 arr[4];
 
-    for [u32 i; i <= 4; i++]{
-        arr[i] = i;
+    for [u32 i; i <= 512; i += 128]{
+        arr[i] = i / 64;
         [4000 + i * 4] = arr[i];
     }
 }
