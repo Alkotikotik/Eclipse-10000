@@ -66,6 +66,41 @@ module ALU (
     logic [31:0] sh_result;
     assign sh_result = is_shl ? rev32(sh_wide[31:0]) : sh_wide[31:0];
 
+
+    //== Quick-Radix-4 Div Unit ==//
+    //So quick-div works similarly to long division: in the first iteration
+    //CLZ(Count leading zeros) finds the bit amount of zeros between msb and first 1 of both divident and divisor
+    //Then it subtracts CLZ(divisor) - CLZ(devidend) and shifts divisor by that amount to the left, rounding it down to even
+    //Specifically for radix-4.
+    //Btw its (dividend / divisor).
+    //That's how we skip unneccesy calculatations of any regular radix div because of leading zeros.
+    //
+    //Then the actual loop starts, we take sd(Shifted divisor), sd2 which is
+    //shifted additionlly left by 1, and sd3, which is further shifted by 2.
+    //Then we compare all of sds to dividend to check the highest that fits.
+    //Then we shift sds left by 2 and repeat the cycle. Btw we compare them by
+    //subtracting largest sd that fits into dividend, from dividend and then
+    //leaving dividend subtracted.
+    //Now for remainder we first set it to the first largest sd that fits,
+    //then we simply subtract subsequent largest sdas from it, so at the end
+    //we will end up with just a nice remainder.
+    //Now as for quotinent, again its similar to regular long division - we append,
+    //to the left, the amount of sds that fit into divident
+    //
+    //Im explaining allat bc I didn't do divisor in logisim using gates.
+    //We divide x/y meaning x is dividend and y is divisor
+    logic  is_div;
+    assign is_div = ((opcode == 6'b000101) || (opcode == 6'b001011) || (opcode == 6'b001001));
+
+    logic [31:0] remainder;
+    logic [31:0] quotinent;
+    logic [31:0] sd; //Shifted Divisor
+    logic [33:0] sd3;
+
+    logic [3:0] div_cycles_left; //Maximum 16 cycles
+    logic       div_working;
+
+
     //Doesn't care about clk
     always_comb begin
         result = 32'b0;
