@@ -1,7 +1,7 @@
 [+]Dynamic branch prediction
 [+]Resolve unconditional branching in ID
 [+]Variable sized instructions using branching opcodes with imm28(256MB)
-[-] quick-radix-4 div
+[+]quick-radix-4 div
 [/]SPARC style LR shifting
 [/]L1 cache, data/instruction as well as WB cache with similar to forwarding mechanism
 [/]SIMD - 32 unused GPRs encoding combinations, use them for SIMD registers
