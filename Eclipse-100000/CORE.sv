@@ -23,7 +23,7 @@ module CORE(
     //====//
 
     logic  demolish;   //Removes current instructions on the branch misprediction/branch
-    logic  stall;     //Stalls on branch
+    logic  stall;     //Stalls on memory accesses in future but atm on divs
     logic  bubble;   //for handling load-use hazard
     logic  [31:0] PC_target;
 
@@ -35,7 +35,7 @@ module CORE(
                         !(EX_branch && EX_predicted_taken)) ||
                         (EX_branch && (EX_predicted_taken != was_branch_taken)));
 
-    assign stall     = 0;
+    assign stall     = div_working;
     assign bubble    = 0;
     assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + ((EX_64 || EX_branch) ? 32'h8 : 32'h4)) : PCNext;
 
@@ -236,7 +236,7 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin
         if (reset || demolish || bubble) begin
             isEX_valid <= 0;
-        end else begin
+        end else if (!stall) begin
             EX_PC <= ID_PC; //Handing instruction to the EX
             EX_IR <= ID_IR;
             EX_64 <= ID_64;
@@ -391,7 +391,7 @@ module CORE(
             MEM_gpr_write   <= GPRsWrite;
             MEM_gpr_dest    <= gpr_rw0_sel;
             MEM_kernel_mode <= KernelMode;
-            isMEM_valid     <= isEX_valid;
+            isMEM_valid     <= isEX_valid & !stall;
             MEM_is_lomul    <= (opcode == 6'b000111);
             MEM_is_himul    <= (opcode == 6'b001101);
 
@@ -600,6 +600,7 @@ module CORE(
     logic [63:0] mul_product;
     logic [1:0] aluOpSel;
     logic [5:0] AluOpcode;
+    logic div_working;
 
     logic [31:0] ram_data_out;
 
@@ -881,12 +882,14 @@ module CORE(
 
     ALU cpu_alu (
         .clk(clk),
+        .reset(reset),
         .x(AluMuxX),
         .y(AluMuxY),
         .opcode(AluOpcode),
 
         .result(AluResult),
         .mul_product(mul_product),
+        .div_working(div_working),
 
         .ZeroDivException(ZeroDivException)
     );

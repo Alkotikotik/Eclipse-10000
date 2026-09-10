@@ -1,11 +1,13 @@
 module ALU (
     input  logic clk, //For DSP
+    input  logic reset,
     input  logic [31:0] x,
     input  logic [31:0] y,
     input  logic [5:0] opcode,
 
     output logic [31:0] result,
     output logic [63:0] mul_product,
+    output logic div_working,
 
     output logic ZeroDivException
 
@@ -98,7 +100,108 @@ module ALU (
     logic [33:0] sd3;
 
     logic [3:0] div_cycles_left; //Maximum 16 cycles
-    logic       div_working;
+
+    logic div_start;
+    assign div_start = is_div && !div_working && !div_finished;
+
+    //We split each signal into 8 4bit slices and check whether they are 0
+    logic [4:0] clz_x;
+    logic [4:0] clz_y;
+
+    assign clz_x[4:2] = (|x[31:28]) ? 3'b000 :
+                        (|x[27:24]) ? 3'b001 :
+                        (|x[23:20]) ? 3'b010 :
+                        (|x[19:16]) ? 3'b011 :
+                        (|x[15:12]) ? 3'b100 :
+                        (|x[11:8])  ? 3'b101 :
+                        (|x[7:4])   ? 3'b110 :
+                        3'b111;
+
+    assign clz_y[4:2] = (|y[31:28]) ? 3'b000 :
+                        (|y[27:24]) ? 3'b001 :
+                        (|y[23:20]) ? 3'b010 :
+                        (|y[19:16]) ? 3'b011 :
+                        (|y[15:12]) ? 3'b100 :
+                        (|y[11:8])  ? 3'b101 :
+                        (|y[7:4])   ? 3'b110 :
+                        3'b111;
+
+    logic [3:0] sub_clz_x;
+    always_comb begin
+        unique case (clz_x[4:2])
+            3'd0: sub_clz_x = x[31:28];
+            3'd1: sub_clz_x = x[27:24];
+            3'd2: sub_clz_x = x[23:20];
+            3'd3: sub_clz_x = x[19:16];
+            3'd4: sub_clz_x = x[15:12];
+            3'd5: sub_clz_x = x[11:8];
+            3'd6: sub_clz_x = x[7:4];
+            3'd7: sub_clz_x = x[3:0];
+        endcase
+    end
+
+    assign clz_x[1:0] = sub_clz_x[3] ? 2'd0 : sub_clz_x[2] ? 2'd1 : sub_clz_x[1] ? 2'd2 : 2'd3;
+
+    logic [3:0] sub_clz_y;
+    always_comb begin
+        unique case (clz_y[4:2])
+            3'd0: sub_clz_y = y[31:28];
+            3'd1: sub_clz_y = y[27:24];
+            3'd2: sub_clz_y = y[23:20];
+            3'd3: sub_clz_y = y[19:16];
+            3'd4: sub_clz_y = y[15:12];
+            3'd5: sub_clz_y = y[11:8];
+            3'd6: sub_clz_y = y[7:4];
+            3'd7: sub_clz_y = y[3:0];
+        endcase
+    end
+
+    assign clz_y[1:0] = sub_clz_y[3] ? 2'd0 : sub_clz_y[2] ? 2'd1 : sub_clz_y[1] ? 2'd2 : 2'd3;
+
+    logic [5:0] div_shift;
+    assign div_shift = {1'b0, clz_y} - {1'b0, clz_x}; //[5] if y > x
+
+    logic [31:0] sd_init;
+    assign sd_init = y << {div_shift[4:1], 1'b0};
+
+
+    //Thats a whole ass main logic
+    logic [31:0] sub1;
+    logic [31:0] sub2;
+    logic [31:0] sub3;
+
+    assign sub1 = {2'b00, remainder} - {2'b00, sd}; //subtract sds from remainder
+    assign sub2 = {2'b00, remainder} - {1'b0, sd, 1'b0}; //Thats sd2 btw
+    assign sub3 = {2'b00, remainder} - sd3; //My brother looking at that said that im sub 3...
+
+    assign count_fits = ~sub3[33] ? 2'd3 : ~sub2[33] ? 2'd2 : ~sub1[33] ? 2'd1 : 2'd0;
+
+
+    always_ff @(posedge clk or posedge reset) begin
+        if (div_start) begin
+            remainder <= x
+            quotinent <= 32'b0;
+            sd <= y << sd_init;
+            sd3 <= {2'b00, sd_init} + {1'b0, sd_init, 1'b0};
+            div_cycles_left <={div_shift[4:1], 1'b0}[4:1];
+            div_working <= !div_shift[5]; //Read above
+            div_finished <= div_shift[5];
+        end else if (div_working) begin
+            remainder <=(count_fits == 2'd3) ? sub3[31:0] :
+                        (count_fits == 2'd2) ? sub2[31:0] :
+                        (count_fits == 2'd1) ? sub1[31:0] :
+                        remainder;
+
+            quotinent <= {quotinent[29:0], count_fits};
+            sd <= {2'b00, sd[31:2]};
+            sd3 <= {2'b00, sd3[33:2]};
+            div_cycles_left <= div_cycles_left - 4'h1;
+            div_working <= (div_cycles_left != 0);
+            div_finished <= (div_cycles_left == 0);
+        end else begin
+            div_finished <= 0;
+        end
+    end
 
 
     //Doesn't care about clk
@@ -123,7 +226,7 @@ module ALU (
                     ZeroDivException = 1;
                     result = 32'b0;
                 end else begin
-                    result = x / y;
+                    result = quotinent;
                 end
             end
 
@@ -132,7 +235,7 @@ module ALU (
                     ZeroDivException = 1'b1;
                     result = 32'b0;
                 end else begin
-                    result = x % y;
+                    result = remainder;
                 end
             end
             6'b001001: begin // SDIV (signed)
