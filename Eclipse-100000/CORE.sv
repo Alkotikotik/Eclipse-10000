@@ -118,7 +118,13 @@ module CORE(
     //PHT - pattern history table 1KB of BRAM. It actually doesn't store
     //saturing counters for each branch, it just stores saturating counters
     //without any inherit meaning associated with them.
-    logic [1:0] PHT [0:4095];
+    (* ram_style = "block" *) logic [1:0] PHT [0:4095];
+
+    //Default is weakly taken simply because branches are usually taken
+    //then not, though if particular one isn't its just 1 time calibration
+    initial begin
+        for (integer i = 0; i< 4096; i = i + 1) PHT[i] = 2'b10;
+    end
 
     //GHR - Global history register 12 bits because its just enough to address
     //all 1KB
@@ -130,10 +136,7 @@ module CORE(
     assign pht_read_idx = IF_PC_next[14:3] ^ GHR;
     /* verilator lint_off UNUSEDSIGNAL */
     logic [1:0] pht_out; //Actual counter for particular branch, only lowest bit isn't really read
-    /* verilator lint_off UNUSEDSIGNAL */
-    always_ff @(posedge clk) begin
-        pht_out <= PHT[pht_read_idx];
-    end
+    /* verilator lint_on UNUSEDSIGNAL */
 
     //We gotta check whether branch was actually taken or not
     logic  was_branch_taken;
@@ -159,16 +162,17 @@ module CORE(
     end
 
     //This all coming together
+    //Only read EX_pht_idx rather than combinationally like previousely
+    always_ff @(posedge clk) begin
+        pht_out <= PHT[pht_read_idx];
+        if (isEX_valid && EX_branch)
+            PHT[EX_pht_idx] <= updated_pht(EX_pht_val, was_branch_taken);
+    end
+
+    //GHR is still in flops though
     always_ff @(posedge clk or posedge reset) begin
-        if (reset) begin
-            GHR <= 12'b0;
-            //Default is weakly taken simply because branches are usually taken
-            //then not, though if particular one isn't its just 1 time calibration
-            for (integer i = 0; i < 4096; i = i + 1) PHT[i] <= 2'b10;
-        end else if (isEX_valid && EX_branch) begin
-            PHT[EX_pht_idx] <= updated_pht(PHT[EX_pht_idx], was_branch_taken);
-            GHR <= {GHR[10:0], was_branch_taken};
-        end
+        if (reset) GHR <= 12'b0;
+        else if (isEX_valid && EX_branch) GHR <= {GHR[10:0], was_branch_taken};
     end
 
 
@@ -177,6 +181,8 @@ module CORE(
     logic [31:0] ID_PC, ID_IR; //Each stage gets into own IR and PC
     logic [31:0] ID_early_target;
     logic [11:0] ID_pht_idx;
+    logic [1:0]  ID_pht_val;
+
     logic isID_valid;
     logic ID_branch;
     logic ID_predicted_taken;
@@ -195,6 +201,7 @@ module CORE(
             ID_early_target <= IF_redirect_target;
             isID_valid <= 1'b1;
             ID_pht_idx <= pht_idx_r;
+            ID_pht_val <= pht_out;
             ID_predicted_taken <= IF_predicted_taken;
         end
         //else: stall holds PC and IR as they are
@@ -227,6 +234,7 @@ module CORE(
     logic [31:0] EX_IR_2;
     logic [31:0] EX_early_target;
     logic [11:0] EX_pht_idx;
+    logic [1:0]  EX_pht_val;
     logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
     logic EX_predicted_taken;
     logic isEX_valid;
@@ -250,6 +258,7 @@ module CORE(
             EX_early_target <= ID_early_target;
             isEX_valid <= isID_valid;
             EX_pht_idx <= ID_pht_idx;
+            EX_pht_val <= ID_pht_val;
             EX_predicted_taken <= ID_predicted_taken;
         end
     end
