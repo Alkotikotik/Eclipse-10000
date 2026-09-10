@@ -4,10 +4,11 @@ module ALU (
     input  logic [31:0] x,
     input  logic [31:0] y,
     input  logic [5:0] opcode,
+    input  logic isDiv_valid,
 
     output logic [31:0] result,
     output logic [63:0] mul_product,
-    output logic div_working,
+    output logic div_stall,
 
     output logic ZeroDivException
 
@@ -100,9 +101,15 @@ module ALU (
     logic [33:0] sd3;
 
     logic [3:0] div_cycles_left; //Maximum 16 cycles
+    logic       div_working;
+    logic       div_finished;
+
+    logic div_req;
+    assign div_req = is_div && isDiv_valid;
 
     logic div_start;
-    assign div_start = is_div && !div_working && !div_finished;
+    assign div_start = div_req && !div_working && !div_finished;
+    assign div_stall = div_req && !div_finished;
 
     //We split each signal into 8 4bit slices and check whether they are 0
     logic [4:0] clz_x;
@@ -126,7 +133,11 @@ module ALU (
                         (|y[7:4])   ? 3'b110 :
                         3'b111;
 
+    //veril***r checks for bits and a lot are unused in that design
+    //So a considerable amount of link offs
+    /* verilator lint_off UNUSEDSIGNAL */
     logic [3:0] sub_clz_x;
+    /* verilator lint_on UNUSEDSIGNAL */
     always_comb begin
         unique case (clz_x[4:2])
             3'd0: sub_clz_x = x[31:28];
@@ -142,7 +153,9 @@ module ALU (
 
     assign clz_x[1:0] = sub_clz_x[3] ? 2'd0 : sub_clz_x[2] ? 2'd1 : sub_clz_x[1] ? 2'd2 : 2'd3;
 
+    /* verilator lint_off UNUSEDSIGNAL */
     logic [3:0] sub_clz_y;
+    /* verilator lint_on UNUSEDSIGNAL */
     always_comb begin
         unique case (clz_y[4:2])
             3'd0: sub_clz_y = y[31:28];
@@ -158,7 +171,9 @@ module ALU (
 
     assign clz_y[1:0] = sub_clz_y[3] ? 2'd0 : sub_clz_y[2] ? 2'd1 : sub_clz_y[1] ? 2'd2 : 2'd3;
 
+    /* verilator lint_off UNUSEDSIGNAL */
     logic [5:0] div_shift;
+    /* verilator lint_on UNUSEDSIGNAL */
     assign div_shift = {1'b0, clz_y} - {1'b0, clz_x}; //[5] if y > x
 
     logic [31:0] sd_init;
@@ -166,9 +181,12 @@ module ALU (
 
 
     //Thats a whole ass main logic
-    logic [31:0] sub1;
-    logic [31:0] sub2;
-    logic [31:0] sub3;
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [33:0] sub1;
+    logic [33:0] sub2;
+    logic [33:0] sub3;
+    /* verilator lint_on UNUSEDSIGNAL */
+    logic [1:0]  count_fits;
 
     assign sub1 = {2'b00, remainder} - {2'b00, sd}; //subtract sds from remainder
     assign sub2 = {2'b00, remainder} - {1'b0, sd, 1'b0}; //Thats sd2 btw
@@ -178,14 +196,20 @@ module ALU (
 
 
     always_ff @(posedge clk or posedge reset) begin
-        if (div_start) begin
-            remainder <= x
+        if (reset) begin
+            div_working  <= 1'b0;
+            div_finished <= 1'b0;
+        end else if (div_start) begin
+            remainder <= x;
             quotinent <= 32'b0;
-            sd <= y << sd_init;
+            sd <= sd_init;
             sd3 <= {2'b00, sd_init} + {1'b0, sd_init, 1'b0};
-            div_cycles_left <={div_shift[4:1], 1'b0}[4:1];
+            div_cycles_left <= div_shift[4:1];
             div_working <= !div_shift[5]; //Read above
             div_finished <= div_shift[5];
+        end else if (div_working && !div_req) begin
+            div_working  <= 1'b0;
+            div_finished <= 1'b0;
         end else if (div_working) begin
             remainder <=(count_fits == 2'd3) ? sub3[31:0] :
                         (count_fits == 2'd2) ? sub2[31:0] :
@@ -220,7 +244,8 @@ module ALU (
             6'b001100: result = sh_result; //SHR
             6'b001010: result = sh_result; //SRA for singed shift right iirc
             6'b000100: result = y; //MOV
-            //Replace later for FPGA for quick div gonna do it soon
+            //Replace later for FPGA for quick div gonna do it soon, already
+            //did it dumbass
             6'b000101: begin // DIV
                 if (y == 32'b0) begin
                     ZeroDivException = 1;

@@ -35,7 +35,7 @@ module CORE(
                         !(EX_branch && EX_predicted_taken)) ||
                         (EX_branch && (EX_predicted_taken != was_branch_taken)));
 
-    assign stall     = div_working;
+    assign stall     = div_stall;
     assign bubble    = 0;
     assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + ((EX_64 || EX_branch) ? 32'h8 : 32'h4)) : PCNext;
 
@@ -600,7 +600,7 @@ module CORE(
     logic [63:0] mul_product;
     logic [1:0] aluOpSel;
     logic [5:0] AluOpcode;
-    logic div_working;
+    logic div_stall;
 
     logic [31:0] ram_data_out;
 
@@ -886,10 +886,11 @@ module CORE(
         .x(AluMuxX),
         .y(AluMuxY),
         .opcode(AluOpcode),
+        .isDiv_valid(isEX_valid && !demolish),
 
         .result(AluResult),
         .mul_product(mul_product),
-        .div_working(div_working),
+        .div_stall(div_stall),
 
         .ZeroDivException(ZeroDivException)
     );
