@@ -111,7 +111,7 @@ module ALU (
     assign div_req = is_div && isDiv_valid;
 
     logic  div_start;
-    assign div_start = div_req && !div_working && !div_finished;
+    assign div_start = div_req && !div_working && !div_finished && !div_init;
     assign div_stall = div_req && !div_finished;
 
     logic  is_signed_div;
@@ -120,10 +120,15 @@ module ALU (
     logic  is_mod_op;
     assign is_mod_op = (opcode == 6'b001011);
 
-    logic [31:0] x_nice, y_nice; //Its how to name it, it basically just works for everything - 
+    //Latch x and y on the start of div to basically half the critical path.
+    //Thsi would add 1 cycle to every div, but quite frankly it doesn't matter
+    logic [31:0] x_div, y_div;
+    logic div_init;
+
+    logic [31:0] x_nice, y_nice; //Idk how to name it, it basically just works for everything - 
     //Full registers, fragmeted, signed, unsigned etc
-    assign x_nice = (is_signed_div && x[31]) ? (~x + 32'd1) : x;
-    assign y_nice = (is_signed_div && y[31]) ? (~y + 32'd1) : y;
+    assign x_nice = (is_signed_div && x_div[31]) ? (~x_div + 32'd1) : x_div;
+    assign y_nice = (is_signed_div && y_div[31]) ? (~y_div + 32'd1) : y_div;
 
     //We split each signal into 8 4bit slices and check whether they are 0
     logic [4:0] clz_x;
@@ -206,21 +211,28 @@ module ALU (
 
     assign count_fits = ~sub3[34] ? 2'd3 : ~sub2[34] ? 2'd2 : ~sub1[34] ? 2'd1 : 2'd0;
 
+    
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             div_working  <= 1'b0;
             div_finished <= 1'b0;
+            div_init     <= 1'b0;
         end else if (div_start) begin
+            x_div <= x;
+            y_div <= y;
+            div_init <= 1'b1;
+        end else if (div_init) begin
             remainder <= x_nice;
             quotinent <= 32'b0;
-            is_neg_quotinent <= is_signed_div && (x[31] ^ y[31]);
-            is_neg_remainder <= is_signed_div && x[31];
+            is_neg_quotinent <= is_signed_div && (x_div[31] ^ y_div[31]);
+            is_neg_remainder <= is_signed_div && x_div[31];
             sd <= sd_init;
             sd3 <= {2'b00, sd_init} + {1'b0, sd_init, 1'b0};
             div_cycles_left <= div_shift[4:1];
             div_working <= !div_shift[5]; //Read above
             div_finished <= div_shift[5];
+            div_init <= 1'b0;
         end else if (div_working && !div_req) begin
             div_working  <= 1'b0;
             div_finished <= 1'b0;
@@ -265,7 +277,7 @@ module ALU (
             //Replace later for FPGA for quick div gonna do it soon, already
             //did it dumbass
             6'b000101: begin // DIV
-                if (y == 32'b0) begin
+                if (y_div == 32'b0) begin
                     ZeroDivException = 1;
                     result = 32'b0;
                 end else begin
@@ -274,7 +286,7 @@ module ALU (
             end
 
             6'b001011: begin // MOD
-                if (y == 32'b0) begin
+                if (y_div == 32'b0) begin
                     ZeroDivException = 1'b1;
                     result = 32'b0;
                 end else begin
@@ -282,7 +294,7 @@ module ALU (
                 end
             end
             6'b001001: begin // SDIV (signed)
-                if (y == 32'b0) begin
+                if (y_div == 32'b0) begin
                     ZeroDivException = 1;
                     result = 32'b0;
                 end else begin
