@@ -114,26 +114,29 @@ module CORE(
     //The GHR is this exact register that holds outputs of previous branches,
     //xoring it with pht_idx gives us different address every time output of
     //previous branches is different.
+    //
+    //Exact numbers in comments are outdated: I changed PHT to 4kb per core
+    //and hence everything else
 
-    //PHT - pattern history table 1KB of BRAM. It actually doesn't store
+    //PHT - pattern history table 4KB of BRAM. It actually doesn't store
     //saturing counters for each branch, it just stores saturating counters
-    //without any inherit meaning associated with them.
-    (* ram_style = "block" *) logic [1:0] PHT [0:4095];
+    //without any inherit meaning associated with them. 4KB per core btw
+    (* ram_style = "block" *) logic [1:0] PHT [0:16383];
 
     //Default is weakly taken simply because branches are usually taken
     //then not, though if particular one isn't its just 1 time calibration
     initial begin
-        for (integer i = 0; i< 4096; i = i + 1) PHT[i] = 2'b10;
+        for (integer i = 0; i< 16384; i = i + 1) PHT[i] = 2'b10;
     end
 
     //GHR - Global history register 12 bits because its just enough to address
-    //all 1KB
-    logic [11:0] GHR;
+    //all 4KB
+    logic [15:0] GHR;
 
-    logic [11:0] pht_read_idx;
-    //Last 12 bits of imm26 13:2 because last two bits are always 0 since labels are 4 byte aligned
+    logic [13:0] pht_read_idx;
+    //Last 14 bits of imm26 13:2 because last two bits are always 0 since labels are 4 byte aligned
     //IF_PC_next because BRAM read happens on the next clock cycle to the request
-    assign pht_read_idx = IF_PC_next[14:3] ^ GHR;
+    assign pht_read_idx = IF_PC_next[16:3] ^ GHR[13:0] ^ {5'b0, GHR[15:14], 7'b0};
     /* verilator lint_off UNUSEDSIGNAL */
     logic [1:0] pht_out; //Actual counter for particular branch, only lowest bit isn't really read
     /* verilator lint_on UNUSEDSIGNAL */
@@ -156,7 +159,7 @@ module CORE(
         end
     endfunction
 
-    logic [11:0] pht_idx_r;
+    logic [13:0] pht_idx_r;
     always_ff @(posedge clk) begin
         pht_idx_r <= pht_read_idx;
     end
@@ -171,8 +174,8 @@ module CORE(
 
     //GHR is still in flops though
     always_ff @(posedge clk or posedge reset) begin
-        if (reset) GHR <= 12'b0;
-        else if (isEX_valid && EX_branch) GHR <= {GHR[10:0], was_branch_taken};
+        if (reset) GHR <= 16'b0;
+        else if (isEX_valid && EX_branch) GHR <= {GHR[14:0], was_branch_taken};
     end
 
 
@@ -180,7 +183,7 @@ module CORE(
     //== Anyways ID(Instruction Decode) stage ==//
     logic [31:0] ID_PC, ID_IR; //Each stage gets into own IR and PC
     logic [31:0] ID_early_target;
-    logic [11:0] ID_pht_idx;
+    logic [13:0] ID_pht_idx;
     logic [1:0]  ID_pht_val;
 
     logic isID_valid;
@@ -233,7 +236,7 @@ module CORE(
     logic [31:0] EX_PC, EX_IR;
     logic [31:0] EX_IR_2;
     logic [31:0] EX_early_target;
-    logic [11:0] EX_pht_idx;
+    logic [13:0] EX_pht_idx;
     logic [1:0]  EX_pht_val;
     logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
     logic EX_predicted_taken;

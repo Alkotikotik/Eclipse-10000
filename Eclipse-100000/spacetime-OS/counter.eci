@@ -2094,7 +2094,7 @@
 	ADD rx27 <- [rx27, rx31 1]
 	SPRSTR rz283 -> [SP 0]
 
-	IBSEU <-< [rx27 <-> 200000] >-> ~Lab_endif_3
+	IBSEU <-< [rx27 <-> 1] >-> ~Lab_endif_3
 
 	LOAD rx30 <- 15
 	MUL ry260 <- [ry260, rx30 0]
