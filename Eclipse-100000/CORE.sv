@@ -241,6 +241,8 @@ module CORE(
     assign EX_is_mul  = isEX_valid && (opcode == 6'b000111 || opcode == 6'b001101);
     assign MEM_is_mul = isMEM_valid && (MEM_is_lomul || MEM_is_himul);
 
+    //Alright I wrote this all for nothing bc the fix is literally just gate
+    //it by ID_64 ill leave it here anyways bc why not.
     //Note: Sometimes by next instruction I mean next 2 instructions
     //Checking if either EX and MEM use the same registers as mul used
     //So I don't check for GPRsWrite is usual because that means it would have
@@ -257,11 +259,11 @@ module CORE(
     //unless it is branch and we used any of rx24 registers, it would fire in that case yeah.
     //It might also fire if we mul to any rx22 and next instruction is SPRSUB
     //or SPRLEA. And yeah afterall its not like it breaks anything it might
-    //just increase overall CPI by 0.05 which is a random estimate I just came
+    //just increase overall CPI by 0.025 which is a random estimate I just came
     //up with.
     logic  ID_uses_EX_dest, ID_uses_MEM_dest;
-    assign ID_uses_EX_dest  = (gpr_rw0_sel[7:3]  == ID_rx0[7:3]) || (gpr_rw0_sel[7:3]  == ID_rx1[7:3]) || (gpr_rw0_sel[7:3]  == ID_IR_2[31:27]);
-    assign ID_uses_MEM_dest = (MEM_gpr_dest[7:3] == ID_rx0[7:3]) || (MEM_gpr_dest[7:3] == ID_rx1[7:3]) || (MEM_gpr_dest[7:3] == ID_IR_2[31:27]);
+    assign ID_uses_EX_dest  = (gpr_rw0_sel[7:3]  == ID_rx0[7:3]) || (gpr_rw0_sel[7:3]  == ID_rx1[7:3]) || (ID_64 && (gpr_rw0_sel[7:3]  == ID_IR_2[31:27]));
+    assign ID_uses_MEM_dest = (MEM_gpr_dest[7:3] == ID_rx0[7:3]) || (MEM_gpr_dest[7:3] == ID_rx1[7:3]) || (ID_64 && (MEM_gpr_dest[7:3] == ID_IR_2[31:27]));
 
     logic  mul_use_hazard;
     assign mul_use_hazard = isID_valid && ((EX_is_mul && ID_uses_EX_dest) || (MEM_is_mul && ID_uses_MEM_dest));

@@ -1,12 +1,12 @@
 ~main:
     LOAD ry00 <- -660
-    LOAD rz03 <- 11
-    LOAD rz04 <- 250
-    LOAD rx1  <- 1000000
-    SDIV ry00 <- ry00, rz03
+    LOAD rz02 <- 11
+    LOAD rz03 <- 250
+    LMA rx1 <- 1000000000
+    SDIV ry00 <- ry00, rz02
     LOMUL ry00 <- ry00, ry00
     STX ry00 -> [rx31, rx31 << 0, 4000]
     HIMUL ry00 <- ry00, rx1
-    DIV ry00 <- ry00, rz04
+    DIV ry00 <- ry00, rz03
     STX ry00 -> [rx31, rx31 << 0, 4004]
     JMP ~main
