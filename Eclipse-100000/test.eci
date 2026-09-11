@@ -4,4 +4,3 @@
     SDIV ry00 <- ry00, rz03
     STX ry00 -> [rx31, rx31 << 0, 4000]
     JMP ~main
-

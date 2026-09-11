@@ -27,11 +27,15 @@ module CORE(
     logic  bubble;   //for handling load-use hazard
     logic  [31:0] PC_target;
 
+    logic  early_target_ok;
+    assign early_target_ok = (opcode == 6'b010000) ? (EX_early_target == LR) : (EX_early_target == EPC);
+
+    //Basically thats a massive check for mispredicted branch
     assign demolish  =  isEX_valid &&
                         (irq_taken ||
                         (PCWrite &&
                         !(opcode == 6'b111111 || opcode == 6'b111000) &&
-                        !((opcode == 6'b010000 || opcode == 6'b111101) && (EX_early_target == PCNext)) &&
+                        !((opcode == 6'b010000 || opcode == 6'b111101) && early_target_ok) &&
                         !(EX_branch && EX_predicted_taken)) ||
                         (EX_branch && (EX_predicted_taken != was_branch_taken)));
 
@@ -903,7 +907,7 @@ module CORE(
         .x(AluMuxX),
         .y(AluMuxY),
         .opcode(AluOpcode),
-        .isDiv_valid(isEX_valid && !demolish),
+        .isDiv_valid(isEX_valid && !irq_taken), //Not demolish bc it has a long of irrelivant data that just slows it dow
 
         .result(AluResult),
         .mul_product(mul_product),
