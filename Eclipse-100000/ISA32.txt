@@ -126,8 +126,8 @@ Second word:
 [21:0]  imm[21:0]
 
 STX/LDX
-010000 : STX rx0 >-> [rx1, rx2 << val + addr] <-< //Stores rx0 at rx1 + ((rx2 << val) + addr)
-011111 : LDX rx0 <-< [rx1, rx2 << val + addr] >->
+010000 : STX rx0 >=> [rx1, rx2 << val + addr] <=< //Stores rx0 at rx1 + ((rx2 << val) + addr)
+011111 : LDX rx0 <=< [rx1, rx2 << val + addr] >=>
 
 Fused CMP and branch, separated into pure register and pure immediate forms, in order to avoid useless wait for ALU in pure register form
 Register Form <<==
@@ -161,7 +161,7 @@ First word:
 [9:5]   sub-op  (6-bit opcode indicating 64-bit instruction)
 [4:0]   imm5    (Somewhat significant bits of full imm19)
 Second word:
-[31:26] imm6  (Least significant bits of imm19)
+[31:26] unused  (Least significant bits of imm19)
 [25:0]  imm26 (branch target)
 >>
 

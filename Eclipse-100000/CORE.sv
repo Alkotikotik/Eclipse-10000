@@ -30,7 +30,8 @@ module CORE(
     logic  early_target_ok;
     assign early_target_ok = (opcode == 6'b010000) ? (EX_early_target == LR) : (EX_early_target == EPC);
 
-    //Basically thats a massive check for mispredicted branch
+    //Basically thats a massive check for unexpected PC change, like branch
+    //misprediction, interrupt and JR
     assign demolish  =  isEX_valid &&
                         (irq_taken ||
                         (PCWrite &&
@@ -40,7 +41,7 @@ module CORE(
                         (EX_branch && (EX_predicted_taken != was_branch_taken)));
 
     assign stall     = div_stall;
-    assign bubble    = 0;
+    assign bubble    = mul_use_hazard && !stall; //If we already stall no point in bubble, it also breaks div
     assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + ((EX_64 || EX_branch) ? 32'h8 : 32'h4)) : PCNext;
 
     //== IF(Instruction Fetch) ==//
@@ -60,7 +61,7 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin
         if (reset) IF_PC <= 32'h0;
         else if(demolish) IF_PC <= PC_target;
-        else if(!stall) IF_PC <= IF_PC_next;
+        else if(!stall && !bubble) IF_PC <= IF_PC_next;
         else IF_PC <= IF_PC; //I just can't omit it
     end
 
@@ -199,7 +200,7 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin
         if (reset || demolish) begin
             isID_valid <= 0;
-        end else if (!stall) begin
+        end else if (!stall && !bubble) begin
             ID_PC <= IF_PC;
             ID_64 <= IF_64;
             ID_IR_2 <= IF_IR_2;
@@ -232,6 +233,38 @@ module CORE(
     logic  load_use_hazard;
     assign load_use_hazard = isEX_valid && memRead && GPRsWrite &&
                           ((gpr_rw0_sel == ID_rx0) || (gpr_rw0_sel == ID_rx1));
+
+    //the CPU will get mul result only at the end of MEM, hence it introduces
+    //mul-use hazard, if next instruction uses mul and we don't have the
+    //result yet, we have to bubble, same as load use
+    logic  EX_is_mul, MEM_is_mul;
+    assign EX_is_mul  = isEX_valid && (opcode == 6'b000111 || opcode == 6'b001101);
+    assign MEM_is_mul = isMEM_valid && (MEM_is_lomul || MEM_is_himul);
+
+    //Note: Sometimes by next instruction I mean next 2 instructions
+    //Checking if either EX and MEM use the same registers as mul used
+    //So I don't check for GPRsWrite is usual because that means it would have
+    //to wait for this whole mem safety thing, which im gonna move to the MEM soon,
+    //And hence keeps critical path short. However that does introduce
+    //a problem, since I unconditionally check for ID_IR_2[31:27], if first
+    //5 bits of opcode of next insruction perfectly align with the exact base
+    //register used bits it would lead to uneccessery bubble. Now unfornutely
+    //Its not as uncommon as it might seem, actually is is pretty damn uncommon:
+    //Most commonely used registers are rx29-rx24 which all start with 11, and
+    //since there is handful of 11' instruction it should appear as often. Btw
+    //it isn't possible with rx30 and rx31 because they are almost never a mul
+    //dest. This also would almost never fire if next instruction is 64bit
+    //unless it is branch and we used any of rx24 registers, it would fire in that case yeah.
+    //It might also fire if we mul to any rx22 and next instruction is SPRSUB
+    //or SPRLEA. And yeah afterall its not like it breaks anything it might
+    //just increase overall CPI by 0.05 which is a random estimate I just came
+    //up with.
+    logic  ID_uses_EX_dest, ID_uses_MEM_dest;
+    assign ID_uses_EX_dest  = (gpr_rw0_sel[7:3]  == ID_rx0[7:3]) || (gpr_rw0_sel[7:3]  == ID_rx1[7:3]) || (gpr_rw0_sel[7:3]  == ID_IR_2[31:27]);
+    assign ID_uses_MEM_dest = (MEM_gpr_dest[7:3] == ID_rx0[7:3]) || (MEM_gpr_dest[7:3] == ID_rx1[7:3]) || (MEM_gpr_dest[7:3] == ID_IR_2[31:27]);
+
+    logic  mul_use_hazard;
+    assign mul_use_hazard = isID_valid && ((EX_is_mul && ID_uses_EX_dest) || (MEM_is_mul && ID_uses_MEM_dest));
     /* verilator lint_on UNUSEDSIGNAL */
 
 
@@ -432,14 +465,11 @@ module CORE(
             mem_read_data = 32'd0;
     end
 
-    //Specifically for mul, actually no - not anymore for loads too
+    //Specifically for mul, actually no - not anymore for loads too, actually
+    //no not even for mul anymore, specifically for loads now
     logic [31:0] MEM_val;
     always_comb begin
-        if (MEM_is_lomul)
-            MEM_val = mul_product[31:0];
-        else if (MEM_is_himul)
-            MEM_val = mul_product[63:32];
-        else if (MEM_is_load)
+        if (MEM_is_load)
             MEM_val = mem_read_data;
         else
             MEM_val = MEM_result;
@@ -453,6 +483,7 @@ module CORE(
     logic WB_gpr_write;
     logic WB_kernel_mode;
     logic isWB_valid;
+    logic WB_is_lomul, WB_is_himul;
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -463,7 +494,21 @@ module CORE(
             WB_gpr_dest <= MEM_gpr_dest;
             WB_gpr_write <= MEM_gpr_write;
             WB_kernel_mode <= MEM_kernel_mode;
+
+            WB_is_lomul <= MEM_is_lomul;
+            WB_is_himul <= MEM_is_himul;
         end
+    end
+
+    //Now this is specifically for mul(prone to change as I already realized)
+    logic [31:0] WB_val;
+    always_comb begin
+        if (WB_is_lomul)
+            WB_val = mul_product[31:0];
+        else if (WB_is_himul)
+            WB_val = mul_product[63:32];
+        else
+            WB_val = WB_result;
     end
 
     //== Forwarding ==//
@@ -539,9 +584,9 @@ module CORE(
     assign ID_wb_hit2 = wb_writes_array && (WB_gpr_dest[7:3] == ID_IR_2[31:27]);
 
     always_comb begin
-        ID_rx0_val = ID_wb_hit0 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out0, WB_result) : GPRs_data_out0;
-        ID_rx1_val = ID_wb_hit1 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out1, WB_result) : GPRs_data_out1;
-        ID_rx2_val = ID_wb_hit2 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out2, WB_result) : GPRs_data_out2;
+        ID_rx0_val = ID_wb_hit0 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out0, WB_val) : GPRs_data_out0;
+        ID_rx1_val = ID_wb_hit1 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out1, WB_val) : GPRs_data_out1;
+        ID_rx2_val = ID_wb_hit2 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out2, WB_val) : GPRs_data_out2;
     end
 
     //So at ID we don't know if instruction should be executed in kernel mode
@@ -928,7 +973,7 @@ module CORE(
         .rr1(ID_rx1[7:3]), //Natevily base
         .rr2(ID_IR_2[31:27]), //Index selector
         .rw0(WB_gpr_dest),
-        .data_in(WB_result),
+        .data_in(WB_val),
         .data_out0(GPRs_data_out0),
         .data_out1(GPRs_data_out1),
         .data_out2(GPRs_data_out2),

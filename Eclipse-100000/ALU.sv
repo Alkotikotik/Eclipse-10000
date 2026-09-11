@@ -16,10 +16,17 @@ module ALU (
 
     //== DSP ==// 
     //DSP is kinda sick so I just wanna highlight it, its basically a built-in
-    //board multipliers
+    //board multipliers.
+    //Internal DSP register to multi-cycle mul between EX and MEM which
+    //supposedely should shorten a critical path according to my assumptions
+    //Based on vivado's report
+    logic [31:0] mul_x, mul_y;
+
     (* use_dsp = "yes" *)
     always_ff @(posedge clk) begin //No reset :(
-        mul_product <= x * y;
+        mul_x <= x;
+        mul_y <= y;
+        mul_product <= mul_x * mul_y;
     end
 
     //Basically I previosely had several reduntant adders and shifters, same
