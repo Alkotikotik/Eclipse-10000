@@ -398,7 +398,7 @@ module CORE(
     assign branch_less_unsigned = (branch_x < branch_y);
     //fwd_slice zero extends so signed compares on rz/ry need re extending, as
     //usual troubles with fragmented, but I love them nontheless
-    function automatic [31:0] br_sext(input [2:0] off, input [31:0] v);
+    function automatic [31:0] br_sext(input [2:0] off, input [31:0] v); //branch sign extend
         unique case (off)
             3'b001, 3'b010:                 br_sext = {{16{v[15]}}, v[15:0]};
             3'b011, 3'b100, 3'b101, 3'b110: br_sext = {{24{v[7]}},  v[7:0]};
@@ -435,6 +435,7 @@ module CORE(
     //== MEM(memory) ==//
     //Work with memory - load, store
     logic [31:0] MEM_result;
+    logic [31:0] MEM_PC;
     logic [7:0]  MEM_gpr_dest;
     logic        MEM_gpr_write;
     logic        MEM_kernel_mode;
@@ -449,6 +450,7 @@ module CORE(
             isMEM_valid <= 0;
         end else begin
             MEM_result      <= GPRs_data_in;
+            MEM_PC          <= EX_PC;
             MEM_gpr_write   <= GPRsWrite;
             MEM_gpr_dest    <= gpr_rw0_sel;
             MEM_kernel_mode <= KernelMode;
@@ -726,9 +728,9 @@ module CORE(
         endcase
     end
 
-    assign memViolation = (!KernelMode && (memRead || memWrite) &&
-                         ((memTarget < memBase) ||
-                          (33'(memTarget) >= (33'(memBase) + 33'(memLimit)))));
+    assign memViolation =   (!KernelMode && (memRead || memWrite) &&
+                            ((memTarget < memBase) ||
+                            (33'(memTarget) >= (33'(memBase) + 33'(memLimit)))));
 
     assign spr_target_sel =
         (opcode == 6'b101000 || opcode == 6'b101001 || opcode == 6'b101010 ||
