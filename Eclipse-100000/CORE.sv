@@ -31,7 +31,7 @@ module CORE(
     assign early_target_ok = (opcode == 6'b010000) ? (EX_early_target == LR) : (EX_early_target == EPC);
 
     //Basically thats a massive check for unexpected PC change, like branch
-    //misprediction, interrupt and JR
+    //misprediction, interrupt and JR maybe other but I forgot
     assign demolish  =  isEX_valid &&
                         (irq_taken ||
                         (PCWrite &&
