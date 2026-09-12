@@ -436,6 +436,11 @@ module CORE(
     //Work with memory - load, store
     logic [31:0] MEM_result;
     logic [31:0] MEM_PC;
+    logic [31:0] MEM_memTarget;
+    logic MEM_memRead, MEM_memWrite;
+    logic [31:0] MEM_ram_data_in;
+    logic [3:0]  MEM_ram_byte_enable;
+
     logic [7:0]  MEM_gpr_dest;
     logic        MEM_gpr_write;
     logic        MEM_kernel_mode;
@@ -451,6 +456,13 @@ module CORE(
         end else begin
             MEM_result      <= GPRs_data_in;
             MEM_PC          <= EX_PC;
+
+            MEM_memTarget   <= memTarget;
+            MEM_memRead     <= memRead;
+            MEM_memWrite    <= memWrite;
+            MEM_ram_data_in <= ram_data_in_aligned;
+            MEM_ram_byte_enable <= ram_byte_enable;
+
             MEM_gpr_write   <= GPRsWrite;
             MEM_gpr_dest    <= gpr_rw0_sel;
             MEM_kernel_mode <= KernelMode;
@@ -465,6 +477,9 @@ module CORE(
             MEM_io_data     <= io_data_out;
         end
     end
+
+    logic [31:0] MEM_vram_addr;
+    assign MEM_vram_addr = MEM_memTarget - 32'h04000000;
 
     logic [31:0] mem_read_data;
     logic [31:0] vram_data_read;
@@ -727,10 +742,9 @@ module CORE(
             end
         endcase
     end
-
-    assign memViolation =   (!KernelMode && (memRead || memWrite) &&
-                            ((memTarget < memBase) ||
-                            (33'(memTarget) >= (33'(memBase) + 33'(memLimit)))));
+    assign memViolation =   (!MEM_KernelMode && (MEM_memRead || MEM_memWrite) &&
+                            ((MEM_memTarget < memBase) ||
+                            (33'(MEM_memTarget) >= (33'(memBase) + 33'(memLimit)))));
 
     assign spr_target_sel =
         (opcode == 6'b101000 || opcode == 6'b101001 || opcode == 6'b101010 ||
@@ -997,11 +1011,12 @@ module CORE(
 
     RAM system_ram (
         .clk(clk),
-        .address(memTarget),
-        .data_in(ram_data_in_aligned),
-        .byte_enable(ram_byte_enable),
-        .mem_write(memWrite && !memViolation && RAM_cs && isEX_valid),
-        .mem_read(memRead && !memViolation && RAM_cs),
+        .addrRead(memTarget),
+        .addrWrite(MEM_memTarget), //Writes happen in MEM
+        .data_in(MEM_ram_data_in),
+        .byte_enable(MEM_ram_byte_enable),
+        .mem_write(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid),
+        .mem_read(memRead && RAM_cs),
         .data_out(ram_data_out),
 
         .instr_address(IF_PC),
@@ -1010,10 +1025,11 @@ module CORE(
 
     VRAM system_vram (
         .clk(clk),
-        .address(vram_addr),
-        .data_in(ram_data_in_aligned),
-        .byte_enable(ram_byte_enable),
-        .mem_write(memWrite && VRAM_cs && isEX_valid),
+        .addrRead(MEM_vram_addr),
+        .addrWrite(MEM_vram_addr),
+        .data_in(MEM_ram_data_in),
+        .byte_enable(MEM_ram_byte_enable),
+        .mem_write(MEM_memWrite && MEM_vram_cs && isMEM_valid),
         .mem_read(memRead && VRAM_cs),
         .data_out(vram_data_read)
     );
