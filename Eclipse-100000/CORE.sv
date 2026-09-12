@@ -41,7 +41,7 @@ module CORE(
                         (EX_branch && (EX_predicted_taken != was_branch_taken)));
 
     assign stall     = div_stall;
-    assign bubble    = mul_use_hazard && !stall; //If we already stall no point in bubble, it also breaks div
+    assign bubble    = (mul_use_hazard || load_use_hazard) && !stall; //If we already stall no point in bubble, it also breaks div
     assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + ((EX_64 || EX_branch) ? 32'h8 : 32'h4)) : PCNext;
 
     //== IF(Instruction Fetch) ==//
@@ -219,7 +219,9 @@ module CORE(
     //overlap - stall
     //So the regfile read is moved to the ID, saves up on critical path and ID
     //is almost empty anyways so I might as well fill it as much as possible
-    logic [7:0]  ID_rx0, ID_rx1; //Selector
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [7:0]  ID_rx0, ID_rx1; //Selector last 3bits are unused
+    /* verilator lint_on UNUSEDSIGNAL */
     logic [31:0] ID_rx0_val, ID_rx1_val, ID_rx2_val;
 
     assign ID_rx0 = ID_IR[25:18];
@@ -229,10 +231,19 @@ module CORE(
     logic ID_wb_hit0, ID_wb_hit1, ID_wb_hit2;
 
     //For later when memory would take actual clock cycles to reach
-    /* verilator lint_off UNUSEDSIGNAL */
+    //Well its later now
+    //The load use-hazard creates a 1 cycle bubble if ID_uses_EX_dest in MEM
+    //when dest hasn't been written and gets read. Now I used a forwarding up
+    //until that point, but that wouldn't work now because if we forward from
+    //the middle of the cycle, like with the mem read, it adds this half
+    //a cycle to a critical path. So to avoid it just add this 1cycle bubble.
+    //This would increase the CPI, but by a small amount, there is no way to
+    //avoid it though, at least as far as im aware.
+    logic  EX_is_load;
+    assign EX_is_load = isEX_valid && memRead;
+
     logic  load_use_hazard;
-    assign load_use_hazard = isEX_valid && memRead && GPRsWrite &&
-                          ((gpr_rw0_sel == ID_rx0) || (gpr_rw0_sel == ID_rx1));
+    assign load_use_hazard = isID_valid && EX_is_load && ID_uses_EX_dest;
 
     //the CPU will get mul result only at the end of MEM, hence it introduces
     //mul-use hazard, if next instruction uses mul and we don't have the
@@ -267,7 +278,6 @@ module CORE(
 
     logic  mul_use_hazard;
     assign mul_use_hazard = isID_valid && ((EX_is_mul && ID_uses_EX_dest) || (MEM_is_mul && ID_uses_MEM_dest));
-    /* verilator lint_on UNUSEDSIGNAL */
 
 
     //== EX(Execute) ==//
@@ -605,14 +615,14 @@ module CORE(
     always_comb begin
         FWD_rx0 = EX_gpr0;
         if (WB_fwd0)  FWD_rx0 = fwd_merge(WB_gpr_dest[2:0],  FWD_rx0, WB_result);
-        if (MEM_fwd0) FWD_rx0 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx0, MEM_val);
+        if (MEM_fwd0) FWD_rx0 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx0, MEM_result);
         FWD_rx0 = fwd_slice(rx0[2:0], FWD_rx0);
     end
 
     always_comb begin
         FWD_rx1_full = EX_gpr1;
         if (WB_fwd1)  FWD_rx1_full = fwd_merge(WB_gpr_dest[2:0],  FWD_rx1_full, WB_result);
-        if (MEM_fwd1) FWD_rx1_full = fwd_merge(MEM_gpr_dest[2:0], FWD_rx1_full, MEM_val);
+        if (MEM_fwd1) FWD_rx1_full = fwd_merge(MEM_gpr_dest[2:0], FWD_rx1_full, MEM_result);
     end
 
     assign FWD_rx1 = fwd_slice(rx1[2:0], FWD_rx1_full);
@@ -620,7 +630,7 @@ module CORE(
     always_comb begin
         FWD_rxi = EX_gpr2;
         if (WB_fwd2)  FWD_rxi = fwd_merge(WB_gpr_dest[2:0],  FWD_rxi, WB_result);
-        if (MEM_fwd2) FWD_rxi = fwd_merge(MEM_gpr_dest[2:0], FWD_rxi, MEM_val);
+        if (MEM_fwd2) FWD_rxi = fwd_merge(MEM_gpr_dest[2:0], FWD_rxi, MEM_result);
         FWD_rxi = fwd_slice(rxi[2:0], FWD_rxi);
     end
 
