@@ -219,12 +219,12 @@ module CU(
                 EPCWrite = 1; isKernelMode = 1; PCSrc = 4'b0100; PCWrite = 1;
                 timer_interrupt_taken = 1;
                 irq_taken = 1;
-                GPRsWrite = 0; memWrite = 0; SPRWrite = 0;
+                GPRsWrite = 0; memWrite = 0; SPRWrite = 0; memRead = 0;
             end else if (key_interrupt_pending) begin
                 EPCWrite = 1; isKernelMode = 1; PCSrc = 4'b1000; PCWrite = 1;
                 key_interrupt_taken = 1;
                 irq_taken = 1;
-                GPRsWrite = 0; memWrite = 0; SPRWrite = 0;
+                GPRsWrite = 0; memWrite = 0; SPRWrite = 0; memRead = 0;
             end
         end
     end
