@@ -32,7 +32,7 @@ module CORE(
 
     //Basically thats a massive check for unexpected PC change, like branch
     //misprediction, interrupt and JR maybe other but I forgot
-    assign demolish  =  isEX_valid &&
+    assign demolish  =  isEX_valid && !mem_stall &&
                         (irq_taken ||
                         (PCWrite &&
                         !(opcode == 6'b111111 || opcode == 6'b111000) &&
@@ -40,7 +40,7 @@ module CORE(
                         !(EX_branch && EX_predicted_taken)) ||
                         (EX_branch && (EX_predicted_taken != was_branch_taken)));
 
-    assign stall     = div_stall;
+    assign stall     = div_stall || mem_stall;
     assign bubble    = (mul_use_hazard || load_use_hazard) && !stall; //If we already stall no point in bubble, it also breaks div
     assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + ((EX_64 || EX_branch) ? 32'h8 : 32'h4)) : PCNext;
 
@@ -60,6 +60,7 @@ module CORE(
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) IF_PC <= 32'h0;
+        else if(memFault) IF_PC <= 32'h00000070;
         else if(demolish) IF_PC <= PC_target;
         else if(!stall && !bubble) IF_PC <= IF_PC_next;
         else IF_PC <= IF_PC; //I just can't omit it
@@ -173,14 +174,14 @@ module CORE(
     //Only read EX_pht_idx rather than combinationally like previousely
     always_ff @(posedge clk) begin
         pht_out <= PHT[pht_read_idx];
-        if (isEX_valid && EX_branch)
+        if (isEX_valid && EX_branch && !mem_stall)
             PHT[EX_pht_idx] <= updated_pht(EX_pht_val, was_branch_taken);
     end
 
     //GHR is still in flops though
     always_ff @(posedge clk or posedge reset) begin
         if (reset) GHR <= 16'b0;
-        else if (isEX_valid && EX_branch) GHR <= {GHR[14:0], was_branch_taken};
+        else if (isEX_valid && EX_branch && !mem_stall) GHR <= {GHR[14:0], was_branch_taken};
     end
 
 
@@ -198,7 +199,7 @@ module CORE(
     logic ID_64;
 
     always_ff @(posedge clk or posedge reset) begin
-        if (reset || demolish) begin
+        if (reset || demolish || memFault) begin
             isID_valid <= 0;
         end else if (!stall && !bubble) begin
             ID_PC <= IF_PC;
@@ -294,7 +295,7 @@ module CORE(
     logic EX_64;
 
     always_ff @(posedge clk or posedge reset) begin
-        if (reset || demolish || bubble) begin
+        if (reset || demolish || bubble || memFault) begin
             isEX_valid <= 0;
         end else if (!stall) begin
             EX_PC <= ID_PC; //Handing instruction to the EX
@@ -443,7 +444,7 @@ module CORE(
 
     logic [7:0]  MEM_gpr_dest;
     logic        MEM_gpr_write;
-    logic        MEM_kernel_mode;
+    logic        MEM_kernelMode;
     logic        isMEM_valid;
 
     logic MEM_is_lomul, MEM_is_himul;
@@ -453,7 +454,7 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isMEM_valid <= 0;
-        end else begin
+        end else if (!mem_stall) begin
             MEM_result      <= GPRs_data_in;
             MEM_PC          <= EX_PC;
 
@@ -465,8 +466,8 @@ module CORE(
 
             MEM_gpr_write   <= GPRsWrite;
             MEM_gpr_dest    <= gpr_rw0_sel;
-            MEM_kernel_mode <= KernelMode;
-            isMEM_valid     <= isEX_valid & !stall;
+            MEM_kernelMode  <= KernelMode;
+            isMEM_valid     <= isEX_valid & !stall & !memFault;
             MEM_is_lomul    <= (opcode == 6'b000111);
             MEM_is_himul    <= (opcode == 6'b001101);
 
@@ -480,6 +481,19 @@ module CORE(
 
     logic [31:0] MEM_vram_addr;
     assign MEM_vram_addr = MEM_memTarget - 32'h04000000;
+
+    //Moving the memFault from CU to here, because CU runs only in EX and
+    //since im moving mem stuff into MEM this is the only way
+    logic  memFault;
+    assign memFault = isMEM_valid && (MEM_memRead || MEM_memWrite) && memViolation;
+
+    //MEM stalls when waiting for memory, soon when FPGA will arrive ill make
+    //a MIG and SDRAM connection and that will govern mem_ready, however at
+    //the moment there is no mem waiting so its just 1 atm.
+    logic  mem_ready;
+    logic  mem_stall;
+    assign mem_ready = 1;
+    assign mem_stall = isMEM_valid && (MEM_memRead || MEM_memWrite) && !memViolation && !mem_ready;
 
     logic [31:0] mem_read_data;
     logic [31:0] vram_data_read;
@@ -510,19 +524,19 @@ module CORE(
     logic [7:0]  WB_gpr_dest;
 
     logic WB_gpr_write;
-    logic WB_kernel_mode;
+    logic WB_kernelMode;
     logic isWB_valid;
     logic WB_is_lomul, WB_is_himul;
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isWB_valid <= 0;
-        end else begin
+        end else if (!mem_stall) begin
             WB_result<= MEM_val;
-            isWB_valid <= isMEM_valid;
+            isWB_valid <= isMEM_valid & !memFault;
             WB_gpr_dest <= MEM_gpr_dest;
             WB_gpr_write <= MEM_gpr_write;
-            WB_kernel_mode <= MEM_kernel_mode;
+            WB_kernelMode <= MEM_kernelMode;
 
             WB_is_lomul <= MEM_is_lomul;
             WB_is_himul <= MEM_is_himul;
@@ -557,17 +571,17 @@ module CORE(
     //This checks whether the write in MEM/WB touches the register this read wants
     //Also account for rx0, rx1 banking
     assign MEM_fwd0 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rx0[7:3]) &&
-                      (rx0[7:3] > 5'd1 || MEM_kernel_mode == KernelMode);
+                      (rx0[7:3] > 5'd1 || MEM_kernelMode == KernelMode);
     assign WB_fwd0  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rx0[7:3]) &&
-                      (rx0[7:3] > 5'd1 || WB_kernel_mode  == KernelMode);
+                      (rx0[7:3] > 5'd1 || WB_kernelMode  == KernelMode);
     assign MEM_fwd1 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rx1[7:3]) &&
-                      (rx1[7:3] > 5'd1 || MEM_kernel_mode == KernelMode);
+                      (rx1[7:3] > 5'd1 || MEM_kernelMode == KernelMode);
     assign WB_fwd1  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rx1[7:3]) &&
-                      (rx1[7:3] > 5'd1 || WB_kernel_mode  == KernelMode);
+                      (rx1[7:3] > 5'd1 || WB_kernelMode  == KernelMode);
     assign MEM_fwd2 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rxi[7:3]) &&
-                      (rxi[7:3] > 5'd1 || MEM_kernel_mode == KernelMode);
+                      (rxi[7:3] > 5'd1 || MEM_kernelMode == KernelMode);
     assign WB_fwd2  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rxi[7:3]) &&
-                      (rxi[7:3] > 5'd1 || WB_kernel_mode  == KernelMode);
+                      (rxi[7:3] > 5'd1 || WB_kernelMode  == KernelMode);
     //Just snuck up in here, so it previosely just zero extended fragmented registers
     //Now if opcode is one of where its vital, we just sign extend it,
     //precisely that fixed: SRA and SDIV
@@ -607,7 +621,7 @@ module CORE(
     //in EX just gotta expand on that 1 cycle more.
     logic  wb_writes_array;
     assign wb_writes_array = isWB_valid && WB_gpr_write &&
-                             !(WB_gpr_dest[7:3] <= 5'd1 && WB_kernel_mode);
+                             !(WB_gpr_dest[7:3] <= 5'd1 && WB_kernelMode);
     assign ID_wb_hit0 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx0[7:3]);
     assign ID_wb_hit1 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx1[7:3]);
     assign ID_wb_hit2 = wb_writes_array && (WB_gpr_dest[7:3] == ID_IR_2[31:27]);
@@ -742,7 +756,7 @@ module CORE(
             end
         endcase
     end
-    assign memViolation =   (!MEM_KernelMode && (MEM_memRead || MEM_memWrite) &&
+    assign memViolation =   (!MEM_kernelMode && (MEM_memRead || MEM_memWrite) &&
                             ((MEM_memTarget < memBase) ||
                             (33'(MEM_memTarget) >= (33'(memBase) + 33'(memLimit)))));
 
@@ -797,7 +811,6 @@ module CORE(
             4'b0010: PCNext = 32'h00000064; // Syscall Vector
             4'b0100: PCNext = 32'h00000068; // Timer Vector
             4'b1000: PCNext = 32'h0000006C; // Key Interrupt Vector
-            4'b0110: PCNext = 32'h00000070; // Memory Protection Fault Vector
             4'b0111: PCNext = FWD_rx0; // JR
             default: PCNext = EX_early_target;
         endcase
@@ -836,7 +849,10 @@ module CORE(
         end else begin
             mod_state <= ENC_10K_ModArr;
 
-            if (isEX_valid) begin
+            if (memFault) begin
+                EPC <= MEM_PC;
+                KernelMode <= 1;
+            end else if (isEX_valid && !mem_stall) begin
                 if (EPCWrite) EPC <= irq_taken ? EX_PC : (EX_PC + ((EX_64 || EX_branch) ? 32'd8 : 32'd4));
                 KernelMode <= isKernelMode;
 
@@ -954,9 +970,8 @@ module CORE(
         .branch_cond_met(branch_cond_met),
         .mmio_timer_reg(mmio_timer_reg),
         .current_kernel_mode(KernelMode),
-        .memViolation(memViolation),
         .key_in(ENC_10K_KeyIn),
-        .isEX_valid(isEX_valid),
+        .isEX_valid(isEX_valid && !memFault && !mem_stall),
         .PCWrite(PCWrite),
         .GPRsWrite(GPRsWrite),
         .EPCWrite(EPCWrite),
@@ -981,6 +996,7 @@ module CORE(
         .y(AluMuxY),
         .opcode(AluOpcode),
         .isDiv_valid(isEX_valid && !irq_taken), //Not demolish bc it has a long of irrelivant data that just slows it dow
+        .mem_stall(mem_stall),
 
         .result(AluResult),
         .mul_product(mul_product),
@@ -993,7 +1009,7 @@ module CORE(
         .clk(clk),
         .reset(reset),
         .reg_write(WB_gpr_write && isWB_valid),
-        .KernelModeWrite(WB_kernel_mode),
+        .KernelModeWrite(WB_kernelMode),
         //offset forced to 000 so these come back as the raw 32bit register,
         //the forwarding block above does the slicing after it merges
         //Again - read in ID
@@ -1011,12 +1027,12 @@ module CORE(
 
     RAM system_ram (
         .clk(clk),
-        .addrRead(memTarget),
+        .addrRead(mem_stall ? MEM_memTarget : memTarget), //If mem_stall it reads MEM's instruction not EX's
         .addrWrite(MEM_memTarget), //Writes happen in MEM
         .data_in(MEM_ram_data_in),
         .byte_enable(MEM_ram_byte_enable),
-        .mem_write(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid),
-        .mem_read(memRead && RAM_cs),
+        .mem_write(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid && mem_ready),
+        .mem_read(mem_stall ? (MEM_memRead && MEM_ram_cs) : (memRead && RAM_cs)), //Same thing
         .data_out(ram_data_out),
 
         .instr_address(IF_PC),
@@ -1025,17 +1041,19 @@ module CORE(
 
     VRAM system_vram (
         .clk(clk),
-        .addrRead(MEM_vram_addr),
-        .addrWrite(MEM_vram_addr),
-        .data_in(MEM_ram_data_in),
+        .addrRead(mem_stall ? MEM_vram_addr : (memTarget - 32'h04000000)),
+        .addrWrite(vram_addr),
+        .data_in(vram_data_out),
         .byte_enable(MEM_ram_byte_enable),
-        .mem_write(MEM_memWrite && MEM_vram_cs && isMEM_valid),
-        .mem_read(memRead && VRAM_cs),
+        .mem_write(vram_write),
+        .mem_read(mem_stall ? (MEM_memRead && MEM_vram_cs) : (memRead && VRAM_cs)),
         .data_out(vram_data_read)
     );
 
-    assign vram_addr     = memTarget - 32'h04000000;
-    assign vram_data_out = FWD_rx0;
-    assign vram_write = (memWrite && VRAM_cs && isEX_valid);
+    //I would have kept it in the file include, but sim_main requires them and
+    //it doesn't matte tbh
+    assign vram_addr     = MEM_vram_addr;
+    assign vram_data_out = MEM_ram_data_in;
+    assign vram_write    = MEM_memWrite && MEM_vram_cs && isMEM_valid && mem_ready;
 
 endmodule

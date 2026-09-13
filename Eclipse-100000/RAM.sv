@@ -19,10 +19,6 @@ module RAM(
     initial begin
         $readmemh("program.hex", ramm);
     end
-    logic [5:0] unused_bits;
-    assign unused_bits = addrRead[31:26]; //So compiler wouldn't compain
-    logic [5:0] really_useful_bits;
-    assign really_useful_bits = addrWrite[31:26];
 
     //Sync read, was async previosely which obviosely is impossible on the
     //actual FPGA, unless LUTRAM ofc but its either BRAM or ddr3
@@ -34,7 +30,7 @@ module RAM(
     end
 
     logic [31:0] ia4;
-    assign ia4 = {6'h0, instr_addrress[25:2], 2'b00};   // 4-byte aligned
+    assign ia4 = {6'h0, instr_address[25:2], 2'b00};   // 4-byte aligned
     //IF needs instruction every cycle so read enable isn't even needed
     assign instr_data_out = {ramm[ia4+7], ramm[ia4+6],
                             ramm[ia4+5], ramm[ia4+4],

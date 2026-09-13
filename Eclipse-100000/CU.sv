@@ -10,7 +10,6 @@ module CU(
     input logic [15:0] mmio_timer_reg,
 
     input logic current_kernel_mode,
-    input logic memViolation,
 
     input logic [7:0] key_in,
     input logic isEX_valid,
@@ -228,13 +227,6 @@ module CU(
                 GPRsWrite = 0; memWrite = 0; SPRWrite = 0;
             end
         end
-
-
-        if ((memRead || memWrite) && memViolation) begin
-            EPCWrite = 1; isKernelMode = 1; PCSrc = 4'b0110; PCWrite = 1;
-            GPRsWrite = 0; SPRWrite = 0;
-        end
-
     end
 
     //== End of CU(god do I love that thing) ==//

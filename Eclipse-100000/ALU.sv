@@ -5,6 +5,7 @@ module ALU (
     input  logic [31:0] y,
     input  logic [5:0] opcode,
     input  logic isDiv_valid,
+    input  logic mem_stall,
 
     output logic [31:0] result,
     output logic [63:0] mul_product,
@@ -24,9 +25,11 @@ module ALU (
 
     (* use_dsp = "yes" *)
     always_ff @(posedge clk) begin //No reset :(
-        mul_x <= x;
-        mul_y <= y;
-        mul_product <= mul_x * mul_y;
+        if (!mem_stall) begin //vivado maps it onto DSP register input ports, meaning they freeze on mem_stall
+            mul_x <= x;
+            mul_y <= y;
+            mul_product <= mul_x * mul_y;
+        end
     end
 
     //Basically I previosely had several reduntant adders and shifters, same
@@ -225,6 +228,7 @@ module ALU (
             div_working  <= 1'b0;
             div_finished <= 1'b0;
             div_init     <= 1'b0;
+        end else if (mem_stall) begin //literally do nothing on mem_stall
         end else if (div_start) begin
             x_div <= x;
             y_div <= y;
