@@ -14,4 +14,17 @@
     HIMUL ry00 <- ry00, rx1
     DIV ry00 <- ry00, rz03
     STX ry00 -> [rx31, rx31 << 0, 4004]
+
+    LMA ry00 <- 0xdeadbeef
+    STX  ry00 -> [rx31, rx31 << 0, 4012]
+    LDX  ry10 <- [rx31, rx31 << 0, 4012]
+    STX  ry10 -> [rx31, rx31 << 0, 4016]
+
+    LOAD rx5  <- 0
+    STX  rx5  -> [rx31, rx31 << 0, 4020]
+    LOAD rz50 <- 171
+    STX  rz50 -> [rx31, rx31 << 0, 4021]
+    LDX  rx6  <- [rx31, rx31 << 0, 4020]
+    STX  rx6 ->  [rx31, rx31 << 0, 4024]
+
     JMP ~main

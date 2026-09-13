@@ -199,8 +199,12 @@ module CORE(
     logic ID_64;
 
     always_ff @(posedge clk or posedge reset) begin
-        if (reset || demolish || memFault) begin
+        if (reset) begin
             isID_valid <= 0;
+            //Vivado started to complain when I added memFault, but whatever
+            //I can just split it into to if blocks
+        end else if (demolish || memFault) begin
+           isID_valid <= 0;
         end else if (!stall && !bubble) begin
             ID_PC <= IF_PC;
             ID_64 <= IF_64;
@@ -295,7 +299,9 @@ module CORE(
     logic EX_64;
 
     always_ff @(posedge clk or posedge reset) begin
-        if (reset || demolish || bubble || memFault) begin
+        if (reset) begin
+            isEX_valid <= 0;
+        end else if (demolish || bubble || memFault) begin
             isEX_valid <= 0;
         end else if (!stall) begin
             EX_PC <= ID_PC; //Handing instruction to the EX
@@ -492,7 +498,31 @@ module CORE(
     //the moment there is no mem waiting so its just 1 atm.
     logic  mem_ready;
     logic  mem_stall;
-    assign mem_ready = 1;
+
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [31:0] store_load_diff;
+    /* verilator lint_on UNUSEDSIGNAL */ 
+    //Alright so memRead is not quite 1 atm, we've got another hazard here,
+    //since new read at the start of MEM and write at the start of MEM happens
+    //at the same clock edge, the read seems the old memory, and that's no good.
+    //To detect this I check the proximit between read and write if they are
+    //not within 4bytes of each other(because of fragmented registers), well
+    //nothing happens, but if they are we wait for it to write, and only then
+    //read
+    assign store_load_diff = MEM_memTarget - WB_memTarget;
+
+    logic  store_load_overlap;
+    assign store_load_overlap = isMEM_valid && MEM_memRead && isWB_valid && WB_memWrite &&
+                                ((store_load_diff[31:2] == 30'h0) || (store_load_diff[31:2] == 30'h3FFFFFFF));
+
+    logic  MEM_reread;
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) MEM_reread <= 1'b0;
+        else MEM_reread <= mem_stall;
+    end
+
+    assign mem_ready = !(store_load_overlap && !MEM_reread);
+
     assign mem_stall = isMEM_valid && (MEM_memRead || MEM_memWrite) && !memViolation && !mem_ready;
 
     logic [31:0] mem_read_data;
@@ -528,6 +558,9 @@ module CORE(
     logic isWB_valid;
     logic WB_is_lomul, WB_is_himul;
 
+    logic        WB_memWrite;
+    logic [31:0] WB_memTarget;
+
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isWB_valid <= 0;
@@ -540,6 +573,9 @@ module CORE(
 
             WB_is_lomul <= MEM_is_lomul;
             WB_is_himul <= MEM_is_himul;
+
+            WB_memWrite <= MEM_memWrite;
+            WB_memTarget<= MEM_memTarget;
         end
     end
 

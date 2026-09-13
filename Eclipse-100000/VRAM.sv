@@ -11,8 +11,8 @@ module VRAM(
 );
     //1MB of VRAM, 480p RGBA4444, addrRead is already VRAM relative
     logic [7:0] vramm [0:1048575];
-    logic [11:0] unused_bits;
-    assign unused_bits = addrRead[31:20]; //So compiler wouldn't compain
+    logic [23:0] unused_bits;
+    assign unused_bits = {addrRead[31:20], addrWrite[31:20]}; //So compiler wouldn't compain
 
     always_ff @(posedge clk) begin
         if (mem_read) data_out <= {vramm[addrRead[19:0] + 3],

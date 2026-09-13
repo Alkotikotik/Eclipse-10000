@@ -16,6 +16,8 @@ module RAM(
     output logic [63:0] instr_data_out
 );
     logic [7:0] ramm [0:67108863]; //64MB
+    logic [11:0] unused_bits;
+    assign unused_bits = {addrRead[31:26], addrWrite[31:26]};
     initial begin
         $readmemh("program.hex", ramm);
     end
