@@ -28,7 +28,7 @@ module CORE(
     logic  [31:0] PC_target;
 
     logic  early_target_ok;
-    assign early_target_ok = (opcode == 6'b010000) ? (EX_early_target == LR) : (EX_early_target == EPC);
+    assign early_target_ok = (opcode == 6'b010000) ? (EX_early_target == EX_LR) : (EX_early_target == EPC);
 
     //Basically thats a massive check for unexpected PC change, like branch
     //misprediction, interrupt and JR maybe other but I forgot
@@ -439,6 +439,12 @@ module CORE(
         endcase
     end
 
+    //This is forwarding too, EX needs to know the new mode immediately after
+    //MEM made the change, becase kernel mode now changes in MEM
+    logic  EX_kernel_mode;
+    assign EX_kernel_mode = isMEM_valid ? MEM_mode : KernelMode;
+
+
     //== MEM(memory) ==//
     //Work with memory - load, store
     logic [31:0] MEM_result;
@@ -453,14 +459,29 @@ module CORE(
     logic        MEM_kernelMode;
     logic        isMEM_valid;
 
+    logic        MEM_EPCWrite;
+    logic        MEM_irq;
+    logic [31:0] MEM_PCNext;
+    logic        MEM_mode;
+
     logic MEM_is_lomul, MEM_is_himul;
     logic MEM_is_load, MEM_ram_cs, MEM_io_cs, MEM_vram_cs;
     logic [31:0] MEM_io_data;
+
+    //Moving SPRs stuff into MEM
+    logic MEM_SPRWrite;
+    logic [31:0] MEM_rx0_val, MEM_SelectedSPR, MEM_activeSP, MEM_activeGP;
+    logic [15:0] MEM_imm16;
+    logic [2:0]  MEM_push_pop_bytes, MEM_SPRSrc;
+    logic [1:0]  MEM_spr_target_sel;
+    logic MEM_is_call;
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isMEM_valid <= 0;
         end else if (!mem_stall) begin
+            //That many variables are actually harmless, because they live in
+            //FFs which are free, there are a lot of unused FFs in logic slices.
             MEM_result      <= GPRs_data_in;
             MEM_PC          <= EX_PC;
 
@@ -470,9 +491,14 @@ module CORE(
             MEM_ram_data_in <= ram_data_in_aligned;
             MEM_ram_byte_enable <= ram_byte_enable;
 
+            MEM_EPCWrite    <= EPCWrite;
+            MEM_irq         <= irq_taken;
+            MEM_PCNext      <= EX_PC + ((EX_64 || EX_branch) ? 8 : 4);
+            MEM_mode        <= isKernelMode;
+
             MEM_gpr_write   <= GPRsWrite;
             MEM_gpr_dest    <= gpr_rw0_sel;
-            MEM_kernelMode  <= KernelMode;
+            MEM_kernelMode  <= EX_kernel_mode;
             isMEM_valid     <= isEX_valid & !stall & !memFault;
             MEM_is_lomul    <= (opcode == 6'b000111);
             MEM_is_himul    <= (opcode == 6'b001101);
@@ -482,6 +508,15 @@ module CORE(
             MEM_io_cs       <= IO_cs;
             MEM_vram_cs     <= VRAM_cs;
             MEM_io_data     <= io_data_out;
+
+            MEM_SPRWrite    <= SPRWrite;
+            MEM_SPRSrc      <= SPRSrc;
+            MEM_spr_target_sel <= spr_target_sel;
+            MEM_push_pop_bytes <= push_pop_bytes;
+            //Active is kinda a weird word, looks kinda strange
+            MEM_rx0_val     <= FWD_rx0;
+            MEM_imm16       <= EX_IR[15:0];
+            MEM_is_call     <= isCallState && (opcode ==6'b111000); //CALL
         end
     end
 
@@ -672,9 +707,9 @@ module CORE(
     //yet, so we always just get the KGPRs and then in EX deduce whether we
     //use GPRs or KGPRs
     logic [31:0] EX_gpr0, EX_gpr1, EX_gpr2;
-    assign EX_gpr0 = (rx0[7:3] <= 5'd1 && KernelMode) ? (rx0[3] ? KGPR1 : KGPR0) : EX_rx0_val;
-    assign EX_gpr1 = (rx1[7:3] <= 5'd1 && KernelMode) ? (rx1[3] ? KGPR1 : KGPR0) : EX_rx1_val;
-    assign EX_gpr2 = (rxi[7:3] <= 5'd1 && KernelMode) ? (rxi[3] ? KGPR1 : KGPR0) : EX_rx2_val;
+    assign EX_gpr0 = (rx0[7:3] <= 5'd1 && EX_kernel_mode) ? (rx0[3] ? KGPR1 : KGPR0) : EX_rx0_val;
+    assign EX_gpr1 = (rx1[7:3] <= 5'd1 && EX_kernel_mode) ? (rx1[3] ? KGPR1 : KGPR0) : EX_rx1_val;
+    assign EX_gpr2 = (rxi[7:3] <= 5'd1 && EX_kernel_mode) ? (rxi[3] ? KGPR1 : KGPR0) : EX_rx2_val;
 
 
     //Here automatic comes in play, function gets called more than ones in
@@ -705,10 +740,17 @@ module CORE(
     logic [31:0] EPC;
 
     logic [31:0] SP, GP, KGP, KSP, LR, KScratch;
+    logic [31:0] EX_SP, EX_KSP, EX_GP, EX_KGP, EX_LR;
+    assign EX_SP  = MEM_SP_w  ? SPRNext : SP;
+    assign EX_KSP = MEM_KSP_w ? SPRNext : KSP;
+    assign EX_GP  = MEM_GP_w  ? SPRNext : GP;
+    assign EX_KGP = MEM_KGP_w ? SPRNext : KGP;
+    assign EX_LR  = MEM_LR_w  ? MEM_LR_val : LR;
+
     logic [31:0] ActiveSP;
     logic [31:0] ActiveGP;
-    assign ActiveSP = KernelMode ? KSP : SP;
-    assign ActiveGP = KernelMode ? KGP : GP;
+    assign ActiveSP = EX_kernel_mode ? EX_KSP : EX_SP;
+    assign ActiveGP = EX_kernel_mode ? EX_KGP : EX_GP;
 
     logic [31:0] PCNext;
     logic [31:0] SPRNext;
@@ -804,7 +846,7 @@ module CORE(
     always_comb begin
         unique case (spr_target_sel)
             2'b00:   SelectedSPR = ActiveSP;
-            2'b01:   SelectedSPR = LR;
+            2'b01:   SelectedSPR = EX_LR;
             2'b10:   SelectedSPR = ActiveGP;
             default: SelectedSPR = 32'd0; // reserved
         endcase
@@ -843,7 +885,7 @@ module CORE(
             4'b0000: PCNext = EX_early_target;
             4'b0001: PCNext = EX_early_target;
             4'b0011: PCNext = EPC;          // RETU
-            4'b0101: PCNext = LR;           // RET
+            4'b0101: PCNext = EX_LR;        // RET
             4'b0010: PCNext = 32'h00000064; // Syscall Vector
             4'b0100: PCNext = 32'h00000068; // Timer Vector
             4'b1000: PCNext = 32'h0000006C; // Key Interrupt Vector
@@ -855,17 +897,42 @@ module CORE(
         end
     end
 
+    assign MEM_activeSP = MEM_kernelMode ? KSP : SP;
+    assign MEM_activeGP = MEM_kernelMode ? KGP : GP;
+
     always_comb begin
-        unique case (SPRSrc)
-            3'b000:  SPRNext = SelectedSPR;                        // hold
-            3'b011:  SPRNext = FWD_rx0;                            // SPRSET
-            3'b100:  SPRNext = ActiveSP - {29'd0, push_pop_bytes}; // PUSH
-            3'b101:  SPRNext = ActiveSP + {29'd0, push_pop_bytes}; // POP
-            3'b110:  SPRNext = SelectedSPR + (FWD_rx0 + sign_ext_imm16); // SPRADD
-            3'b111:  SPRNext = SelectedSPR - (FWD_rx0 + sign_ext_imm16); // SPRSUB
-            default: SPRNext = SelectedSPR;
+        unique case (MEM_spr_target_sel)
+            2'b00:   MEM_SelectedSPR = MEM_activeSP;
+            2'b01:   MEM_SelectedSPR = LR;
+            2'b10:   MEM_SelectedSPR = MEM_activeGP;
+            default: MEM_SelectedSPR = 32'd0;
         endcase
     end
+
+    logic [31:0] MEM_sign_ext_imm16;
+    assign MEM_sign_ext_imm16 = { {16{MEM_imm16[15]}}, MEM_imm16 };
+
+    always_comb begin
+        unique case (MEM_SPRSrc)
+            3'b000:  SPRNext = MEM_SelectedSPR;                        // hold
+            3'b011:  SPRNext = MEM_rx0_val;                            // SPRSET
+            3'b100:  SPRNext = MEM_activeSP - {29'd0, MEM_push_pop_bytes}; // PUSH
+            3'b101:  SPRNext = MEM_activeSP + {29'd0, MEM_push_pop_bytes}; // POP
+            3'b110:  SPRNext = MEM_SelectedSPR + (MEM_rx0_val + MEM_sign_ext_imm16); // SPRADD
+            3'b111:  SPRNext = MEM_SelectedSPR - (MEM_rx0_val + MEM_sign_ext_imm16); // SPRSUB
+            default: SPRNext = MEM_SelectedSPR;
+        endcase
+    end
+
+    //This does look kinda scary but trust me its just SPRs write and banking
+    logic  MEM_SP_w, MEM_KSP_w, MEM_GP_w, MEM_KGP_w, MEM_LR_w;
+    logic [31:0] MEM_LR_val;
+    assign MEM_SP_w   = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) && !MEM_kernelMode;
+    assign MEM_KSP_w  = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) &&  MEM_kernelMode;
+    assign MEM_GP_w   = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) && !MEM_kernelMode;
+    assign MEM_KGP_w  = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) &&  MEM_kernelMode;
+    assign MEM_LR_w   = isMEM_valid && (MEM_is_call || (MEM_SPRWrite && (MEM_spr_target_sel == 2'b01)));
+    assign MEM_LR_val = MEM_is_call ? MEM_PCNext : SPRNext;
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -888,40 +955,44 @@ module CORE(
             if (memFault) begin
                 EPC <= MEM_PC;
                 KernelMode <= 1;
-            end else if (isEX_valid && !mem_stall) begin
-                if (EPCWrite) EPC <= irq_taken ? EX_PC : (EX_PC + ((EX_64 || EX_branch) ? 32'd8 : 32'd4));
-                KernelMode <= isKernelMode;
+            end else begin
+                if (isMEM_valid && !mem_stall) begin //Its now MEM bounded because, again, mode switch happens in MEM
+                    if (MEM_EPCWrite) EPC <= MEM_irq ? MEM_PC : MEM_PCNext;
+                    KernelMode <= MEM_mode;
 
-                if (isCallState && opcode == 6'b111000) begin
-                    LR <= EX_PC + ((EX_64 || EX_branch) ? 32'h8 : 32'h4);
+                    if (MEM_is_call) begin
+                        LR <= MEM_PCNext;
+                    end
+
+                    if (MEM_SPRWrite) begin
+                        unique case (MEM_spr_target_sel)
+                            2'b00: begin
+                                if (MEM_kernelMode) KSP <= SPRNext;
+                                else SP <= SPRNext;
+                            end
+                            2'b01: LR <= SPRNext;
+                            2'b10: begin
+                                if (MEM_kernelMode) KGP <= SPRNext;
+                                else GP <= SPRNext;
+                            end
+                            default: ; // reserved for later
+                        endcase
+                    end
                 end
 
-                if (SPRWrite) begin
-                    unique case (spr_target_sel)
-                        2'b00: begin
-                            if (KernelMode) KSP <= SPRNext;
-                            else SP <= SPRNext;
-                        end
-                        2'b01: LR <= SPRNext;
-                        2'b10: begin
-                            if (KernelMode) KGP <= SPRNext;
-                            else GP <= SPRNext;
-                        end
-                        default: ; // reserved for later
-                    endcase
-                end
-
-                if (memWrite && IO_cs && KernelMode) begin
-                    unique case (memTarget)
-                        32'hFFFFFF04: mmio_timer_reg <= FWD_rx0[15:0];
-                        32'hFFFFFF08: memBase        <= FWD_rx0;
-                        32'hFFFFFF0C: memLimit       <= FWD_rx0;
-                        32'hFFFFFF10: EPC            <= FWD_rx0;
-                        32'hFFFFFF14: SP             <= FWD_rx0;
-                        32'hFFFFFF18: KSP            <= FWD_rx0;
-                        32'hFFFFFF1C: KScratch       <= FWD_rx0;
-                        default: ;
-                    endcase
+                if (isEX_valid && !mem_stall) begin
+                    if (memWrite && IO_cs && EX_kernel_mode) begin
+                        unique case (memTarget)
+                            32'hFFFFFF04: mmio_timer_reg <= FWD_rx0[15:0];
+                            32'hFFFFFF08: memBase        <= FWD_rx0;
+                            32'hFFFFFF0C: memLimit       <= FWD_rx0;
+                            32'hFFFFFF10: EPC            <= FWD_rx0;
+                            32'hFFFFFF14: SP             <= FWD_rx0;
+                            32'hFFFFFF18: KSP            <= FWD_rx0;
+                            32'hFFFFFF1C: KScratch       <= FWD_rx0;
+                            default: ;
+                        endcase
+                    end
                 end
             end
         end
@@ -981,11 +1052,11 @@ module CORE(
             32'h04100000: io_data_out = {24'd0, ENC_10K_KeyIn};
             32'h04100004: io_data_out = {31'd0, mod_state};
             32'h04100008: io_data_out = {16'd0, mmio_timer_reg};
-            32'h04100014: io_data_out = SP;
-            32'h04100018: io_data_out = KSP;
+            32'h04100014: io_data_out = EX_SP;
+            32'h04100018: io_data_out = EX_KSP;
             32'h0410001C: io_data_out = KScratch;
             32'h04100020: io_data_out = ActiveSP;
-            32'h04100024: io_data_out = LR;
+            32'h04100024: io_data_out = EX_LR;
             default:      io_data_out = 32'd0;
         endcase
     end
@@ -1005,7 +1076,7 @@ module CORE(
         .branch_op(branch_op),
         .branch_cond_met(branch_cond_met),
         .mmio_timer_reg(mmio_timer_reg),
-        .current_kernel_mode(KernelMode),
+        .current_kernel_mode(EX_kernel_mode),
         .key_in(ENC_10K_KeyIn),
         .isEX_valid(isEX_valid && !memFault && !mem_stall),
         .PCWrite(PCWrite),
