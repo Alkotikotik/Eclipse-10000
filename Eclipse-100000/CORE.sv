@@ -739,8 +739,8 @@ module CORE(
     //Declarations
     logic [31:0] EPC;
 
-    logic [31:0] SP, GP, KGP, KSP, LR, KScratch;
-    logic [31:0] EX_SP, EX_KSP, EX_GP, EX_KGP, EX_LR;
+    logic  [31:0] SP, GP, KGP, KSP, LR, KScratch;
+    logic  [31:0] EX_SP, EX_KSP, EX_GP, EX_KGP, EX_LR;
     assign EX_SP  = MEM_SP_w  ? SPRNext : SP;
     assign EX_KSP = MEM_KSP_w ? SPRNext : KSP;
     assign EX_GP  = MEM_GP_w  ? SPRNext : GP;
