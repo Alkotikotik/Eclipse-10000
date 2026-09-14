@@ -42,16 +42,6 @@ module ALU (
     logic [31:0] add_y;
     assign add_y = is_sub_op ? ~y : y;
 
-    logic [8:0]  add_s0;  //rz0, [8] is the rz carry
-    logic [8:0]  add_s1;  //rz1, [8] is the ry carry
-    /* verilator lint_off UNUSEDSIGNAL */
-    logic [16:0] add_s2;  //ry1, [16] is the rx carry
-    /* verilator lint_on UNUSEDSIGNAL */
-
-    assign add_s0 = {1'b0, x[7:0]}   + {1'b0, add_y[7:0]}   + {8'b0,  is_sub_op};
-    assign add_s1 = {1'b0, x[15:8]}  + {1'b0, add_y[15:8]}  + {8'b0,  add_s0[8]};
-    assign add_s2 = {1'b0, x[31:16]} + {1'b0, add_y[31:16]} + {16'b0, add_s1[8]};
-
     logic [31:0] add_result;
     assign add_result = x + add_y + {31'b0, is_sub_op}; //Had to change it, because turns out it does have an effect
     //On the critical path, because instead of just chaining carry4 vivado

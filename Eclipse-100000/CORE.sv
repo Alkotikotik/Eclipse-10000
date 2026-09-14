@@ -28,7 +28,7 @@ module CORE(
     logic  [31:0] PC_target;
 
     logic  early_target_ok;
-    assign early_target_ok = (opcode == 6'b010000) ? (EX_early_target == EX_LR) : (EX_early_target == EPC);
+    assign early_target_ok = (opcode == 6'b010000) ? (EX_early_target == EX_LR) : (EX_early_target == EX_EPC);
 
     //Basically thats a massive check for unexpected PC change, like branch
     //misprediction, interrupt and JR maybe other but I forgot
@@ -466,7 +466,6 @@ module CORE(
 
     logic MEM_is_lomul, MEM_is_himul;
     logic MEM_is_load, MEM_ram_cs, MEM_io_cs, MEM_vram_cs;
-    logic [31:0] MEM_io_data;
 
     //Moving SPRs stuff into MEM
     logic MEM_SPRWrite;
@@ -505,9 +504,7 @@ module CORE(
 
             MEM_is_load     <= (GPRsSrc == 3'b001);
             MEM_ram_cs      <= RAM_cs;
-            MEM_io_cs       <= IO_cs;
             MEM_vram_cs     <= VRAM_cs;
-            MEM_io_data     <= io_data_out;
 
             MEM_SPRWrite    <= SPRWrite;
             MEM_SPRSrc      <= SPRSrc;
@@ -527,6 +524,11 @@ module CORE(
     //since im moving mem stuff into MEM this is the only way
     logic  memFault;
     assign memFault = isMEM_valid && (MEM_memRead || MEM_memWrite) && memViolation;
+
+    //MMIO cs but basically in MEM
+    logic MEM_mmio_cs;
+    assign MEM_mmio_cs = (MEM_memTarget[31:8] == 24'hFFFFFF);
+    assign MEM_io_cs   = (MEM_memTarget[31:8] == 24'h041000);
 
     //MEM stalls when waiting for memory, soon when FPGA will arrive ill make
     //a MIG and SDRAM connection and that will govern mem_ready, however at
@@ -566,7 +568,7 @@ module CORE(
         if (MEM_ram_cs)
             mem_read_data = ram_data_out;
         else if (MEM_io_cs)
-            mem_read_data = MEM_io_data;
+            mem_read_data = io_data_out;
         else if (MEM_vram_cs)
             mem_read_data = vram_data_read;
         else
@@ -738,14 +740,21 @@ module CORE(
 
     //Declarations
     logic [31:0] EPC;
+    logic [31:0] EX_EPC, MEM_EPC_val;
+    logic        MEM_EPC_write;
+    assign MEM_EPC_write = (isMEM_valid && MEM_EPCWrite) || (MEM_mmio_write && MEM_memTarget == 32'hFFFFFF10);
+    assign MEM_EPC_val   = MEM_mmio_write ? MEM_rx0_val : (MEM_irq ? MEM_PC : MEM_PCNext);
+    assign EX_EPC        = MEM_EPC_write ? MEM_EPC_val : EPC;
 
     logic  [31:0] SP, GP, KGP, KSP, LR, KScratch;
-    logic  [31:0] EX_SP, EX_KSP, EX_GP, EX_KGP, EX_LR;
-    assign EX_SP  = MEM_SP_w  ? SPRNext : SP;
-    assign EX_KSP = MEM_KSP_w ? SPRNext : KSP;
-    assign EX_GP  = MEM_GP_w  ? SPRNext : GP;
-    assign EX_KGP = MEM_KGP_w ? SPRNext : KGP;
-    assign EX_LR  = MEM_LR_w  ? MEM_LR_val : LR;
+    logic  [31:0] EX_SP, EX_KSP, EX_GP, EX_KGP, EX_LR, MEM_SP_val, MEM_KSP_val;
+    assign MEM_SP_val  = MEM_mmio_write ? MEM_rx0_val : SPRNext;
+    assign MEM_KSP_val = MEM_mmio_write ? MEM_rx0_val : SPRNext;
+    assign EX_SP  = MEM_SP_write  ? MEM_SP_val : SP;
+    assign EX_KSP = MEM_KSP_write ? MEM_KSP_val : KSP;
+    assign EX_GP  = MEM_GP_write  ? SPRNext : GP;
+    assign EX_KGP = MEM_KGP_write ? SPRNext : KGP;
+    assign EX_LR  = MEM_LR_write  ? MEM_LR_val : LR;
 
     logic [31:0] ActiveSP;
     logic [31:0] ActiveGP;
@@ -761,6 +770,7 @@ module CORE(
     logic isCallState;
     logic [31:0] memBase;
     logic [31:0] memLimit;
+    logic [32:0] memEnd;
     logic [31:0] memTarget;
     logic [1:0] spr_target_sel;
 
@@ -793,7 +803,6 @@ module CORE(
 
     logic RAM_cs; //Chip select
     logic VRAM_cs;
-    logic IO_cs;
     logic [15:0] mmio_timer_reg;
 
     logic ZeroDivException;
@@ -836,7 +845,7 @@ module CORE(
     end
     assign memViolation =   (!MEM_kernelMode && (MEM_memRead || MEM_memWrite) &&
                             ((MEM_memTarget < memBase) ||
-                            (33'(MEM_memTarget) >= (33'(memBase) + 33'(memLimit)))));
+                            (33'(MEM_memTarget) >= memEnd)));
 
     assign spr_target_sel =
         (opcode == 6'b101000 || opcode == 6'b101001 || opcode == 6'b101010 ||
@@ -884,7 +893,7 @@ module CORE(
         unique case (PCSrc)
             4'b0000: PCNext = EX_early_target;
             4'b0001: PCNext = EX_early_target;
-            4'b0011: PCNext = EPC;          // RETU
+            4'b0011: PCNext = EX_EPC;       // RETU
             4'b0101: PCNext = EX_LR;        // RET
             4'b0010: PCNext = 32'h00000064; // Syscall Vector
             4'b0100: PCNext = 32'h00000068; // Timer Vector
@@ -925,14 +934,17 @@ module CORE(
     end
 
     //This does look kinda scary but trust me its just SPRs write and banking
-    logic  MEM_SP_w, MEM_KSP_w, MEM_GP_w, MEM_KGP_w, MEM_LR_w;
+    logic MEM_mmio_write;
+    assign MEM_mmio_write = isMEM_valid && MEM_memWrite && MEM_mmio_cs && MEM_kernelMode;
+
+    logic  MEM_SP_write, MEM_KSP_write, MEM_GP_write, MEM_KGP_write, MEM_LR_write;
     logic [31:0] MEM_LR_val;
-    assign MEM_SP_w   = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) && !MEM_kernelMode;
-    assign MEM_KSP_w  = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) &&  MEM_kernelMode;
-    assign MEM_GP_w   = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) && !MEM_kernelMode;
-    assign MEM_KGP_w  = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) &&  MEM_kernelMode;
-    assign MEM_LR_w   = isMEM_valid && (MEM_is_call || (MEM_SPRWrite && (MEM_spr_target_sel == 2'b01)));
-    assign MEM_LR_val = MEM_is_call ? MEM_PCNext : SPRNext;
+    assign MEM_SP_write  = (isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) && !MEM_kernelMode) || (MEM_mmio_write && MEM_memTarget == 32'hFFFFFF14);
+    assign MEM_KSP_write = (isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) &&  MEM_kernelMode) || (MEM_mmio_write && MEM_memTarget == 32'hFFFFFF18);
+    assign MEM_GP_write  = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) && !MEM_kernelMode;
+    assign MEM_KGP_write = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) &&  MEM_kernelMode;
+    assign MEM_LR_write  = isMEM_valid && (MEM_is_call || (MEM_SPRWrite && (MEM_spr_target_sel == 2'b01)));
+    assign MEM_LR_val    = MEM_is_call ? MEM_PCNext : SPRNext;
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -947,6 +959,7 @@ module CORE(
 
             memBase    <= 32'h0;
             memLimit   <= 32'hFFFFFFFF;
+            memEnd     <= 33'h0FFFFFFFF;
             mmio_timer_reg <= 16'd10000;
 
         end else begin
@@ -980,16 +993,22 @@ module CORE(
                     end
                 end
 
-                if (isEX_valid && !mem_stall) begin
-                    if (memWrite && IO_cs && EX_kernel_mode) begin
-                        unique case (memTarget)
-                            32'hFFFFFF04: mmio_timer_reg <= FWD_rx0[15:0];
-                            32'hFFFFFF08: memBase        <= FWD_rx0;
-                            32'hFFFFFF0C: memLimit       <= FWD_rx0;
-                            32'hFFFFFF10: EPC            <= FWD_rx0;
-                            32'hFFFFFF14: SP             <= FWD_rx0;
-                            32'hFFFFFF18: KSP            <= FWD_rx0;
-                            32'hFFFFFF1C: KScratch       <= FWD_rx0;
+                if (isMEM_valid && !mem_stall) begin //Moved to MEM from EX
+                    if (MEM_memWrite && MEM_mmio_cs && MEM_kernelMode) begin
+                        unique case (MEM_memTarget)
+                            32'hFFFFFF04: mmio_timer_reg <= MEM_rx0_val[15:0];
+                            32'hFFFFFF08: begin
+                                memBase  <= MEM_rx0_val;
+                                memEnd   <= 33'(MEM_rx0_val) + 33'(memLimit);
+                            end
+                            32'hFFFFFF0C: begin
+                                memLimit <= MEM_rx0_val;
+                                memEnd   <= 33'(memBase) + 33'(MEM_rx0_val);
+                            end
+                            32'hFFFFFF10: EPC            <= MEM_rx0_val;
+                            32'hFFFFFF14: SP             <= MEM_rx0_val;
+                            32'hFFFFFF18: KSP            <= MEM_rx0_val;
+                            32'hFFFFFF1C: KScratch       <= MEM_rx0_val;
                             default: ;
                         endcase
                     end
@@ -1015,7 +1034,6 @@ module CORE(
     always_comb begin
         RAM_cs  = 0;
         VRAM_cs = 0;
-        IO_cs   = 0;
 
         if (memTarget <= 32'h03FFFFFF) begin
             RAM_cs = 1;
@@ -1023,10 +1041,10 @@ module CORE(
         else if (memTarget >= 32'h04000000 && memTarget <= 32'h040FFFFF) begin
             VRAM_cs = 1;
         end
-        else if (memTarget >= 32'h04100000 && memTarget <= 32'h041000FF) begin
-            IO_cs = 1;
-        end
-        //Else memFault
+        //Else memFault, not really actually its either IO_cs or memFault,
+        //I moved IO_cs to MEM because it doesn't really gate anything earlier,
+        //so its fine in MEM, whilst its a lil more complicated for others,
+        //and they aren't even in critical path so it doesn't matter anyway.
     end
 
     always_comb begin
@@ -1048,15 +1066,15 @@ module CORE(
 
     logic [31:0] io_data_out;
     always_comb begin
-        unique case (memTarget)
+        unique case (MEM_memTarget)
             32'h04100000: io_data_out = {24'd0, ENC_10K_KeyIn};
             32'h04100004: io_data_out = {31'd0, mod_state};
             32'h04100008: io_data_out = {16'd0, mmio_timer_reg};
-            32'h04100014: io_data_out = EX_SP;
-            32'h04100018: io_data_out = EX_KSP;
+            32'h04100014: io_data_out = SP;
+            32'h04100018: io_data_out = KSP;
             32'h0410001C: io_data_out = KScratch;
-            32'h04100020: io_data_out = ActiveSP;
-            32'h04100024: io_data_out = EX_LR;
+            32'h04100020: io_data_out = MEM_activeSP;
+            32'h04100024: io_data_out = LR;
             default:      io_data_out = 32'd0;
         endcase
     end
