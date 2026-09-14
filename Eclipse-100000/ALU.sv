@@ -53,8 +53,9 @@ module ALU (
     assign add_s2 = {1'b0, x[31:16]} + {1'b0, add_y[31:16]} + {16'b0, add_s1[8]};
 
     logic [31:0] add_result;
-    assign add_result = {add_s2[15:0], add_s1[7:0], add_s0[7:0]};
-
+    assign add_result = x + add_y + {31'b0, is_sub_op}; //Had to change it, because turns out it does have an effect
+    //On the critical path, because instead of just chaining carry4 vivado
+    //just added some bs there, eaasy fix though.
     //==Barrel==// 
     //A left shift is just a right shift with the bits flipped on both ends, and flipping is just writing,
     //actually no LUTs involved
