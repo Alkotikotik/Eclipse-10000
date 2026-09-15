@@ -84,8 +84,7 @@ module CORE(
             6'b010000: IF_redirect_target = LR; //RET
             6'b111111, 6'b111000: IF_redirect_target = {4'b0, instr_fetch_data[25:0], 2'b00}; //JMP / CALL
             6'b110000: IF_redirect_target = {4'b0, IF_IR_2[25:0], 2'b00}; //64bit branches
-            default: IF_redirect_target = IF_PC + 32'd4 +
-                     {{6{instr_fetch_data[25]}}, instr_fetch_data[25:0]};
+            default: IF_redirect_target = {4'b0, IF_IR_2[25:0], 2'b00};
         endcase
     end
 
@@ -447,8 +446,8 @@ module CORE(
 
     //Same this as IF_PC_plus4_or8
     logic [31:0] EX_PC_next;
-    assign EX_PCNext = EX_PC + {28'd0, (EX_64 || EX_branch), !(EX_64 || EX_branch), 2'b00};
-    assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? EX_PCNext : PCNext;
+    assign EX_PC_next = EX_PC + {28'd0, (EX_64 || EX_branch), !(EX_64 || EX_branch), 2'b00};
+    assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? EX_PC_next : PCNext;
 
     //This is forwarding too, EX needs to know the new mode immediately after
     //MEM made the change, becase kernel mode now changes in MEM
@@ -503,7 +502,7 @@ module CORE(
 
             MEM_EPCWrite    <= EPCWrite;
             MEM_irq         <= irq_taken;
-            MEM_PCNext      <= EX_PCNext;
+            MEM_PCNext      <= EX_PC_next;
             MEM_mode        <= isKernelMode;
 
             MEM_gpr_write   <= GPRsWrite;
@@ -690,17 +689,6 @@ module CORE(
     //means that each call gets its own unique set of argumenst, like in
     //regular C stack allocation, regularly though, it gives everyone the same
     //argumetns. Best thing is that it costs nothing in hardware
-    function automatic [31:0] fwd_merge(input [2:0] fragment, input [31:0] old, input [31:0] val);
-        unique case (fragment)
-            3'b001:  fwd_merge = {old[31:16], val[15:0]};             //ry0
-            3'b010:  fwd_merge = {val[15:0],  old[15:0]};             //ry1
-            3'b011:  fwd_merge = {old[31:8],  val[7:0]};              //rz0
-            3'b100:  fwd_merge = {old[31:16], val[7:0], old[7:0]};    //rz1
-            3'b101:  fwd_merge = {old[31:24], val[7:0], old[15:0]};   //rz2
-            3'b110:  fwd_merge = {val[7:0],   old[23:0]};             //rz3
-            default: fwd_merge = val;                                 //rx
-        endcase
-    endfunction
 
     function automatic [31:0] fwd_slice(input [2:0] fragment, input [31:0] val);
         unique case (fragment)
@@ -721,13 +709,13 @@ module CORE(
     //late than never
     function automatic [31:0] fwd_align(input [2:0] fragment, input [31:0] val);
         unique case (fragment)
-            3'b001:  fwd_align = {16'h0000, val[15:0]};
-            3'b010:  fwd_align = {val[15:0], 16'h0000};
-            3'b011:  fwd_align = {24'h000000, val[7:0]};
-            3'b100:  fwd_align = {16'h0000, val[7:0], 8'h00};
-            3'b101:  fwd_align = {8'h00, val[7:0], 16'h0000};
-            3'b110:  fwd_align = {val[7:0], 24'h000000};
-            default: fwd_align = val;
+            3'b001:  fwd_align = {16'h0000, val[15:0]};          //ry0
+            3'b010:  fwd_align = {val[15:0], 16'h0000};          //ry1
+            3'b011:  fwd_align = {24'h000000, val[7:0]};         //rz0
+            3'b100:  fwd_align = {16'h0000, val[7:0], 8'h00};    //rz1
+            3'b101:  fwd_align = {8'h00, val[7:0], 16'h0000};    //rz2
+            3'b110:  fwd_align = {val[7:0], 24'h000000};         //rz3
+            default: fwd_align = val;                            //rx
         endcase
     endfunction
 
@@ -803,16 +791,15 @@ module CORE(
     logic [31:0] EPC;
     logic [31:0] EX_EPC, MEM_EPC_val;
     logic        MEM_EPC_write;
-    assign MEM_EPC_write = (isMEM_valid && MEM_EPCWrite) || (MEM_mmio_write && MEM_memTarget == 32'hFFFFFF10);
+    assign MEM_EPC_write = (isMEM_valid && MEM_EPCWrite) || (MEM_mmio_write && MEM_memTarget[7:0] == 8'h10);
     assign MEM_EPC_val   = MEM_mmio_write ? MEM_rx0_val : (MEM_irq ? MEM_PC : MEM_PCNext);
     assign EX_EPC        = MEM_EPC_write ? MEM_EPC_val : EPC;
 
     logic  [31:0] SP, GP, KGP, KSP, LR, KScratch;
-    logic  [31:0] EX_SP, EX_KSP, EX_GP, EX_KGP, EX_LR, MEM_SP_val, MEM_KSP_val;
+    logic  [31:0] EX_SP, EX_KSP, EX_GP, EX_KGP, EX_LR, MEM_SP_val;
     assign MEM_SP_val  = MEM_mmio_write ? MEM_rx0_val : SPRNext;
-    assign MEM_KSP_val = MEM_mmio_write ? MEM_rx0_val : SPRNext;
     assign EX_SP  = MEM_SP_write  ? MEM_SP_val : SP;
-    assign EX_KSP = MEM_KSP_write ? MEM_KSP_val : KSP;
+    assign EX_KSP = MEM_KSP_write ? MEM_SP_val : KSP;
     assign EX_GP  = MEM_GP_write  ? SPRNext : GP;
     assign EX_KGP = MEM_KGP_write ? SPRNext : KGP;
     assign EX_LR  = MEM_LR_write  ? MEM_LR_val : LR;
@@ -1000,8 +987,8 @@ module CORE(
 
     logic  MEM_SP_write, MEM_KSP_write, MEM_GP_write, MEM_KGP_write, MEM_LR_write;
     logic [31:0] MEM_LR_val;
-    assign MEM_SP_write  = (isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) && !MEM_kernelMode) || (MEM_mmio_write && MEM_memTarget == 32'hFFFFFF14);
-    assign MEM_KSP_write = (isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) &&  MEM_kernelMode) || (MEM_mmio_write && MEM_memTarget == 32'hFFFFFF18);
+    assign MEM_SP_write  = (isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) && !MEM_kernelMode) || (MEM_mmio_write && MEM_memTarget[7:0] == 8'h14);
+    assign MEM_KSP_write = (isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) &&  MEM_kernelMode) || (MEM_mmio_write && MEM_memTarget[7:0] == 8'h18);
     assign MEM_GP_write  = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) && !MEM_kernelMode;
     assign MEM_KGP_write = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) &&  MEM_kernelMode;
     assign MEM_LR_write  = isMEM_valid && (MEM_is_call || (MEM_SPRWrite && (MEM_spr_target_sel == 2'b01)));
@@ -1055,18 +1042,14 @@ module CORE(
 
                 if (isMEM_valid && !mem_stall) begin //Moved to MEM from EX
                     if (MEM_memWrite && MEM_mmio_cs && MEM_kernelMode) begin
-                        unique case (MEM_memTarget)
-                            32'hFFFFFF04: mmio_timer_reg <= MEM_rx0_val[15:0];
-                            32'hFFFFFF08: begin
-                                memBase  <= MEM_rx0_val;
-                            end
-                            32'hFFFFFF0C: begin
-                                memLimit <= MEM_rx0_val;
-                            end
-                            32'hFFFFFF10: EPC            <= MEM_rx0_val;
-                            32'hFFFFFF14: SP             <= MEM_rx0_val;
-                            32'hFFFFFF18: KSP            <= MEM_rx0_val;
-                            32'hFFFFFF1C: KScratch       <= MEM_rx0_val;
+                        unique case (MEM_memTarget[7:0])
+                            8'h04: mmio_timer_reg <= MEM_rx0_val[15:0];
+                            8'h08: memBase        <= MEM_rx0_val;
+                            8'h0C: memLimit       <= MEM_rx0_val;
+                            8'h10: EPC            <= MEM_rx0_val;
+                            8'h14: SP             <= MEM_rx0_val;
+                            8'h18: KSP            <= MEM_rx0_val;
+                            8'h1C: KScratch       <= MEM_rx0_val;
                             default: ;
                         endcase
                     end
