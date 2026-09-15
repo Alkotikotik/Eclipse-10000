@@ -42,18 +42,13 @@ module CORE(
 
     assign stall     = div_stall || mem_stall;
     assign bubble    = (mul_use_hazard || load_use_hazard) && !stall; //If we already stall no point in bubble, it also breaks div
-    assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? (EX_PC + ((EX_64 || EX_branch) ? 32'h8 : 32'h4)) : PCNext;
 
     //== IF(Instruction Fetch) ==//
     logic [31:0] IF_PC;
-    logic [31:0] IF_PC_plus4;
-    logic [31:0] IF_PC_plus8;
     logic [31:0] IF_PC_plus4_or8;
 
-    assign IF_PC_plus4 = IF_PC + 32'd4;
-    assign IF_PC_plus8 = IF_PC + 32'd8;
-
-    assign IF_PC_plus4_or8 = (IF_64 || IF_branch) ? IF_PC_plus8 : IF_PC_plus4;  //Easy - 32 or 64 bits
+    //Just a neat little bit trick to get rid of IF_PC_plus(4/8)
+    assign IF_PC_plus4_or8 = IF_PC + {28'd0, (IF_64 || IF_branch), !(IF_64 || IF_branch), 2'b00};
 
     logic [31:0] IF_PC_next;
     assign IF_PC_next = (instr_fetch_data[31:26]==6'b111111 || instr_fetch_data[31:26]==6'b111000 || instr_fetch_data[31:26]==6'b010000 || instr_fetch_data[31:26]==6'b111101 || IF_predicted_taken) ? IF_redirect_target : IF_PC_plus4_or8;
@@ -450,6 +445,11 @@ module CORE(
         endcase
     end
 
+    //Same this as IF_PC_plus4_or8
+    logic [31:0] EX_PC_next;
+    assign EX_PCNext = EX_PC + {28'd0, (EX_64 || EX_branch), !(EX_64 || EX_branch), 2'b00};
+    assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? EX_PCNext : PCNext;
+
     //This is forwarding too, EX needs to know the new mode immediately after
     //MEM made the change, becase kernel mode now changes in MEM
     logic  EX_kernel_mode;
@@ -503,7 +503,7 @@ module CORE(
 
             MEM_EPCWrite    <= EPCWrite;
             MEM_irq         <= irq_taken;
-            MEM_PCNext      <= EX_PC + ((EX_64 || EX_branch) ? 8 : 4);
+            MEM_PCNext      <= EX_PCNext;
             MEM_mode        <= isKernelMode;
 
             MEM_gpr_write   <= GPRsWrite;
@@ -586,6 +586,11 @@ module CORE(
             mem_read_data = 32'd0;
     end
 
+    logic [31:0] MEM_aligned;
+    logic [3:0]  MEM_lanes;
+    assign MEM_aligned = fwd_align(MEM_gpr_dest[2:0], MEM_result);
+    assign MEM_lanes   = fwd_lanes(MEM_gpr_dest[2:0]);
+
     //Specifically for mul, actually no - not anymore for loads too, actually
     //no not even for mul anymore, specifically for loads now
     logic [31:0] MEM_val;
@@ -609,6 +614,9 @@ module CORE(
     logic        WB_memWrite;
     logic [31:0] WB_memTarget;
 
+    logic [31:0] WB_aligned;
+    logic [3:0]  WB_lanes;
+
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isWB_valid <= 0;
@@ -624,6 +632,9 @@ module CORE(
 
             WB_memWrite <= MEM_memWrite;
             WB_memTarget<= MEM_memTarget;
+
+            WB_aligned  <= fwd_align(MEM_gpr_dest[2:0], MEM_val);
+            WB_lanes    <= fwd_lanes(MEM_gpr_dest[2:0]);
         end
     end
 
@@ -649,7 +660,8 @@ module CORE(
     //Two selectors that differ only in the offset still name the exact same physical
     //register, so comparing the whole 8bit selector breaks everything.
     //The fix is only match using base_id and apply offset only at the end
-    logic [31:0] FWD_rx0, FWD_rx1, FWD_rx1_full, FWD_rxi, FWD_rx0_signed, FWD_rx1_signed;
+    logic [31:0] FWD_rx0, FWD_rx1, FWD_rxi, FWD_rx0_signed, FWD_rx1_signed;
+    logic [31:0] FWD_rx0_full, FWD_rx1_full, FWD_rxi_full;
     logic MEM_fwd0, WB_fwd0, MEM_fwd1, WB_fwd1, MEM_fwd2, WB_fwd2;
 
     //This checks whether the write in MEM/WB touches the register this read wants
@@ -666,6 +678,7 @@ module CORE(
                       (rxi[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
     assign WB_fwd2  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rxi[7:3]) &&
                       (rxi[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
+
     //Just snuck up in here, so it previosely just zero extended fragmented registers
     //Now if opcode is one of where its vital, we just sign extend it,
     //precisely that fixed: SRA and SDIV
@@ -677,8 +690,8 @@ module CORE(
     //means that each call gets its own unique set of argumenst, like in
     //regular C stack allocation, regularly though, it gives everyone the same
     //argumetns. Best thing is that it costs nothing in hardware
-    function automatic [31:0] fwd_merge(input [2:0] off, input [31:0] old, input [31:0] val);
-        unique case (off)
+    function automatic [31:0] fwd_merge(input [2:0] fragment, input [31:0] old, input [31:0] val);
+        unique case (fragment)
             3'b001:  fwd_merge = {old[31:16], val[15:0]};             //ry0
             3'b010:  fwd_merge = {val[15:0],  old[15:0]};             //ry1
             3'b011:  fwd_merge = {old[31:8],  val[7:0]};              //rz0
@@ -689,15 +702,44 @@ module CORE(
         endcase
     endfunction
 
-    function automatic [31:0] fwd_slice(input [2:0] off, input [31:0] v);
-        unique case (off)
-            3'b001:  fwd_slice = {16'h0000, v[15:0]};
-            3'b010:  fwd_slice = {16'h0000, v[31:16]};
-            3'b011:  fwd_slice = {24'h000000, v[7:0]};
-            3'b100:  fwd_slice = {24'h000000, v[15:8]};
-            3'b101:  fwd_slice = {24'h000000, v[23:16]};
-            3'b110:  fwd_slice = {24'h000000, v[31:24]};
-            default: fwd_slice = v;
+    function automatic [31:0] fwd_slice(input [2:0] fragment, input [31:0] val);
+        unique case (fragment)
+            3'b001:  fwd_slice = {16'h0000,   val[15:0]};
+            3'b010:  fwd_slice = {16'h0000,   val[31:16]};
+            3'b011:  fwd_slice = {24'h000000, val[7:0]};
+            3'b100:  fwd_slice = {24'h000000, val[15:8]};
+            3'b101:  fwd_slice = {24'h000000, val[23:16]};
+            3'b110:  fwd_slice = {24'h000000, val[31:24]};
+            default: fwd_slice = val;
+        endcase
+    endfunction
+
+    //So in order to save up 1 logic level instead of writing FWD to full registers
+    //I write it to the byte lanes, same thing as in GPRs really. This should
+    //decrease the mux to 1 LUT6 instead of 2 therby saving 1 logic level.
+    //Why did I only think of the fragment name now, its genuis. Well better
+    //late than never
+    function automatic [31:0] fwd_align(input [2:0] fragment, input [31:0] val);
+        unique case (fragment)
+            3'b001:  fwd_align = {16'h0000, val[15:0]};
+            3'b010:  fwd_align = {val[15:0], 16'h0000};
+            3'b011:  fwd_align = {24'h000000, val[7:0]};
+            3'b100:  fwd_align = {16'h0000, val[7:0], 8'h00};
+            3'b101:  fwd_align = {8'h00, val[7:0], 16'h0000};
+            3'b110:  fwd_align = {val[7:0], 24'h000000};
+            default: fwd_align = val;
+        endcase
+    endfunction
+
+    function automatic [3:0] fwd_lanes(input [2:0] fragment);
+        unique case (fragment)
+            3'b001:  fwd_lanes = 4'b0011;
+            3'b010:  fwd_lanes = 4'b1100;
+            3'b011:  fwd_lanes = 4'b0001;
+            3'b100:  fwd_lanes = 4'b0010;
+            3'b101:  fwd_lanes = 4'b0100;
+            3'b110:  fwd_lanes = 4'b1000;
+            default: fwd_lanes = 4'b1111;
         endcase
     endfunction
 
@@ -710,10 +752,17 @@ module CORE(
     assign ID_wb_hit1 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx1[7:3]);
     assign ID_wb_hit2 = wb_writes_array && (WB_gpr_dest[7:3] == ID_IR_2[31:27]);
 
+    //Do once
+    logic [31:0] WB_val_aligned;
+    assign WB_val_aligned = fwd_align(WB_gpr_dest[2:0], WB_val);
+
+    //Apply several times
     always_comb begin
-        ID_rx0_val = ID_wb_hit0 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out0, WB_val) : GPRs_data_out0;
-        ID_rx1_val = ID_wb_hit1 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out1, WB_val) : GPRs_data_out1;
-        ID_rx2_val = ID_wb_hit2 ? fwd_merge(WB_gpr_dest[2:0], GPRs_data_out2, WB_val) : GPRs_data_out2;
+        for (integer lane = 0; lane < 4; lane++) begin
+            ID_rx0_val[8*lane +: 8] = (ID_wb_hit0 && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : GPRs_data_out0[8*lane +: 8];
+            ID_rx1_val[8*lane +: 8] = (ID_wb_hit1 && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : GPRs_data_out1[8*lane +: 8];
+            ID_rx2_val[8*lane +: 8] = (ID_wb_hit2 && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : GPRs_data_out2[8*lane +: 8];
+        end
     end
 
     //So at ID we don't know if instruction should be executed in kernel mode
@@ -727,27 +776,28 @@ module CORE(
 
     //Here automatic comes in play, function gets called more than ones in
     //always_comb block so its neccessery
+    //writing to exact lanes of fragmented registers
     always_comb begin
-        FWD_rx0 = EX_gpr0;
-        if (WB_fwd0)  FWD_rx0 = fwd_merge(WB_gpr_dest[2:0],  FWD_rx0, WB_result);
-        if (MEM_fwd0) FWD_rx0 = fwd_merge(MEM_gpr_dest[2:0], FWD_rx0, MEM_result);
-        FWD_rx0 = fwd_slice(rx0[2:0], FWD_rx0);
+        for (int lane = 0; lane < 4; lane++) begin
+            //This notation is pretty scary but its just 8 subsequent bits
+            //after 8*lane
+            if (MEM_fwd0 && MEM_lanes[lane])     FWD_rx0_full[8*lane +: 8] = MEM_aligned[8*lane +: 8];
+            else if (WB_fwd0 && WB_lanes[lane])  FWD_rx0_full[8*lane +: 8] = WB_aligned[8*lane +: 8];
+            else                              FWD_rx0_full[8*lane +: 8] = EX_gpr0[8*lane +: 8];
+
+            if (MEM_fwd1 && MEM_lanes[lane])     FWD_rx1_full[8*lane +: 8] = MEM_aligned[8*lane +: 8];
+            else if (WB_fwd1 && WB_lanes[lane])  FWD_rx1_full[8*lane +: 8] = WB_aligned[8*lane +: 8];
+            else                              FWD_rx1_full[8*lane +: 8] = EX_gpr1[8*lane +: 8];
+
+            if (MEM_fwd2 && MEM_lanes[lane])     FWD_rxi_full[8*lane +: 8] = MEM_aligned[8*lane +: 8];
+            else if (WB_fwd2 && WB_lanes[lane])  FWD_rxi_full[8*lane +: 8] = WB_aligned[8*lane +: 8];
+            else                              FWD_rxi_full[8*lane +: 8] = EX_gpr2[8*lane +: 8];
+        end
     end
 
-    always_comb begin
-        FWD_rx1_full = EX_gpr1;
-        if (WB_fwd1)  FWD_rx1_full = fwd_merge(WB_gpr_dest[2:0],  FWD_rx1_full, WB_result);
-        if (MEM_fwd1) FWD_rx1_full = fwd_merge(MEM_gpr_dest[2:0], FWD_rx1_full, MEM_result);
-    end
-
+    assign FWD_rx0 = fwd_slice(rx0[2:0], FWD_rx0_full);
     assign FWD_rx1 = fwd_slice(rx1[2:0], FWD_rx1_full);
-
-    always_comb begin
-        FWD_rxi = EX_gpr2;
-        if (WB_fwd2)  FWD_rxi = fwd_merge(WB_gpr_dest[2:0],  FWD_rxi, WB_result);
-        if (MEM_fwd2) FWD_rxi = fwd_merge(MEM_gpr_dest[2:0], FWD_rxi, MEM_result);
-        FWD_rxi = fwd_slice(rxi[2:0], FWD_rxi);
-    end
+    assign FWD_rxi = fwd_slice(rxi[2:0], FWD_rxi_full);
 
     //Declarations
     logic [31:0] EPC;
@@ -970,7 +1020,6 @@ module CORE(
 
             memBase    <= 32'h0;
             memLimit   <= 32'hFFFFFFFF;
-            memEnd     <= 33'h0FFFFFFFF;
             mmio_timer_reg <= 16'd10000;
 
         end else begin
@@ -1010,11 +1059,9 @@ module CORE(
                             32'hFFFFFF04: mmio_timer_reg <= MEM_rx0_val[15:0];
                             32'hFFFFFF08: begin
                                 memBase  <= MEM_rx0_val;
-                                memEnd   <= 33'(MEM_rx0_val) + 33'(memLimit);
                             end
                             32'hFFFFFF0C: begin
                                 memLimit <= MEM_rx0_val;
-                                memEnd   <= 33'(memBase) + 33'(MEM_rx0_val);
                             end
                             32'hFFFFFF10: EPC            <= MEM_rx0_val;
                             32'hFFFFFF14: SP             <= MEM_rx0_val;
@@ -1027,6 +1074,16 @@ module CORE(
             end
         end
     end
+
+    //memEnd was at always_ff block above and it was written to twice.
+    //So I thought why not just compute it every cycle.
+    //That does make it lag 1 cycle behind but according to my precise
+    //Calculations: we dgaf
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) memEnd <= 33'h0FFFFFFFF;
+        else memEnd <= 33'(memBase) + 33'(memLimit);
+    end
+
 
     always_comb begin
         unique case (aluOpSel)
@@ -1077,15 +1134,15 @@ module CORE(
 
     logic [31:0] io_data_out;
     always_comb begin
-        unique case (MEM_memTarget)
-            32'h04100000: io_data_out = {24'd0, ENC_10K_KeyIn};
-            32'h04100004: io_data_out = {31'd0, mod_state};
-            32'h04100008: io_data_out = {16'd0, mmio_timer_reg};
-            32'h04100014: io_data_out = SP;
-            32'h04100018: io_data_out = KSP;
-            32'h0410001C: io_data_out = KScratch;
-            32'h04100020: io_data_out = MEM_activeSP;
-            32'h04100024: io_data_out = LR;
+        unique case (MEM_memTarget[7:0]) //Upper 24bits are checked by chip select, this is just LUT optimization
+            8'h00: io_data_out = {24'd0, ENC_10K_KeyIn};
+            8'h04: io_data_out = {31'd0, mod_state};
+            8'h08: io_data_out = {16'd0, mmio_timer_reg};
+            8'h14: io_data_out = SP;
+            8'h18: io_data_out = KSP;
+            8'h1C: io_data_out = KScratch;
+            8'h20: io_data_out = MEM_activeSP;
+            8'h24: io_data_out = LR;
             default:      io_data_out = 32'd0;
         endcase
     end
@@ -1186,7 +1243,7 @@ module CORE(
         .data_out(vram_data_read)
     );
 
-    //I would have kept it in the file include, but sim_main requires them and
+    //I would have kept it in the file include, but sim_main(and debug) requires them and
     //it doesn't matte tbh
     assign vram_addr     = MEM_vram_addr;
     assign vram_data_out = MEM_ram_data_in;
