@@ -655,17 +655,17 @@ module CORE(
     //This checks whether the write in MEM/WB touches the register this read wants
     //Also account for rx0, rx1 banking
     assign MEM_fwd0 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rx0[7:3]) &&
-                      (rx0[7:3] > 5'd1 || MEM_kernelMode == KernelMode);
+                      (rx0[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
     assign WB_fwd0  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rx0[7:3]) &&
-                      (rx0[7:3] > 5'd1 || WB_kernelMode  == KernelMode);
+                      (rx0[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
     assign MEM_fwd1 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rx1[7:3]) &&
-                      (rx1[7:3] > 5'd1 || MEM_kernelMode == KernelMode);
+                      (rx1[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
     assign WB_fwd1  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rx1[7:3]) &&
-                      (rx1[7:3] > 5'd1 || WB_kernelMode  == KernelMode);
+                      (rx1[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
     assign MEM_fwd2 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rxi[7:3]) &&
-                      (rxi[7:3] > 5'd1 || MEM_kernelMode == KernelMode);
+                      (rxi[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
     assign WB_fwd2  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rxi[7:3]) &&
-                      (rxi[7:3] > 5'd1 || WB_kernelMode  == KernelMode);
+                      (rxi[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
     //Just snuck up in here, so it previosely just zero extended fragmented registers
     //Now if opcode is one of where its vital, we just sign extend it,
     //precisely that fixed: SRA and SDIV
