@@ -292,6 +292,7 @@ module CORE(
     logic [13:0] EX_pht_idx;
     logic [1:0]  EX_pht_val;
     logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
+    logic EX_mem_hit0, EX_mem_hit1, EX_mem_hit2, EX_wb_hit0, EX_wb_hit1, EX_wb_hit2;
     logic EX_predicted_taken;
     logic isEX_valid;
     logic EX_branch;
@@ -324,6 +325,15 @@ module CORE(
             EX_pht_idx <= ID_pht_idx;
             EX_pht_val <= ID_pht_val;
             EX_predicted_taken <= ID_predicted_taken;
+
+            //The forwarding check moves to the ID now, only check forwarding itself
+            //still stays in EX
+            EX_mem_hit0 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx0[7:3]);
+            EX_mem_hit1 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx1[7:3]);
+            EX_mem_hit2 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_IR_2[31:27]);
+            EX_wb_hit0  <= isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx0[7:3]);
+            EX_wb_hit1  <= isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx1[7:3]);
+            EX_wb_hit2  <= isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_IR_2[31:27]);
         end
     end
 
@@ -453,6 +463,8 @@ module CORE(
     //MEM made the change, becase kernel mode now changes in MEM
     logic  EX_kernel_mode;
     assign EX_kernel_mode = isMEM_valid ? MEM_mode : KernelMode;
+
+
 
 
     //== MEM(memory) ==//
@@ -672,18 +684,12 @@ module CORE(
 
     //This checks whether the write in MEM/WB touches the register this read wants
     //Also account for rx0, rx1 banking
-    assign MEM_fwd0 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rx0[7:3]) &&
-                      (rx0[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
-    assign WB_fwd0  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rx0[7:3]) &&
-                      (rx0[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
-    assign MEM_fwd1 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rx1[7:3]) &&
-                      (rx1[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
-    assign WB_fwd1  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rx1[7:3]) &&
-                      (rx1[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
-    assign MEM_fwd2 = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == rxi[7:3]) &&
-                      (rxi[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
-    assign WB_fwd2  = isWB_valid  && WB_gpr_write  && (WB_gpr_dest[7:3]  == rxi[7:3]) &&
-                      (rxi[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
+    assign MEM_fwd0 = EX_mem_hit0 && (rx0[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
+    assign WB_fwd0  = EX_wb_hit0  && (rx0[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
+    assign MEM_fwd1 = EX_mem_hit1 && (rx1[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
+    assign WB_fwd1  = EX_wb_hit1  && (rx1[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
+    assign MEM_fwd2 = EX_mem_hit2 && (rxi[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
+    assign WB_fwd2  = EX_wb_hit2  && (rxi[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
 
     //Just snuck up in here, so it previosely just zero extended fragmented registers
     //Now if opcode is one of where its vital, we just sign extend it,
