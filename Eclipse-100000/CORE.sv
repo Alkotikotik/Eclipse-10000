@@ -55,7 +55,7 @@ module CORE(
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) IF_PC <= 32'h0;
-        else if(memFault) IF_PC <= 32'h00000070;
+        else if(MEM_fault) IF_PC <= memFault ? 32'h00000070 : 32'h00000074;
         else if(demolish) IF_PC <= PC_target;
         else if(!stall && !bubble) IF_PC <= IF_PC_next;
         else IF_PC <= IF_PC; //I just can't omit it
@@ -197,7 +197,7 @@ module CORE(
             isID_valid <= 0;
             //Vivado started to complain when I added memFault, but whatever
             //I can just split it into to if blocks
-        end else if (demolish || memFault) begin
+        end else if (demolish || MEM_fault) begin
             isID_valid <= 0;
         end else if (!stall && !bubble) begin
             isID_valid <= 1'b1;
@@ -303,7 +303,7 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isEX_valid <= 0;
-        end else if (demolish || bubble || memFault) begin
+        end else if (demolish || bubble || MEM_fault) begin
             isEX_valid <= 0;
         end else if (!stall) begin
             isEX_valid <= isID_valid;
@@ -477,6 +477,8 @@ module CORE(
     logic MEM_is_lomul, MEM_is_himul;
     logic MEM_is_load, MEM_ram_cs, MEM_io_cs, MEM_vram_cs;
 
+    logic MEM_zeroDiv;
+
     //Moving SPRs stuff into MEM
     logic MEM_SPRWrite;
     logic [31:0] MEM_rx0_val, MEM_SelectedSPR, MEM_activeSP, MEM_activeGP;
@@ -508,9 +510,10 @@ module CORE(
             MEM_gpr_write   <= GPRsWrite;
             MEM_gpr_dest    <= gpr_rw0_sel;
             MEM_kernelMode  <= EX_kernel_mode;
-            isMEM_valid     <= isEX_valid & !stall & !memFault;
+            isMEM_valid     <= isEX_valid & !stall & !MEM_fault;
             MEM_is_lomul    <= (opcode == 6'b000111);
             MEM_is_himul    <= (opcode == 6'b001101);
+            MEM_zeroDiv     <= ZeroDivException && !irq_taken;
 
             MEM_is_load     <= (GPRsSrc == 3'b001);
             MEM_ram_cs      <= RAM_cs;
@@ -534,6 +537,10 @@ module CORE(
     //since im moving mem stuff into MEM this is the only way
     logic  memFault;
     assign memFault = isMEM_valid && (MEM_memRead || MEM_memWrite) && memViolation;
+
+    logic  divFault, MEM_fault; //zeroDiv and memFault can never fire on the same cycle
+    assign divFault = isMEM_valid && MEM_zeroDiv;
+    assign MEM_fault = memFault || divFault;
 
     //MMIO cs but basically in MEM
     logic MEM_mmio_cs;
@@ -621,7 +628,7 @@ module CORE(
             isWB_valid <= 0;
         end else if (!mem_stall) begin
             WB_result<= MEM_val;
-            isWB_valid <= isMEM_valid & !memFault;
+            isWB_valid <= isMEM_valid & !MEM_fault;
             WB_gpr_dest <= MEM_gpr_dest;
             WB_gpr_write <= MEM_gpr_write;
             WB_kernelMode <= MEM_kernelMode;
@@ -949,9 +956,6 @@ module CORE(
             4'b0111: PCNext = FWD_rx0; // JR
             default: PCNext = EX_early_target;
         endcase
-        if (ZeroDivException) begin
-            PCNext = 32'h00000074;
-        end
     end
 
     assign MEM_activeSP = MEM_kernelMode ? KSP : SP;
@@ -1012,7 +1016,7 @@ module CORE(
         end else begin
             mod_state <= ENC_10K_ModArr;
 
-            if (memFault) begin
+            if (MEM_fault) begin
                 EPC <= MEM_PC;
                 KernelMode <= 1;
             end else begin
@@ -1147,7 +1151,7 @@ module CORE(
         .mmio_timer_reg(mmio_timer_reg),
         .current_kernel_mode(EX_kernel_mode),
         .key_in(ENC_10K_KeyIn),
-        .isEX_valid(isEX_valid && !memFault && !mem_stall),
+        .isEX_valid(isEX_valid && !MEM_fault && !mem_stall),
         .PCWrite(PCWrite),
         .GPRsWrite(GPRsWrite),
         .EPCWrite(EPCWrite),
