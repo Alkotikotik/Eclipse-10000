@@ -204,15 +204,20 @@ module CORE(
             //Vivado started to complain when I added memFault, but whatever
             //I can just split it into to if blocks
         end else if (demolish || memFault) begin
-           isID_valid <= 0;
+            isID_valid <= 0;
         end else if (!stall && !bubble) begin
+            isID_valid <= 1'b1;
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!stall && !bubble) begin
             ID_PC <= IF_PC;
             ID_64 <= IF_64;
             ID_IR_2 <= IF_IR_2;
             ID_branch <= IF_branch;
             ID_IR <= instr_fetch_data;
             ID_early_target <= IF_redirect_target;
-            isID_valid <= 1'b1;
             ID_pht_idx <= pht_idx_r;
             ID_pht_val <= pht_out;
             ID_predicted_taken <= IF_predicted_taken;
@@ -298,12 +303,21 @@ module CORE(
     logic EX_branch;
     logic EX_64;
 
+    //Alright so there was a big always_ff block here previousely, which
+    //apparantely led to high fanout, so just splitting it into 2 always_ff
+    //Should do the trick
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isEX_valid <= 0;
         end else if (demolish || bubble || memFault) begin
             isEX_valid <= 0;
         end else if (!stall) begin
+            isEX_valid <= isID_valid;
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!stall) begin
             EX_PC <= ID_PC; //Handing instruction to the EX
             EX_IR <= ID_IR;
             EX_64 <= ID_64;
@@ -312,10 +326,7 @@ module CORE(
             EX_rx1_val <= ID_rx1_val;
             EX_rx2_val <= ID_rx2_val;
             EX_branch <= ID_branch;
-
-
             EX_early_target <= ID_early_target;
-            isEX_valid <= isID_valid;
             EX_pht_idx <= ID_pht_idx;
             EX_pht_val <= ID_pht_val;
             EX_predicted_taken <= ID_predicted_taken;
