@@ -208,6 +208,10 @@ module CU(
                 GPRsSrc = 3'b101;
                 GPRsWrite = 1;
             end
+            6'b111100: begin //RNG
+                GPRsWrite = 1;
+                GPRsSrc = 3'b111;
+            end
             default: ; //Should cover everything
         endcase
 

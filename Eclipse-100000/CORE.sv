@@ -465,7 +465,50 @@ module CORE(
     assign EX_kernel_mode = isMEM_valid ? MEM_mode : KernelMode;
 
 
+    //== RNG ==//
+    //literally a random number generator. I am using the xoshiro128**
+    //algorithm, it runs every cycle and it dgaf about anything - stall,
+    //memfault, interrupt, trap like whatever happens it just doesn't care and
+    //exectes xoshiro128**. I did this to increase unpredictability further.
+    //Now the interesting part is seeding on init - more on that later tho.
+    //It takes 1 cycle to execute - just a really fast neat instruction
 
+    logic [31:0] s [3:0]; //state idk why crygrophers use variable name that go against all conventions but i kinda like it
+    logic [31:0] s_comb [3:0];
+    logic [31:0] t, t1, t2; //temp
+    logic [31:0] rng_result, rng_result_comb;
+
+    initial begin //Very scientific numbers
+        s[0] = 32'h923423;
+        s[1] = 32'h23408;
+        s[2] = 32'h23572395;
+        s[3] = 32'h235732905;
+    end
+
+    always_comb begin
+        t1 = (s[1] << 2) + s[1];
+        t2 = (t1 << 7) | (t1 >> 25); //32-7
+
+        rng_result_comb = (t2 << 3) + t2;
+
+        t = s[1] << 9;
+
+        s_comb[2] = s[2] ^ s[0];
+        s_comb[3] = s[3] ^ s[1];
+        s_comb[1] = s[1] ^ s_comb[2];
+        s_comb[0] = s[0] ^ s_comb[3];
+        s_comb[2] = s_comb[2] ^ t;
+        s_comb[3] = (s_comb[3] << 11) | (s_comb[3] >> 21); //32 - 9
+
+    end
+
+    always_ff @(posedge clk) begin //Again - no reset
+        rng_result <= rng_result_comb;
+        s[0]   <= s_comb[0];
+        s[1]   <= s_comb[1];
+        s[2]   <= s_comb[2];
+        s[3]   <= s_comb[3];
+    end
 
     //== MEM(memory) ==//
     //Work with memory - load, store
@@ -1141,11 +1184,13 @@ module CORE(
     end
 
     //No 3'b001 arm anymore, MEM fixes the load in one cycle later
-    assign GPRs_data_in = (GPRsSrc == 3'b010) ? EX_PC :
-                  (GPRsSrc == 3'b011) ? sign_ext_imm18 :
-                  (GPRsSrc == 3'b101) ? memTarget : //SPRLEA
-                  (GPRsSrc == 3'b110) ? EX_IR_2 :
-                  AluResult;
+    assign GPRs_data_in = //That looks nice
+                    (GPRsSrc == 3'b010) ? EX_PC          :
+                    (GPRsSrc == 3'b011) ? sign_ext_imm18 :
+                    (GPRsSrc == 3'b101) ? memTarget      : //SPRLEA
+                    (GPRsSrc == 3'b110) ? EX_IR_2        :
+                    (GPRsSrc == 3'b111) ? rng_result     :
+                    AluResult;
 
     CU control_unit (
         .clk(clk),

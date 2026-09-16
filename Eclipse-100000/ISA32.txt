@@ -94,6 +94,9 @@ Privilege and Syscalls
 010010 : SYS             // System Call Exception
 111101 : RETU           // Return to User Mode from Exception
 
+RNGs
+111100 : RNG rx0 //Generates random 32bit value into rx0
+
 
 Format of 64-bit instructions
 Split in 2 words, first word is essentially same as regular 32-bit instructions, but [9:4] is sub-op indicating 64bit operation
@@ -207,3 +210,7 @@ XC7A100T Wukong board provides HDMI compatible display interface;
 XC7A100T Wukong board provides USB to UART serial port by using CH340N;
 XC7A100T Wukong board PCB size is: 9.96cm x 9.96cm;
 Default power source for board is: 2A@5V DC, the DC header type: DC-050, 5.5mmx2.1mm;
+
+Slice LUTs                   3541         3694       63400     5.83
+LUT as logic               3445         3622       63400     5.71
+LUT as memory                96           72       19000     0.38

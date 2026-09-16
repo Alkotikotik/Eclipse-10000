@@ -124,12 +124,14 @@ fn main() -> io::Result<()> {
     opcodes.insert("HIMUL", 0b001101);
 
     opcodes.insert("XOR", 0b000010);
-    opcodes.insert("OR", 0b000110);
+    opcodes.insert("OR",  0b000110);
     opcodes.insert("AND", 0b001110);
     opcodes.insert("NOT", 0b001111);
     opcodes.insert("SHL", 0b001000);
     opcodes.insert("SHR", 0b001100);
     opcodes.insert("SRA", 0b001010);
+
+    opcodes.insert("RNG", 0b111100);
 
     opcodes.insert("LOAD", 0b010001);
     opcodes.insert("LMA", 0b000000);
@@ -397,7 +399,7 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-            "PUSH" | "POP" => {
+            "PUSH" | "POP" | "RNG" => {
                 if tokens.len() > 1 { rx0 = parse_reg(tokens[1]); }
             }
             "RET" | "SYS" | "RETU" | "PAD" => {}
