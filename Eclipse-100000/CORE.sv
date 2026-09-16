@@ -504,10 +504,11 @@ module CORE(
 
     always_ff @(posedge clk) begin //Again - no reset
         rng_result <= rng_result_comb;
-        s[0]   <= s_comb[0];
-        s[1]   <= s_comb[1];
-        s[2]   <= s_comb[2];
-        s[3]   <= s_comb[3];
+
+        s[0] <= s_comb[0] ^ inject;
+        s[1] <= s_comb[1];
+        s[2] <= s_comb[2];
+        s[3] <= s_comb[3];
     end
 
     //== Seeding
@@ -517,10 +518,86 @@ module CORE(
     //Its not exactly 1V it always flactuate at list a little bit, and those flactuations are fairy random.
     //XADC's internal ADC converts those voltages into 12bit digital signal,
     //and according my to assumptions at least 4 LSBs should flactuate randomly.
-    //So I am going to sample 4LSBs of  V_CCINT(main), V_CCAUX(secondary) and V_CCBRAM(bram) and XOR all of
-    //them together at the boot and seed s[array]. Now the thing is XADC is
+    //So I am going to sample 4LSBs of  V_CCINT(main), V_CCAUX(secondary) and V_CCBRAM(bram)
+    //Now the thing is XADC is
     //slow asf so its gonna take about 200us which normaly is horrendous but
-    //since it is 1 time operation on boot it doesn't matter
+    //since it is 1 time operation on boot it doesn't matter.
+    //PS: I was considering adding temp sensor but I don't trust it - in 200us
+    //seed is gonna run temp sensor wouldn't even update, there is suppose to
+    //be some garbage nontheless due to ADC's stuff but nah I don't really trust it.
+
+    logic [15:0] xadc_do;
+    logic [6:0]  xadc_addr;
+    logic        xadc_den, xadc_drdy, xadc_eos, seed_grab;
+    logic [31:0] inject_rng;
+
+    //Inject zero extended 4bits that are read from XADC. This works because
+    //xoshiro128** would just shuffle those 4bits around while fsm waits for
+    //another xadc_rdy.
+    assign inject_rng = seed_grab ? {28'b0, xadc_do[7:4]} : 32'd0;
+    assign seed_grab = (state == WAIT) && xadc_drdy;
+
+    typedef enum logic [1:0] {
+        WAIT,
+        IDLE,
+        SMPL,
+        DONE
+    } seed_states;
+
+    seed_states rng_state;
+
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset)
+            rng_state <= IDLE;
+            xadc_addr <= 7'b01;
+        else begin
+            unique case (rng_state)
+                IDLE: begin
+                    if (xadc_eos) //finally can read
+                        rng_state <= SMPL;
+                    else
+                        rng_state <= IDLE;
+                end
+                SMPL: begin
+                    if (xadc_addr == 7'h06)
+                        xadc_addr <= 7'h01
+                    else if (xadc_addr == 7'h02)
+                        xadc_addr <= 7'h06;
+                    else //xadc_addr == 7'h01
+                        xadc_addr <= 7'h02;
+
+                    xadc_den = 1; //data enable
+                    rng_state <= WAIT;
+                end
+                WAIT: begin
+                    //Literally nothing
+                end
+            endcase
+        end
+    end
+
+    //This is the call to XADC there isn't actually anything phenomenal here
+    //Similar to regular files includes
+    XADC #(
+        .INIT_40(16'h0000), //default mode is fine
+        .INIT_41(16'h0000), //defalt one too
+        .INIT_42(16'h0800)
+    ) xadc_i (
+        .DCLK      (clk),
+        .RESET     (reset),
+        .DADDR     (xadc_addr), //Read specified register
+        .DEN       (xadc_den),
+        .DWE       (1'b0),
+        .DI        (16'h0),
+        .DO        (xadc_do), //Data Out(actually its not just a nice way to remember)
+        .DRDY      (xadc_drdy),
+        .EOS       (xadc_eos),
+        //Some bs we don't care about
+        .VP(1'b0), .VN(1'b0), .VAUXP(16'h0), .VAUXN(16'h0),
+        .CONVST(1'b0), .CONVSTCLK(1'b0),
+        .EOC(), .BUSY(), .CHANNEL(), .OT(), .ALM(), .MUXADDR(),
+        .JTAGBUSY(), .JTAGLOCKED(), .JTAGMODIFIED()
+    );
 
     //== MEM(memory) ==//
     //Work with memory - load, store
