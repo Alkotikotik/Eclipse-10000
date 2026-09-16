@@ -21,14 +21,16 @@
 
 
 ~init:
-    LMA rx3 <- 0x04000000
+    LMA rx3 <- 1000000
     XOR rx0, rx0
 
 ~main:
     RNG -> rx0
-    SHR rx0 >> rx31 + 16
-    STX rx0 -> rx3, rx1 << 0, 0
-    ADD rx1 <- rx1, rx31 + 2
-    JMP ~main
+    SHR rx0 >> rx31 + 28
+    LDX rx4 <- rx31, rx0 << 2, 4000
+    ADD rx4 <- rx4, rx31 + 1
+    STX rx4 -> rx31, rx0 << 2, 4000
+    ADD rx1 <- rx1, rx31 + 1
+    BSEU rx1 <-> rx3 -> ~main
 
 

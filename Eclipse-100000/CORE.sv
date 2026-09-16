@@ -486,10 +486,10 @@ module CORE(
     end
 
     always_comb begin
-        t1 = (s[1] << 2) + s[1];
+        t1 = (s[1] << 2) + s[1];  //Thats just multiplication by 5
         t2 = (t1 << 7) | (t1 >> 25); //32-7
 
-        rng_result_comb = (t2 << 3) + t2;
+        rng_result_comb = (t2 << 3) + t2; //And this is by 9
 
         t = s[1] << 9;
 
@@ -509,6 +509,18 @@ module CORE(
         s[2]   <= s_comb[2];
         s[3]   <= s_comb[3];
     end
+
+    //== Seeding
+    //This is the seeding i mentioned: we are gonna seed initial value using XADC which is a special module on
+    //Artix-7 FPGAs that monitors a lot of stuff like FPGA temprerature, voltages, I/Os and other stuff its
+    //Pretty cool. The thing I care about is voltages - the thing is even though voltage is 1V at all times
+    //Its not exactly 1V it always flactuate at list a little bit, and those flactuations are fairy random.
+    //XADC's internal ADC converts those voltages into 12bit digital signal,
+    //and according my to assumptions at least 4 LSBs should flactuate randomly.
+    //So I am going to sample 4LSBs of  V_CCINT(main), V_CCAUX(secondary) and V_CCBRAM(bram) and XOR all of
+    //them together at the boot and seed s[array]. Now the thing is XADC is
+    //slow asf so its gonna take about 200us which normaly is horrendous but
+    //since it is 1 time operation on boot it doesn't matter
 
     //== MEM(memory) ==//
     //Work with memory - load, store
