@@ -505,7 +505,7 @@ module CORE(
     always_ff @(posedge clk) begin //Again - no reset
         rng_result <= rng_result_comb;
 
-        s[0] <= s_comb[0] ^ inject;
+        s[0] <= (s_comb[0] ^ inject_rng) | {31'b0, finish_seed}; //Ensures it can't be zero
         s[1] <= s_comb[1];
         s[2] <= s_comb[2];
         s[3] <= s_comb[3];
@@ -528,14 +528,9 @@ module CORE(
 
     logic [15:0] xadc_do;
     logic [6:0]  xadc_addr;
-    logic        xadc_den, xadc_drdy, xadc_eos, seed_grab;
+    logic        xadc_den, xadc_drdy, xadc_eos, seed_grab, finish_seed;
     logic [31:0] inject_rng;
-
-    //Inject zero extended 4bits that are read from XADC. This works because
-    //xoshiro128** would just shuffle those 4bits around while fsm waits for
-    //another xadc_rdy.
-    assign inject_rng = seed_grab ? {28'b0, xadc_do[7:4]} : 32'd0;
-    assign seed_grab = (state == WAIT) && xadc_drdy;
+    logic [6:0]  inject_counter;
 
     typedef enum logic [1:0] {
         WAIT,
@@ -546,11 +541,22 @@ module CORE(
 
     seed_states rng_state;
 
+    //Inject zero extended 4bits that are read from XADC. This works because
+    //xoshiro128** would just shuffle those 4bits around while fsm waits for
+    //another xadc_rdy.
+    assign inject_rng = seed_grab ? {28'b0, xadc_do[7:4]} : 32'd0;
+    assign seed_grab = (rng_state == WAIT) && xadc_drdy;
+    assign finish_seed = seed_grab && (inject_counter == 127);
+
+
+
     always_ff @(posedge clk or posedge reset) begin
-        if (reset)
+        if (reset) begin
             rng_state <= IDLE;
-            xadc_addr <= 7'b01;
-        else begin
+            xadc_addr <= 7'b01; //Would actually read 7'h02 on first time
+            //But honest the more chaos in this the better entropy is lol
+            inject_counter <= 0;
+        end else begin
             unique case (rng_state)
                 IDLE: begin
                     if (xadc_eos) //finally can read
@@ -560,19 +566,33 @@ module CORE(
                 end
                 SMPL: begin
                     if (xadc_addr == 7'h06)
-                        xadc_addr <= 7'h01
+                        xadc_addr <= 7'h01;
                     else if (xadc_addr == 7'h02)
                         xadc_addr <= 7'h06;
                     else //xadc_addr == 7'h01
                         xadc_addr <= 7'h02;
 
-                    xadc_den = 1; //data enable
+                    xadc_den <= 1; //data enable
                     rng_state <= WAIT;
                 end
                 WAIT: begin
-                    //Literally nothing
+                    if (xadc_drdy) begin
+                        if (xadc_addr == 7'h06)
+                            rng_state <= IDLE;
+                        else
+                            rng_state <= SMPL;
+                    end
+                end
+                DONE: begin
+                    //Stuck here forever
                 end
             endcase
+            if (grab_seed) begin
+                if (finish_seed) //inject 128 times for the full 128bit inject
+                    rng_state <= DONE;
+                else
+                    inject_counter <= inject_counter + 1;
+            end
         end
     end
 
