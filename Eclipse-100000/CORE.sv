@@ -482,7 +482,7 @@ module CORE(
         s[0] = 32'h923423;
         s[1] = 32'h23408;
         s[2] = 32'h23572395;
-        s[3] = 32'h235732905;
+        s[3] = 32'h2357329;
     end
 
     always_comb begin
@@ -1184,13 +1184,15 @@ module CORE(
     end
 
     //No 3'b001 arm anymore, MEM fixes the load in one cycle later
-    assign GPRs_data_in = //That looks nice
-                    (GPRsSrc == 3'b010) ? EX_PC          :
-                    (GPRsSrc == 3'b011) ? sign_ext_imm18 :
-                    (GPRsSrc == 3'b101) ? memTarget      : //SPRLEA
-                    (GPRsSrc == 3'b110) ? EX_IR_2        :
-                    (GPRsSrc == 3'b111) ? rng_result     :
-                    AluResult;
+    always_comb begin
+        case (GPRsSrc)
+            3'b011:  GPRs_data_in = sign_ext_imm18; //LOAD
+            3'b101:  GPRs_data_in = memTarget; //SPRLEA
+            3'b110:  GPRs_data_in = EX_IR_2; //LMA
+            3'b111:  GPRs_data_in = rng_result; //RNG
+            default: GPRs_data_in = AluResult; //regular
+        endcase
+    end
 
     CU control_unit (
         .clk(clk),

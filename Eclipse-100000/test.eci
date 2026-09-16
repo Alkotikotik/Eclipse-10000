@@ -1,5 +1,34 @@
+#ORG 60
+~JmpBoot:
+	JMP ~boot
+	
+#ORG 100   >_ 0x64 Syscall Vector
+	RETU
+	
+#ORG 104   >_ 0x68 Timer Vector
+	RETU
+	
+#ORG 108   >_ 0x6C Key Interrupt Vector
+	>_JMP ~HandleKey
+	RETU
+	
+#ORG 112   >_ 0x70 Memory Fault Vector
+	RETU
+	
+#ORG 116 >_ 0x74 ZeroDiv
+	RETU
+~boot:
+
+
+~init:
+    LMA rx3 <- 0x04000000
+    XOR rx0, rx0
+
 ~main:
-    PAD
-    PAD
-    RNG -> rx0;
-    STX rx0 -> rx31, rx31 << 0, 4000
+    RNG -> rx0
+    SHR rx0 >> rx31 + 16
+    STX rx0 -> rx3, rx1 << 0, 0
+    ADD rx1 <- rx1, rx31 + 2
+    JMP ~main
+
+
