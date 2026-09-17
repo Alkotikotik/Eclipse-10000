@@ -110,11 +110,10 @@ int main(int argc, char **argv) {
             if (top->rootp->CORE__DOT__isWB_valid) {
                 g_retired_instructions++;
             }
-            if (top->rootp->CORE__DOT__isEX_valid && top->rootp->CORE__DOT__EX_branch) {
+            if (top->rootp->CORE__DOT__isMEM_valid && top->rootp->CORE__DOT__MEM_branch &&
+                !top->rootp->CORE__DOT__MEM_irq && !top->rootp->CORE__DOT__mem_stall) {
                 g_cond_branches++;
-                bool predicted_taken = top->rootp->CORE__DOT__EX_predicted_taken;
-                bool actually_taken = top->rootp->CORE__DOT__was_branch_taken;
-                if (predicted_taken != actually_taken) {
+                if (top->rootp->CORE__DOT__MEM_mispredict) {
                     g_branch_mispredicts++;
                 }
             }

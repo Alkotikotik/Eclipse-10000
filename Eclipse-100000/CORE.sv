@@ -25,20 +25,17 @@ module CORE(
     logic  demolish;   //Removes current instructions on the branch misprediction/branch
     logic  stall;     //Stalls on memory accesses in future but atm on divs
     logic  bubble;   //for handling load-use hazard
-    logic  [31:0] PC_target;
 
     logic  early_target_ok;
     assign early_target_ok = (opcode == 6'b010000) ? (EX_early_target == EX_LR) : (EX_early_target == EX_EPC);
 
     //Basically thats a massive check for unexpected PC change, like branch
     //misprediction, interrupt and JR maybe other but I forgot
-    assign demolish  =  isEX_valid && !mem_stall &&
+    assign demolish  =  isEX_valid && !mem_stall && !MEM_redirect &&
                         (irq_taken ||
                         (PCWrite &&
                         !(opcode == 6'b111111 || opcode == 6'b111000) &&
-                        !((opcode == 6'b010000 || opcode == 6'b111101) && early_target_ok) &&
-                        !(EX_branch && EX_predicted_taken)) ||
-                        (EX_branch && (EX_predicted_taken != was_branch_taken)));
+                        !((opcode == 6'b010000 || opcode == 6'b111101) && early_target_ok)));
 
     assign stall     = div_stall || mem_stall;
     assign bubble    = (mul_use_hazard || load_use_hazard) && !stall; //If we already stall no point in bubble, it also breaks div
@@ -56,7 +53,7 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin
         if (reset) IF_PC <= 32'h0;
         else if(MEM_fault) IF_PC <= memFault ? 32'h00000070 : 32'h00000074;
-        else if(demolish) IF_PC <= PC_target;
+        else if(MEM_redirect) IF_PC <= MEM_redirect_target;
         else if(!stall && !bubble) IF_PC <= IF_PC_next;
         else IF_PC <= IF_PC; //I just can't omit it
     end
@@ -142,8 +139,6 @@ module CORE(
     /* verilator lint_on UNUSEDSIGNAL */
 
     //We gotta check whether branch was actually taken or not
-    logic  was_branch_taken;
-    assign was_branch_taken = PCWrite && (PCSrc == 4'b0000);
 
     //Simple table:
     //00 || 01 - predict not taken
@@ -168,14 +163,14 @@ module CORE(
     //Only read EX_pht_idx rather than combinationally like previousely
     always_ff @(posedge clk) begin
         pht_out <= PHT[pht_read_idx];
-        if (isEX_valid && EX_branch && !mem_stall)
-            PHT[EX_pht_idx] <= updated_pht(EX_pht_val, was_branch_taken);
+        if (isMEM_valid && MEM_branch && !MEM_irq && !mem_stall)
+            PHT[MEM_pht_idx] <= updated_pht(MEM_pht_val, branch_cond_met);
     end
 
     //GHR is still in flops though
     always_ff @(posedge clk or posedge reset) begin
         if (reset) GHR <= 16'b0;
-        else if (isEX_valid && EX_branch && !mem_stall) GHR <= {GHR[14:0], was_branch_taken};
+        else if (isMEM_valid && MEM_branch && !MEM_irq && !mem_stall) GHR <= {GHR[14:0], branch_cond_met};
     end
 
 
@@ -197,7 +192,7 @@ module CORE(
             isID_valid <= 0;
             //Vivado started to complain when I added memFault, but whatever
             //I can just split it into to if blocks
-        end else if (demolish || MEM_fault) begin
+        end else if (MEM_redirect || MEM_fault) begin
             isID_valid <= 0;
         end else if (!stall && !bubble) begin
             isID_valid <= 1'b1;
@@ -293,6 +288,7 @@ module CORE(
     logic [1:0]  EX_pht_val;
     logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
     logic EX_mem_hit0, EX_mem_hit1, EX_mem_hit2, EX_wb_hit0, EX_wb_hit1, EX_wb_hit2;
+    logic EX_banked0, EX_banked1, EX_banked2;
     logic EX_predicted_taken;
     logic isEX_valid;
     logic EX_branch;
@@ -304,7 +300,7 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isEX_valid <= 0;
-        end else if (demolish || bubble || MEM_fault) begin
+        end else if (MEM_redirect || bubble || MEM_fault) begin
             isEX_valid <= 0;
         end else if (!stall) begin
             isEX_valid <= isID_valid;
@@ -328,6 +324,9 @@ module CORE(
 
             //The forwarding check moves to the ID now, only check forwarding itself
             //still stays in EX
+            EX_banked0 <= (ID_rx0[7:3] <= 5'd1);
+            EX_banked1 <= (ID_rx1[7:3] <= 5'd1);
+            EX_banked2 <= (ID_IR_2[31:27] <= 5'd1);
             EX_mem_hit0 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx0[7:3]);
             EX_mem_hit1 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx1[7:3]);
             EX_mem_hit2 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_IR_2[31:27]);
@@ -389,75 +388,9 @@ module CORE(
     assign LDX_idx = FWD_rxi << EX_IR_2[23:22];
     assign LDX_imm29 = {{3{EX_IR[12]}}, EX_IR[12:10], EX_IR[3:0], EX_IR_2[21:0]};
 
-    //== Comparator ==//
-    //Moved the compare module from ALU to here, for 1) shorten critical path,
-    //2) convinience
-    logic [31:0] branch_x, branch_y;
-    logic        branch_eq, branch_less_unsigned, branch_less_signed;
-
-    assign branch_x = FWD_rx0;
-    //2 opcodes for every branch - the one that uses imm, and other uses register
-    //That way we don't have to add imm every time on branch, in fact we never
-    //have to add imm if we are comparing to the varibale, which shortens
-    //critical path, and as a bonus compiler wouldn't need to use rx31 as
-    //a buffer and add imm to it, we can just use big imm19
-    logic [31:0] branch_imm19;
-    //Nice way to sign ext
-    assign branch_imm19 = {{13{rx1[7]}}, rx1, EX_IR[4:0], EX_IR_2[31:26]};
-
-    assign branch_y = (branch_op[4]) ? branch_imm19 : FWD_rx1;
-
-    logic [31:0] branch_mask;
-    always_comb begin
-        unique case (rx0[2:0])
-            3'b001, 3'b010:                 branch_mask = 32'h0000FFFF;
-            3'b011, 3'b100, 3'b101, 3'b110: branch_mask = 32'h000000FF;
-            default:                        branch_mask = 32'hFFFFFFFF;
-        endcase
-    end
-
-    assign branch_eq = (((branch_x ^ branch_y) & branch_mask) == 32'b0);
-    assign branch_less_unsigned = (branch_x < branch_y);
-    //fwd_slice zero extends so signed compares on rz/ry need re extending, as
-    //usual troubles with fragmented, but I love them nontheless
-    function automatic [31:0] br_sext(input [2:0] off, input [31:0] v); //branch sign extend
-        unique case (off)
-            3'b001, 3'b010:                 br_sext = {{16{v[15]}}, v[15:0]};
-            3'b011, 3'b100, 3'b101, 3'b110: br_sext = {{24{v[7]}},  v[7:0]};
-            default:                        br_sext = v;
-        endcase
-    endfunction
-
-    logic [31:0] branch_xs, branch_ys;
-    assign branch_xs = br_sext(rx0[2:0], branch_x);
-    assign branch_ys = (branch_op[4]) ? branch_imm19 : br_sext(rx1[2:0], FWD_rx1);
-    assign branch_less_signed = ($signed(branch_xs) < $signed(branch_ys));
-
-    logic branch_cond_met;
-
-    always_comb begin
-        case (branch_op)
-            5'b00001, 5'b10001: branch_cond_met = branch_eq;  //BEQ/IBEQ
-            5'b00010, 5'b10010: branch_cond_met = !branch_eq; //BNE/IBNE
-
-            5'b00011, 5'b10111: branch_cond_met = !branch_less_unsigned && !branch_eq; // BGU/IBGU
-            5'b00100, 5'b11000: branch_cond_met = branch_less_unsigned;                // BSU/IBSU
-            5'b00111, 5'b11001: branch_cond_met = !branch_less_unsigned;               // BGEU/IBGEU
-            5'b01000, 5'b11010: branch_cond_met = branch_less_unsigned || branch_eq;   // BSEU/IBSUE
-
-            5'b00101, 5'b10011: branch_cond_met = !branch_less_signed && !branch_eq;   // BGS/IBG
-            5'b00110, 5'b10100: branch_cond_met = branch_less_signed;                  // BSS/IBS
-            5'b01001, 5'b10101: branch_cond_met = !branch_less_signed;                 // BGES/IBGE
-            5'b01010, 5'b10110: branch_cond_met = branch_less_signed || branch_eq;     // BSES/IBSE
-
-            default: branch_cond_met = 0;
-        endcase
-    end
-
     //Same this as IF_PC_plus4_or8
     logic [31:0] EX_PC_next;
     assign EX_PC_next = EX_PC + {28'd0, (EX_64 || EX_branch), !(EX_64 || EX_branch), 2'b00};
-    assign PC_target = (EX_branch && EX_predicted_taken && !PCWrite) ? EX_PC_next : PCNext;
 
     //This is forwarding too, EX needs to know the new mode immediately after
     //MEM made the change, becase kernel mode now changes in MEM
@@ -649,6 +582,19 @@ module CORE(
 
     logic MEM_zeroDiv;
 
+    //I moved the decision on whether branch is taken or not to MEM in order
+    //to decrease critical path. This would increase the CPI but from my
+    //testings not that much, at most + 0.03CPI which is the price im willing
+    //to pay.
+    //Even more MEM FFs... shouldn't matter though bc im using only like 2k
+    //out of 100k or so
+    logic        MEM_demolish, MEM_branch, MEM_predicted_taken;
+    logic [31:0] MEM_redirect_pc, MEM_early_target;
+    logic [4:0]  MEM_branch_op;
+    logic [31:0] MEM_branch_x, MEM_branch_y, MEM_branch_xs, MEM_branch_ys, MEM_branch_mask;
+    logic [13:0] MEM_pht_idx;
+    logic [1:0]  MEM_pht_val;
+
     //Moving SPRs stuff into MEM
     logic MEM_SPRWrite;
     logic [31:0] MEM_rx0_val, MEM_SelectedSPR, MEM_activeSP, MEM_activeGP;
@@ -680,10 +626,24 @@ module CORE(
             MEM_gpr_write   <= GPRsWrite;
             MEM_gpr_dest    <= gpr_rw0_sel;
             MEM_kernelMode  <= EX_kernel_mode;
-            isMEM_valid     <= isEX_valid & !stall & !MEM_fault;
+            isMEM_valid     <= isEX_valid & !stall & !MEM_fault & !MEM_redirect;
             MEM_is_lomul    <= (opcode == 6'b000111);
             MEM_is_himul    <= (opcode == 6'b001101);
             MEM_zeroDiv     <= ZeroDivException && !irq_taken;
+
+            MEM_demolish        <= demolish;
+            MEM_redirect_pc     <= PCNext;
+            MEM_branch          <= EX_branch;
+            MEM_predicted_taken <= EX_predicted_taken;
+            MEM_early_target    <= EX_early_target;
+            MEM_branch_op       <= branch_op;
+            MEM_branch_x        <= branch_x;
+            MEM_branch_y        <= branch_y;
+            MEM_branch_xs       <= branch_xs;
+            MEM_branch_ys       <= branch_ys;
+            MEM_branch_mask     <= branch_mask;
+            MEM_pht_idx         <= EX_pht_idx;
+            MEM_pht_val         <= EX_pht_val;
 
             MEM_is_load     <= (GPRsSrc == 3'b001);
             MEM_ram_cs      <= RAM_cs;
@@ -777,6 +737,82 @@ module CORE(
             MEM_val = MEM_result;
     end
 
+    //== Comparator ==//
+    //Moved the compare module from ALU to here, for 1) shorten critical path,
+    //2) convinience
+    //Now I moved it from EX to MEM reason above
+    logic [31:0] branch_x, branch_y;
+    logic        branch_eq, branch_less_unsigned, branch_less_signed;
+
+    assign branch_x = FWD_rx0;
+    //2 opcodes for every branch - the one that uses imm, and other uses register
+    //That way we don't have to add imm every time on branch, in fact we never
+    //have to add imm if we are comparing to the varibale, which shortens
+    //critical path, and as a bonus compiler wouldn't need to use rx31 as
+    //a buffer and add imm to it, we can just use big imm19
+    logic [31:0] branch_imm19;
+    //Nice way to sign ext
+    assign branch_imm19 = {{13{rx1[7]}}, rx1, EX_IR[4:0], EX_IR_2[31:26]};
+
+    assign branch_y = (branch_op[4]) ? branch_imm19 : FWD_rx1;
+
+    logic [31:0] branch_mask;
+    always_comb begin
+        unique case (rx0[2:0])
+            3'b001, 3'b010:                 branch_mask = 32'h0000FFFF;
+            3'b011, 3'b100, 3'b101, 3'b110: branch_mask = 32'h000000FF;
+            default:                        branch_mask = 32'hFFFFFFFF;
+        endcase
+    end
+
+    //fwd_slice zero extends so signed compares on rz/ry need re extending, as
+    //usual troubles with fragmented, but I love them nontheless
+    function automatic [31:0] br_sext(input [2:0] off, input [31:0] v); //branch sign extend
+        unique case (off)
+            3'b001, 3'b010:                 br_sext = {{16{v[15]}}, v[15:0]};
+            3'b011, 3'b100, 3'b101, 3'b110: br_sext = {{24{v[7]}},  v[7:0]};
+            default:                        br_sext = v;
+        endcase
+    endfunction
+
+    logic [31:0] branch_xs, branch_ys;
+    assign branch_xs = br_sext(rx0[2:0], branch_x);
+    assign branch_ys = (branch_op[4]) ? branch_imm19 : br_sext(rx1[2:0], FWD_rx1);
+
+    assign branch_eq = (((MEM_branch_x ^ MEM_branch_y) & MEM_branch_mask) == 32'b0);
+    assign branch_less_unsigned = (MEM_branch_x < MEM_branch_y);
+    assign branch_less_signed = ($signed(MEM_branch_xs) < $signed(MEM_branch_ys));
+
+    logic branch_cond_met;
+
+    always_comb begin
+        case (MEM_branch_op)
+            5'b00001, 5'b10001: branch_cond_met = branch_eq;  //BEQ/IBEQ
+            5'b00010, 5'b10010: branch_cond_met = !branch_eq; //BNE/IBNE
+
+            5'b00011, 5'b10111: branch_cond_met = !branch_less_unsigned && !branch_eq; // BGU/IBGU
+            5'b00100, 5'b11000: branch_cond_met = branch_less_unsigned;                // BSU/IBSU
+            5'b00111, 5'b11001: branch_cond_met = !branch_less_unsigned;               // BGEU/IBGEU
+            5'b01000, 5'b11010: branch_cond_met = branch_less_unsigned || branch_eq;   // BSEU/IBSUE
+
+            5'b00101, 5'b10011: branch_cond_met = !branch_less_signed && !branch_eq;   // BGS/IBG
+            5'b00110, 5'b10100: branch_cond_met = branch_less_signed;                  // BSS/IBS
+            5'b01001, 5'b10101: branch_cond_met = !branch_less_signed;                 // BGES/IBGE
+            5'b01010, 5'b10110: branch_cond_met = branch_less_signed || branch_eq;     // BSES/IBSE
+
+            default: branch_cond_met = 0;
+        endcase
+    end
+
+    logic  [31:0] MEM_redirect_target;
+    //Veril***r compains fsr idk
+    logic  MEM_mispredict /*verilator public_flat_rd*/;
+    logic  MEM_redirect;
+    assign MEM_mispredict = isMEM_valid && MEM_branch && !MEM_irq && (branch_cond_met != MEM_predicted_taken);
+    assign MEM_redirect   = MEM_mispredict || (isMEM_valid && MEM_demolish);
+    assign MEM_redirect_target = MEM_demolish ? MEM_redirect_pc : (branch_cond_met ? MEM_early_target : MEM_PCNext);
+
+
 
     //== WB(WriteBack) ==//
     logic [31:0] WB_result;
@@ -842,10 +878,10 @@ module CORE(
 
     //This checks whether the write in MEM/WB touches the register this read wants
     //Also account for rx0, rx1 banking
-    assign MEM_fwd0 = EX_mem_hit0 && (rx0[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
-    assign WB_fwd0  = EX_wb_hit0  && (rx0[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
-    assign MEM_fwd1 = EX_mem_hit1 && (rx1[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
-    assign WB_fwd1  = EX_wb_hit1  && (rx1[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
+    assign MEM_fwd0 = EX_mem_hit0 && (!EX_banked0 || MEM_kernelMode == EX_kernel_mode);
+    assign WB_fwd0  = EX_wb_hit0  && (!EX_banked0 || WB_kernelMode  == EX_kernel_mode);
+    assign MEM_fwd1 = EX_mem_hit1 && (!EX_banked1 || MEM_kernelMode == EX_kernel_mode);
+    assign WB_fwd1  = EX_wb_hit1  && (!EX_banked1 || WB_kernelMode  == EX_kernel_mode);
     assign MEM_fwd2 = EX_mem_hit2 && (rxi[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
     assign WB_fwd2  = EX_wb_hit2  && (rxi[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
 
@@ -928,9 +964,9 @@ module CORE(
     //yet, so we always just get the KGPRs and then in EX deduce whether we
     //use GPRs or KGPRs
     logic [31:0] EX_gpr0, EX_gpr1, EX_gpr2;
-    assign EX_gpr0 = (rx0[7:3] <= 5'd1 && EX_kernel_mode) ? (rx0[3] ? KGPR1 : KGPR0) : EX_rx0_val;
-    assign EX_gpr1 = (rx1[7:3] <= 5'd1 && EX_kernel_mode) ? (rx1[3] ? KGPR1 : KGPR0) : EX_rx1_val;
-    assign EX_gpr2 = (rxi[7:3] <= 5'd1 && EX_kernel_mode) ? (rxi[3] ? KGPR1 : KGPR0) : EX_rx2_val;
+    assign EX_gpr0 = (EX_banked0 && EX_kernel_mode) ? (rx0[3] ? KGPR1 : KGPR0) : EX_rx0_val;
+    assign EX_gpr1 = (EX_banked1 && EX_kernel_mode) ? (rx1[3] ? KGPR1 : KGPR0) : EX_rx1_val;
+    assign EX_gpr2 = (EX_banked2 && EX_kernel_mode) ? (rxi[3] ? KGPR1 : KGPR0) : EX_rx2_val;
 
 
     //Here automatic comes in play, function gets called more than ones in
@@ -1254,10 +1290,10 @@ module CORE(
         RAM_cs  = 0;
         VRAM_cs = 0;
 
-        if (memTarget <= 32'h03FFFFFF) begin
+        if (memTarget[31:26] == 6'b0) begin //A little optimizations
             RAM_cs = 1;
         end
-        else if (memTarget >= 32'h04000000 && memTarget <= 32'h040FFFFF) begin
+        else if (memTarget[31:20] == 12'h040) begin
             VRAM_cs = 1;
         end
         //Else memFault, not really actually its either IO_cs or memFault,
@@ -1314,12 +1350,10 @@ module CORE(
         .reset(reset),
         .opcode(opcode),
         .op_64(op_64),
-        .branch_op(branch_op),
-        .branch_cond_met(branch_cond_met),
         .mmio_timer_reg(mmio_timer_reg),
         .current_kernel_mode(EX_kernel_mode),
         .key_in(ENC_10K_KeyIn),
-        .isEX_valid(isEX_valid && !MEM_fault && !mem_stall),
+        .isEX_valid(isEX_valid && !MEM_fault && !mem_stall && !MEM_redirect),
         .PCWrite(PCWrite),
         .GPRsWrite(GPRsWrite),
         .EPCWrite(EPCWrite),
@@ -1343,7 +1377,7 @@ module CORE(
         .x(AluMuxX),
         .y(AluMuxY),
         .opcode(AluOpcode),
-        .isDiv_valid(isEX_valid && !irq_taken), //Not demolish bc it has a long of irrelivant data that just slows it dow
+        .isDiv_valid(isEX_valid && !irq_taken && !MEM_redirect), //Not demolish bc it has a long of irrelivant data that just slows it dow
         .mem_stall(mem_stall),
 
         .result(AluResult),

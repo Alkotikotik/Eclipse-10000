@@ -4,8 +4,6 @@ module CU(
 
     input logic [5:0] opcode,
     input logic [5:0] op_64,
-    input logic [4:0] branch_op,
-    input logic branch_cond_met,
 
     input logic [15:0] mmio_timer_reg,
 
@@ -118,9 +116,8 @@ module CU(
                 aluSrcY = 2'b10;
                 aluOpSel = 2'b00;
                 PCSrc = 4'b0000;
-                if (opcode == 6'b110000 && (|branch_op)) begin //64bit fused branches
-                    PCWrite = branch_cond_met;
-                end
+                //The CU no longer decides whether branch was taken, bc its
+                //now in MEM
             end
             2'b01: begin // LOAD-imm
                 if (opcode == 6'b010001) begin

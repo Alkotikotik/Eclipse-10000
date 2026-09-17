@@ -211,6 +211,3 @@ XC7A100T Wukong board provides USB to UART serial port by using CH340N;
 XC7A100T Wukong board PCB size is: 9.96cm x 9.96cm;
 Default power source for board is: 2A@5V DC, the DC header type: DC-050, 5.5mmx2.1mm;
 
-Slice LUTs                   3541         3694       63400     5.83
-LUT as logic               3445         3622       63400     5.71
-LUT as memory                96           72       19000     0.38
