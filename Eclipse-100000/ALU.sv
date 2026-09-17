@@ -6,6 +6,7 @@ module ALU (
     input  logic [5:0] opcode,
     input  logic isDiv_valid,
     input  logic mem_stall,
+    input  logic [4:0] shift_amount, //separate input, should reduct logic levels
 
     output logic [31:0] result,
     output logic [63:0] mul_product,
@@ -46,6 +47,7 @@ module ALU (
     assign add_result = x + add_y + {31'b0, is_sub_op}; //Had to change it, because turns out it does have an effect
     //On the critical path, because instead of just chaining carry4 vivado
     //just added some bs there, eaasy fix though.
+    //
     //==Barrel==// 
     //A left shift is just a right shift with the bits flipped on both ends, and flipping is just writing,
     //actually no LUTs involved
@@ -53,7 +55,7 @@ module ALU (
         for (int i = 0; i < 32; i++) rev32[i] = v[31-i];
     endfunction
 
-    logic is_shl, is_sra;
+    logic  is_shl, is_sra;
     assign is_shl = (opcode == 6'b001000);
     assign is_sra = (opcode == 6'b001010);
 
@@ -65,7 +67,7 @@ module ALU (
     /* verilator lint_off UNUSEDSIGNAL */
     logic [32:0] sh_wide;
     /* verilator lint_on UNUSEDSIGNAL */
-    assign sh_wide = $signed({sh_fill, sh_src}) >>> y[4:0];
+    assign sh_wide = $signed({sh_fill, sh_src}) >>> shift_amount;
 
     logic [31:0] sh_result;
     assign sh_result = is_shl ? rev32(sh_wide[31:0]) : sh_wide[31:0];

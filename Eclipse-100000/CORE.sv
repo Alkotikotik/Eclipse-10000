@@ -397,8 +397,15 @@ module CORE(
 
     //This is forwarding too, EX needs to know the new mode immediately after
     //MEM made the change, becase kernel mode now changes in MEM
+    //In always_ff bc its a flop
     logic  EX_kernel_mode;
-    assign EX_kernel_mode = isMEM_valid ? MEM_mode : KernelMode;
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) EX_kernel_mode <= 0;
+        else EX_kernel_mode <= (!mem_stall && isEX_valid && !stall && !MEM_fault && !MEM_redirect) ? isKernelMode : (MEM_fault || EX_kernel_mode);
+    end
+
+    logic [4:0] shift_amount;
+    assign shift_amount = FWD_rx1[4:0] + EX_IR[4:0];
 
 
     //== RNG ==//
@@ -578,7 +585,6 @@ module CORE(
     logic        MEM_EPCWrite;
     logic        MEM_irq;
     logic [31:0] MEM_PCNext;
-    logic        MEM_mode;
 
     logic MEM_is_lomul, MEM_is_himul;
     logic MEM_is_load, MEM_ram_cs, MEM_io_cs, MEM_vram_cs;
@@ -624,7 +630,6 @@ module CORE(
             MEM_EPCWrite    <= EPCWrite;
             MEM_irq         <= irq_taken;
             MEM_PCNext      <= EX_PC_next;
-            MEM_mode        <= isKernelMode;
 
             MEM_gpr_write   <= GPRsWrite;
             MEM_gpr_dest    <= gpr_rw0_sel;
@@ -1038,7 +1043,6 @@ module CORE(
     logic [2:0] GPRsSrc;
     logic [2:0] SPRSrc;
 
-    logic KernelMode;
     logic EPCWrite;
     logic irq_taken;
     logic isKernelMode;
@@ -1200,7 +1204,6 @@ module CORE(
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
-            KernelMode <= 0;
             SP <= 32'h03FFFFF0;
             KSP <= 32'h000000FC;
             LR  <= 32'd0;
@@ -1218,11 +1221,9 @@ module CORE(
 
             if (MEM_fault) begin
                 EPC <= MEM_PC;
-                KernelMode <= 1;
             end else begin
                 if (isMEM_valid && !mem_stall) begin //Its now MEM bounded because, again, mode switch happens in MEM
                     if (MEM_EPCWrite) EPC <= MEM_irq ? MEM_PC : MEM_PCNext;
-                    KernelMode <= MEM_mode;
 
                     if (MEM_is_call) begin
                         LR <= MEM_PCNext;
@@ -1379,6 +1380,7 @@ module CORE(
         .opcode(AluOpcode),
         .isDiv_valid(isEX_valid && !irq_taken && !MEM_redirect), //Not demolish bc it has a long of irrelivant data that just slows it dow
         .mem_stall(mem_stall),
+        .shift_amount(shift_amount),
 
         .result(AluResult),
         .mul_product(mul_product),
