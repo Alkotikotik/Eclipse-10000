@@ -114,7 +114,7 @@ module ALU (
     assign div_req = is_div && isDiv_valid;
 
     logic  div_start;
-    assign div_start = div_req && !div_working && !div_finished && !div_init;
+    assign div_start = div_req && !div_working && !div_finished && !div_init && !div_init2 && !div_init3;
     assign div_stall = div_req && !div_finished;
 
     logic  is_signed_div;
@@ -126,33 +126,36 @@ module ALU (
     //Latch x and y on the start of div to basically half the critical path.
     //Thsi would add 1 cycle to every div, but quite frankly it doesn't matter
     logic [31:0] x_div, y_div;
-    logic div_init;
+    logic div_init, div_init2, div_init3;
 
     logic [31:0] x_nice, y_nice; //Idk how to name it, it basically just works for everything - 
     //Full registers, fragmeted, signed, unsigned etc
     assign x_nice = (is_signed_div && x_div[31]) ? (~x_div + 32'd1) : x_div;
     assign y_nice = (is_signed_div && y_div[31]) ? (~y_div + 32'd1) : y_div;
 
+    logic [31:0] x_abs, y_abs;
+    logic [33:0] y3_abs;
+
     //We split each signal into 8 4bit slices and check whether they are 0
     logic [4:0] clz_x;
     logic [4:0] clz_y;
 
-    assign clz_x[4:2] = (|x_nice[31:28]) ? 3'b000 :
-                        (|x_nice[27:24]) ? 3'b001 :
-                        (|x_nice[23:20]) ? 3'b010 :
-                        (|x_nice[19:16]) ? 3'b011 :
-                        (|x_nice[15:12]) ? 3'b100 :
-                        (|x_nice[11:8])  ? 3'b101 :
-                        (|x_nice[7:4])   ? 3'b110 :
+    assign clz_x[4:2] = (|x_abs[31:28]) ? 3'b000 :
+                        (|x_abs[27:24]) ? 3'b001 :
+                        (|x_abs[23:20]) ? 3'b010 :
+                        (|x_abs[19:16]) ? 3'b011 :
+                        (|x_abs[15:12]) ? 3'b100 :
+                        (|x_abs[11:8])  ? 3'b101 :
+                        (|x_abs[7:4])   ? 3'b110 :
                         3'b111;
 
-    assign clz_y[4:2] = (|y_nice[31:28]) ? 3'b000 :
-                        (|y_nice[27:24]) ? 3'b001 :
-                        (|y_nice[23:20]) ? 3'b010 :
-                        (|y_nice[19:16]) ? 3'b011 :
-                        (|y_nice[15:12]) ? 3'b100 :
-                        (|y_nice[11:8])  ? 3'b101 :
-                        (|y_nice[7:4])   ? 3'b110 :
+    assign clz_y[4:2] = (|y_abs[31:28]) ? 3'b000 :
+                        (|y_abs[27:24]) ? 3'b001 :
+                        (|y_abs[23:20]) ? 3'b010 :
+                        (|y_abs[19:16]) ? 3'b011 :
+                        (|y_abs[15:12]) ? 3'b100 :
+                        (|y_abs[11:8])  ? 3'b101 :
+                        (|y_abs[7:4])   ? 3'b110 :
                         3'b111;
 
     //veril***r checks for bits and a lot are unused in that design
@@ -162,14 +165,14 @@ module ALU (
     /* verilator lint_on UNUSEDSIGNAL */
     always_comb begin
         unique case (clz_x[4:2])
-            3'd0: sub_clz_x = x_nice[31:28];
-            3'd1: sub_clz_x = x_nice[27:24];
-            3'd2: sub_clz_x = x_nice[23:20];
-            3'd3: sub_clz_x = x_nice[19:16];
-            3'd4: sub_clz_x = x_nice[15:12];
-            3'd5: sub_clz_x = x_nice[11:8];
-            3'd6: sub_clz_x = x_nice[7:4];
-            3'd7: sub_clz_x = x_nice[3:0];
+            3'd0: sub_clz_x = x_abs[31:28];
+            3'd1: sub_clz_x = x_abs[27:24];
+            3'd2: sub_clz_x = x_abs[23:20];
+            3'd3: sub_clz_x = x_abs[19:16];
+            3'd4: sub_clz_x = x_abs[15:12];
+            3'd5: sub_clz_x = x_abs[11:8];
+            3'd6: sub_clz_x = x_abs[7:4];
+            3'd7: sub_clz_x = x_abs[3:0];
         endcase
     end
 
@@ -180,14 +183,14 @@ module ALU (
     /* verilator lint_on UNUSEDSIGNAL */
     always_comb begin
         unique case (clz_y[4:2])
-            3'd0: sub_clz_y = y_nice[31:28];
-            3'd1: sub_clz_y = y_nice[27:24];
-            3'd2: sub_clz_y = y_nice[23:20];
-            3'd3: sub_clz_y = y_nice[19:16];
-            3'd4: sub_clz_y = y_nice[15:12];
-            3'd5: sub_clz_y = y_nice[11:8];
-            3'd6: sub_clz_y = y_nice[7:4];
-            3'd7: sub_clz_y = y_nice[3:0];
+            3'd0: sub_clz_y = y_abs[31:28];
+            3'd1: sub_clz_y = y_abs[27:24];
+            3'd2: sub_clz_y = y_abs[23:20];
+            3'd3: sub_clz_y = y_abs[19:16];
+            3'd4: sub_clz_y = y_abs[15:12];
+            3'd5: sub_clz_y = y_abs[11:8];
+            3'd6: sub_clz_y = y_abs[7:4];
+            3'd7: sub_clz_y = y_abs[3:0];
         endcase
     end
 
@@ -198,8 +201,7 @@ module ALU (
     /* verilator lint_on UNUSEDSIGNAL */
     assign div_shift = {1'b0, clz_y} - {1'b0, clz_x}; //[5] if y > x
 
-    logic [31:0] sd_init;
-    assign sd_init = y_nice << {div_shift[4:1], 1'b0};
+    logic [4:0] div_shift_r;
 
 
     //Thats a whole ass main logic
@@ -214,32 +216,52 @@ module ALU (
 
     assign count_fits = ~sub3[34] ? 2'd3 : ~sub2[34] ? 2'd2 : ~sub1[34] ? 2'd1 : 2'd0;
 
-    
-
+    //Holy shit that looks scary didn't even realize while writing.
+    //So lemme explain: the div is split into 4 main phases.
+    //First 3phases are inits, I split them into 3 to reduce
+    //critical path. Previosely it all happened in 1 init cycle
+    //Fourth phase, though, is the actual divider loop I explained earlier.
+    //That unfortunately means div would take 3cycle more than it would have
+    //without inits, but its a worth price to pay for 6.5ns.
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             div_working  <= 1'b0;
             div_finished <= 1'b0;
             div_init     <= 1'b0;
+            div_init2    <= 1'b0;
+            div_init3    <= 1'b0;
         end else if (mem_stall) begin //literally do nothing on mem_stall
+        end else if ((div_init || div_init2 || div_init3 || div_working) && !div_req) begin
+            div_init     <= 1'b0;
+            div_init2    <= 1'b0;
+            div_init3    <= 1'b0;
+            div_working  <= 1'b0;
+            div_finished <= 1'b0;
         end else if (div_start) begin
             x_div <= x;
             y_div <= y;
             div_init <= 1'b1;
         end else if (div_init) begin
-            remainder <= x_nice;
-            quotinent <= 32'b0;
+            x_abs <= x_nice;
+            y_abs <= y_nice;
             is_neg_quotinent <= is_signed_div && (x_div[31] ^ y_div[31]);
             is_neg_remainder <= is_signed_div && x_div[31];
-            sd <= sd_init;
-            sd3 <= {2'b00, sd_init} + {1'b0, sd_init, 1'b0};
-            div_cycles_left <= div_shift[4:1];
-            div_working <= !div_shift[5]; //Read above
-            div_finished <= div_shift[5];
             div_init <= 1'b0;
-        end else if (div_working && !div_req) begin
-            div_working  <= 1'b0;
-            div_finished <= 1'b0;
+            div_init2 <= 1'b1;
+        end else if (div_init2) begin
+            remainder <= x_abs;
+            quotinent <= 32'b0;
+            div_shift_r <= div_shift[5:1];
+            y3_abs <= {2'b00, y_abs} + {1'b0, y_abs, 1'b0};
+            div_init2 <= 1'b0;
+            div_init3 <= 1'b1;
+        end else if (div_init3) begin
+            sd <= y_abs << {div_shift_r[3:0], 1'b0};
+            sd3 <= y3_abs << {div_shift_r[3:0], 1'b0};
+            div_cycles_left <= div_shift_r[3:0];
+            div_working <= !div_shift_r[4]; //Read above
+            div_finished <= div_shift_r[4];
+            div_init3 <= 1'b0;
         end else if (div_working) begin
             remainder <=(count_fits == 2'd3) ? sub3[31:0] :
                         (count_fits == 2'd2) ? sub2[31:0] :
