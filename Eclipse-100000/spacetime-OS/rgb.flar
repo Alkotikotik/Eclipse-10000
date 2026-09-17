@@ -1,0 +1,57 @@
+>_Essentially a better version of render.flar bc im writing 2 pixels at ones
+inline[
+    #ORG 60
+    ~JmpBoot:
+        JMP ~boot
+
+    #ORG 100   >_ 0x64 Syscall Vector
+        RETU
+
+    #ORG 104   >_ 0x68 Timer Vector
+        RETU
+
+    #ORG 108   >_ 0x6C Key Interrupt Vector
+        JMP ~HandleKey
+        >_RETU
+
+    #ORG 112   >_ 0x70 Memory Fault Vector
+        RETU
+    ~boot:
+outline];
+
+func main() {
+    u32 ptr = 0x04000000;
+
+    u16 px0 = 0;
+    u16 px1 = 0;
+
+    u8 phase = 0;
+
+    while [true] {
+        u32 color = (px0 << 16) | px1;
+        [ptr] = color;
+        ptr = ptr + 4;
+
+        if [phase == 0] {
+            px0 += 1;
+            px1 -= (1 << 8);
+            if [px0 == 15] {
+                phase = 1;
+            }
+        }
+        else if [phase == 1] {
+            px0 -= 1;
+            px1 += (1 << 8);
+            if [px1 >= 239] {
+                phase = 2;
+            }
+        }
+        else if [phase == 2] {
+            px1 -= (1 << 8);
+            px0 += (1 << 8);
+            if [px0 >= 239] {
+                phase = 0;
+            }
+        }
+    }
+}

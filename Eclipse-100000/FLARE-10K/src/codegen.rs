@@ -2305,7 +2305,14 @@ impl<'a> Codegen<'a> {
         out: &mut Vec<AsmInst>,
     ) {
         let dest_asm = self.operand_to_asm(dest);
-        let left_asm = self.operand_to_asm(left);
+
+        //rx31 is pinned to 0 for the (rx1 + imm10) form, so a const left has to go through rx30
+        let left_asm = if is_const(left) {
+            load_const(rx30_reg(), const_val(left), out);
+            rx30()
+        } else {
+            self.operand_to_asm(left)
+        };
 
         let mut used_rx31 = false;
         let (rx1, imm10) = if is_const(right) && fits(const_val(right) as i64, 10, false) {

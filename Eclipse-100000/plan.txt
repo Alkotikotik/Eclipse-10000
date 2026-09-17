@@ -8,6 +8,10 @@
 [/]Add multi-core
 [/]Switch to 1024x600 display
 
+Bugs:
+5 more cycles than needed on random check
+FLARE-10K pinned register work weird, when pinned u16 to ry90 it changed behaviour
+
 
 Verilator commands:
 Regular:

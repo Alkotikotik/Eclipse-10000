@@ -20,53 +20,30 @@
 	XOR [rx30, rx30]
 
 ~main:
-	LMA rx26 <- 67108864
-	LOAD rx30 <- 4096
-	LOAD rx31 <- 11
-	STR rx31 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	XOR [rx31, rx31 0]
-	LOAD rx29 <- 0
-	LOAD rz290 <- 15
-	LOAD rz291 <- 0
-	LOAD rz292 <- 0
-	LOAD rz293 <- 15
-	LOAD rz250 <- 0
+	LMA rx27 <- 67108864
+	LOAD ry281 <- 0
+	LOAD ry280 <- 0
+	LOAD rz260 <- 0
 
 ~Lab_while_start_0:
-	LOAD rx30 <- 4092
-	LOAD rx31 <- 12
-	STR rx31 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	XOR [rx31, rx31 0]
-	MOV rz280 <- rz290 0
-	MOV rx27 <- rz280 0
-	SHL [rx27, rx31 12]
-	MOV rz280 <- rz291 0
-	MOV rx28 <- rz280 0
-	SHL [rx28, rx31 8]
-	OR  [rx27, rx28 0]
-	MOV rz280 <- rz292 0
-	MOV rx28 <- rz280 0
-	SHL [rx28, rx31 4]
-	OR  [rx27, rx28 0]
-	MOV rz280 <- rz293 0
-	MOV rx31 <- rz280 0
-	MOV rx28 <- rx27 0
-	OR  [rx28, rx31 0]
-	XOR [rx31, rx31 0]
-	STR rx28 -> [rx26 0]
-	ADD rx26 <- [rx26, rx31 2]
+	MOV rx29 <- ry281 0
+	SHL [rx29, rx31 16]
+	OR  [rx29, ry280 0]
+	STR rx29 -> [rx27 0]
+	LOAD rx30 <- 4
+	ADD rx27 <- [rx27, rx30 0]
 
-	IBNE <-< [rz250 <-> 0] >-> ~Lab_else_2
+	IBNE <-< [rz260 <-> 0] >-> ~Lab_else_2
 
-	SUB rz290 <- [rz290, rx31 1]
-	ADD rz291 <- [rz291, rx31 1]
-	MOV rz280 <- rz291 0
+	ADD ry281 <- [ry281, rx31 1]
+	LOAD rx30 <- 1
+	MOV rx29 <- rx30 0
+	SHL [rx29, rx31 8]
+	SUB ry280 <- [ry280, rx29 0]
 
-	IBNE <-< [rz280 <-> 15] >-> ~Lab_endif_5
+	IBNE <-< [ry281 <-> 15] >-> ~Lab_endif_5
 
-	LOAD rz250 <- 1
+	LOAD rz260 <- 1
 
 ~Lab_endif_5:
 	JMP -> ~Lab_endif_3
@@ -74,15 +51,17 @@
 
 ~Lab_else_2:
 
-	IBNE <-< [rz250 <-> 1] >-> ~Lab_else_6
+	IBNE <-< [rz260 <-> 1] >-> ~Lab_else_6
 
-	SUB rz291 <- [rz291, rx31 1]
-	ADD rz292 <- [rz292, rx31 1]
-	MOV rz280 <- rz292 0
+	SUB ry281 <- [ry281, rx31 1]
+	LOAD rx30 <- 1
+	MOV rx29 <- rx30 0
+	SHL [rx29, rx31 8]
+	ADD ry280 <- [ry280, rx29 0]
 
-	IBNE <-< [rz280 <-> 15] >-> ~Lab_endif_9
+	IBSU <-< [ry280 <-> 239] >-> ~Lab_endif_9
 
-	LOAD rz250 <- 2
+	LOAD rz260 <- 2
 
 ~Lab_endif_9:
 	JMP -> ~Lab_endif_7
@@ -90,15 +69,20 @@
 
 ~Lab_else_6:
 
-	IBNE <-< [rz250 <-> 2] >-> ~Lab_endif_11
+	IBNE <-< [rz260 <-> 2] >-> ~Lab_endif_11
 
-	SUB rz292 <- [rz292, rx31 1]
-	ADD rz290 <- [rz290, rx31 1]
-	MOV rz280 <- rz290 0
+	LOAD rx30 <- 1
+	MOV rx29 <- rx30 0
+	SHL [rx29, rx31 8]
+	SUB ry280 <- [ry280, rx29 0]
+	LOAD rx30 <- 1
+	MOV rx29 <- rx30 0
+	SHL [rx29, rx31 8]
+	ADD ry281 <- [ry281, rx29 0]
 
-	IBNE <-< [rz280 <-> 15] >-> ~Lab_endif_13
+	IBSU <-< [ry281 <-> 239] >-> ~Lab_endif_13
 
-	LOAD rz250 <- 0
+	LOAD rz260 <- 0
 
 ~Lab_endif_13:
 
@@ -107,11 +91,6 @@
 ~Lab_endif_7:
 
 ~Lab_endif_3:
-	LOAD rx30 <- 4088
-	LOAD rx31 <- 13
-	STR rx31 -> [rx30 0]
-	XOR [rx30, rx30 0]
-	XOR [rx31, rx31 0]
 	JMP -> ~Lab_while_start_0
 
 
