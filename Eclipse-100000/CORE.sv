@@ -366,6 +366,9 @@ module CORE(
     logic [31:0] sign_ext_imm16;
     assign sign_ext_imm16 = { {16{EX_IR[15]}}, EX_IR[15:0] };
 
+    logic [31:0] spr_operand;
+    assign spr_operand = FWD_rx0 + sign_ext_imm16;
+
     //Is it useless? Absolutely not, imagine it for "for" loops
     logic [31:0] sign_ext_imm2;
 
@@ -598,7 +601,7 @@ module CORE(
     //Moving SPRs stuff into MEM
     logic MEM_SPRWrite;
     logic [31:0] MEM_rx0_val, MEM_SelectedSPR, MEM_activeSP, MEM_activeGP;
-    logic [15:0] MEM_imm16;
+    logic [31:0] MEM_spr_operand;
     logic [2:0]  MEM_push_pop_bytes, MEM_SPRSrc;
     logic [1:0]  MEM_spr_target_sel;
     logic MEM_is_call;
@@ -655,7 +658,7 @@ module CORE(
             MEM_push_pop_bytes <= push_pop_bytes;
             //Active is kinda a weird word, looks kinda strange
             MEM_rx0_val     <= FWD_rx0;
-            MEM_imm16       <= EX_IR[15:0];
+            MEM_spr_operand <= spr_operand;
             MEM_is_call     <= isCallState && (opcode ==6'b111000); //CALL
         end
     end
@@ -1170,17 +1173,14 @@ module CORE(
         endcase
     end
 
-    logic [31:0] MEM_sign_ext_imm16;
-    assign MEM_sign_ext_imm16 = { {16{MEM_imm16[15]}}, MEM_imm16 };
-
     always_comb begin
         unique case (MEM_SPRSrc)
             3'b000:  SPRNext = MEM_SelectedSPR;                        // hold
             3'b011:  SPRNext = MEM_rx0_val;                            // SPRSET
             3'b100:  SPRNext = MEM_activeSP - {29'd0, MEM_push_pop_bytes}; // PUSH
             3'b101:  SPRNext = MEM_activeSP + {29'd0, MEM_push_pop_bytes}; // POP
-            3'b110:  SPRNext = MEM_SelectedSPR + (MEM_rx0_val + MEM_sign_ext_imm16); // SPRADD
-            3'b111:  SPRNext = MEM_SelectedSPR - (MEM_rx0_val + MEM_sign_ext_imm16); // SPRSUB
+            3'b110:  SPRNext = MEM_SelectedSPR + MEM_spr_operand; // SPRADD
+            3'b111:  SPRNext = MEM_SelectedSPR - MEM_spr_operand; // SPRSUB
             default: SPRNext = MEM_SelectedSPR;
         endcase
     end
@@ -1414,7 +1414,7 @@ module CORE(
         .data_in(MEM_ram_data_in),
         .byte_enable(MEM_ram_byte_enable),
         .mem_write(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid && mem_ready),
-        .mem_read(mem_stall ? (MEM_memRead && MEM_ram_cs) : (memRead && RAM_cs)), //Same thing
+        .mem_read(mem_stall ? MEM_memRead : memRead), //Same thing
         .data_out(ram_data_out),
 
         .instr_address(IF_PC),
@@ -1428,7 +1428,7 @@ module CORE(
         .data_in(vram_data_out),
         .byte_enable(MEM_ram_byte_enable),
         .mem_write(vram_write),
-        .mem_read(mem_stall ? (MEM_memRead && MEM_vram_cs) : (memRead && VRAM_cs)),
+        .mem_read(mem_stall ? MEM_memRead : memRead),
         .data_out(vram_data_read)
     );
 
