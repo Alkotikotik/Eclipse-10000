@@ -526,7 +526,9 @@ module CORE(
     //seed is gonna run temp sensor wouldn't even update, there is suppose to
     //be some garbage nontheless due to ADC's stuff but nah I don't really trust it.
 
-    logic [15:0] xadc_do;
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [15:0] xadc_do; //Only 4bits are used
+    /* verilator lint_on UNUSEDSIGNAL */
     logic [6:0]  xadc_addr;
     logic        xadc_den, xadc_drdy, xadc_eos, seed_grab, finish_seed;
     logic [31:0] inject_rng;
@@ -556,7 +558,9 @@ module CORE(
             xadc_addr <= 7'b01; //Would actually read 7'h02 on first time
             //But honest the more chaos in this the better entropy is lol
             inject_counter <= 0;
+            xadc_den <= 0;
         end else begin
+            xadc_den <= 0; //So it stays high only for 1 cycle
             unique case (rng_state)
                 IDLE: begin
                     if (xadc_eos) //finally can read
@@ -587,7 +591,7 @@ module CORE(
                     //Stuck here forever
                 end
             endcase
-            if (grab_seed) begin
+            if (seed_grab) begin
                 if (finish_seed) //inject 128 times for the full 128bit inject
                     rng_state <= DONE;
                 else
@@ -598,6 +602,7 @@ module CORE(
 
     //This is the call to XADC there isn't actually anything phenomenal here
     //Similar to regular files includes
+    /* verilator lint_off PINCONNECTEMPTY */
     XADC #(
         .INIT_40(16'h0000), //default mode is fine
         .INIT_41(16'h0000), //defalt one too
@@ -618,6 +623,7 @@ module CORE(
         .EOC(), .BUSY(), .CHANNEL(), .OT(), .ALM(), .MUXADDR(),
         .JTAGBUSY(), .JTAGLOCKED(), .JTAGMODIFIED()
     );
+    /* verilator lint_on PINCONNECTEMPTY */
 
     //== MEM(memory) ==//
     //Work with memory - load, store
