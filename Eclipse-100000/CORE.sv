@@ -715,7 +715,7 @@ module CORE(
 
     assign mem_ready = !(store_load_overlap && !MEM_reread);
 
-    assign mem_stall = isMEM_valid && (MEM_memRead || MEM_memWrite) && !memViolation && !mem_ready;
+    assign mem_stall = isMEM_valid && (MEM_memRead || MEM_memWrite) && !mem_ready; //Writes are gates by memViolation anyways
 
     logic [31:0] mem_read_data;
     logic [31:0] vram_data_read;
