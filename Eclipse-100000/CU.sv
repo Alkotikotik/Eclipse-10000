@@ -42,7 +42,7 @@ module CU(
 
     //== CU ==//
     //So since I got rid of FSM CU currentely acts as purely decoding circuit
-    //It executes in the EX
+    //It runs in the EX
 
     logic [15:0] counter;
     logic timer_interrupt_pending;

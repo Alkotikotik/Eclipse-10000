@@ -4,6 +4,9 @@ module ALU (
     input  logic [31:0] x,
     input  logic [31:0] y,
     input  logic [5:0] opcode,
+    input  logic [31:0] imm2,
+    input  logic [2:0] x_fragment,
+    input  logic [2:0] y_fragment,
     input  logic isDiv_valid,
     input  logic mem_stall,
     input  logic [4:0] shift_amount, //separate input, should reduct logic levels
@@ -28,7 +31,7 @@ module ALU (
     always_ff @(posedge clk) begin //No reset :(
         if (!mem_stall) begin //vivado maps it onto DSP register input ports, meaning they freeze on mem_stall
             mul_x <= x;
-            mul_y <= y;
+            mul_y <= y + imm2; //moved + imm2 to here this should reduce critical path
             mul_product <= mul_x * mul_y;
         end
     end
@@ -44,7 +47,10 @@ module ALU (
     assign add_y = is_sub_op ? ~y : y;
 
     logic [31:0] add_result;
-    assign add_result = x + add_y + {31'b0, is_sub_op}; //Had to change it, because turns out it does have an effect
+    logic [31:0] add_imm;
+    assign add_imm = is_sub_op ? (32'd1 - imm2) : imm2;
+
+    assign add_result = x + add_y + add_imm; //Had to change it, because turns out it does have an effect
     //On the critical path, because instead of just chaining carry4 vivado
     //just added some bs there, eaasy fix though.
 
@@ -59,10 +65,21 @@ module ALU (
     assign is_shl = (opcode == 6'b001000);
     assign is_sra = (opcode == 6'b001010);
 
+    function automatic [31:0] frag_sext(input [2:0] fragment, input [31:0] v);
+        unique case (fragment)
+            3'b001, 3'b010:                 frag_sext = {{16{v[15]}}, v[15:0]};
+            3'b011, 3'b100, 3'b101, 3'b110: frag_sext = {{24{v[7]}},  v[7:0]};
+            default:                        frag_sext = v;
+        endcase
+    endfunction
+
+    logic [31:0] x_sext;
+    assign x_sext = frag_sext(x_fragment, x);
+
     logic [31:0] sh_src;
     logic        sh_fill;
-    assign sh_src  = is_shl ? rev32(x) : x;
-    assign sh_fill = is_sra & x[31];  //33rd bit carries the sign for SRA
+    assign sh_src  = is_shl ? rev32(x) : (is_sra ? x_sext : x);
+    assign sh_fill = is_sra & x_sext[31];  //33rd bit carries the sign for SRA
 
     /* verilator lint_off UNUSEDSIGNAL */
     logic [32:0] sh_wide;
@@ -238,8 +255,8 @@ module ALU (
             div_working  <= 1'b0;
             div_finished <= 1'b0;
         end else if (div_start) begin
-            x_div <= x;
-            y_div <= y;
+            x_div <= is_signed_div ? x_sext : x;
+            y_div <= (is_signed_div ? frag_sext(y_fragment, y) : y) + imm2;
             div_init <= 1'b1;
         end else if (div_init) begin
             x_abs <= x_nice;

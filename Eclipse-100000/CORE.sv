@@ -289,10 +289,13 @@ module CORE(
     logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
     logic EX_mem_hit0, EX_mem_hit1, EX_mem_hit2, EX_wb_hit0, EX_wb_hit1, EX_wb_hit2;
     logic EX_banked0, EX_banked1, EX_banked2;
+    logic [7:0] EX_pick0, EX_pick1, EX_pick2;
+    logic [3:0] EX_keep0, EX_keep1, EX_keep2;
     logic EX_predicted_taken;
     logic isEX_valid;
     logic EX_branch;
     logic EX_64;
+    logic [3:0] EX_lanes;
 
     //Alright so there was a big always_ff block here previousely, which
     //apparantely led to high fanout, so just splitting it into 2 always_ff
@@ -327,6 +330,12 @@ module CORE(
             EX_banked0 <= (ID_rx0[7:3] <= 5'd1);
             EX_banked1 <= (ID_rx1[7:3] <= 5'd1);
             EX_banked2 <= (ID_IR_2[31:27] <= 5'd1);
+            EX_pick0 <= slice_pick(ID_rx0[2:0]);
+            EX_pick1 <= slice_pick(ID_rx1[2:0]);
+            EX_pick2 <= slice_pick(ID_IR_2[26:24]);
+            EX_keep0 <= slice_keep(ID_rx0[2:0]);
+            EX_keep1 <= slice_keep(ID_rx1[2:0]);
+            EX_keep2 <= slice_keep(ID_IR_2[26:24]);
             EX_mem_hit0 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx0[7:3]);
             EX_mem_hit1 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx1[7:3]);
             EX_mem_hit2 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_IR_2[31:27]);
@@ -340,7 +349,9 @@ module CORE(
     logic [5:0] opcode;
     logic [5:0] op_64;
     logic [4:0] branch_op; //32 possible branches
+    /* verilator lint_off UNUSEDSIGNAL */
     logic [7:0] rx0, rx1, rx2, rxi; //rxi for LDX/STX, a lot of special stuff for it, But I love them nontheless(for that reason too)
+    /* verilator lint_on UNUSEDSIGNAL */
     logic [11:0] immediate;
     logic [31:0] j_imm_signed;
 
@@ -366,8 +377,6 @@ module CORE(
     logic [31:0] sign_ext_imm16;
     assign sign_ext_imm16 = { {16{EX_IR[15]}}, EX_IR[15:0] };
 
-    logic [31:0] spr_operand;
-    assign spr_operand = FWD_rx0 + sign_ext_imm16;
 
     //Is it useless? Absolutely not, imagine it for "for" loops
     logic [31:0] sign_ext_imm2;
@@ -381,6 +390,13 @@ module CORE(
         endcase
     end
 
+
+    logic  is_imm2_op;
+    assign is_imm2_op = (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111 ||
+                         opcode == 6'b000101 || opcode == 6'b001001 || opcode == 6'b001011);
+
+    logic [31:0] alu_imm2;
+    assign alu_imm2 = is_imm2_op ? sign_ext_imm2 : 32'd0;
 
     logic[31:0] LDX_base, LDX_idx, LDX_imm29; //Just enough to cover all 256MB signed
 
@@ -610,8 +626,8 @@ module CORE(
     //Moving SPRs stuff into MEM
     logic MEM_SPRWrite;
     logic [31:0] MEM_rx0_val, MEM_SelectedSPR, MEM_activeSP, MEM_activeGP;
-    logic [31:0] MEM_spr_operand;
-    logic [2:0]  MEM_push_pop_bytes, MEM_SPRSrc;
+    logic [31:0] MEM_spr_result;
+    logic [2:0]  MEM_SPRSrc;
     logic [1:0]  MEM_spr_target_sel;
     logic MEM_is_call;
 
@@ -666,14 +682,16 @@ module CORE(
             MEM_SPRWrite    <= SPRWrite;
             MEM_SPRSrc      <= SPRSrc;
             MEM_spr_target_sel <= spr_target_sel;
-            MEM_push_pop_bytes <= push_pop_bytes;
             //Active is kinda a weird word, looks kinda strange
             MEM_rx0_val     <= FWD_rx0;
-            MEM_spr_operand <= spr_operand;
+            MEM_spr_result  <= spr_result;
             MEM_is_call     <= isCallState && (opcode ==6'b111000); //CALL
 
             MEM_irq_timer <= timer_interrupt_taken;
             MEM_irq_key   <= key_interrupt_taken;
+
+            MEM_lanes     <= EX_lanes;
+            MEM_aligned   <= fwd_align(gpr_rw0_sel[2:0], GPRs_data_in);
         end
     end
 
@@ -738,8 +756,7 @@ module CORE(
 
     logic [31:0] MEM_aligned;
     logic [3:0]  MEM_lanes;
-    assign MEM_aligned = fwd_align(MEM_gpr_dest[2:0], MEM_result);
-    assign MEM_lanes   = fwd_lanes(MEM_gpr_dest[2:0]);
+    assign EX_lanes   = fwd_lanes(gpr_rw0_sel[2:0]);
 
     //Specifically for mul, actually no - not anymore for loads too, actually
     //no not even for mul anymore, specifically for loads now
@@ -888,8 +905,8 @@ module CORE(
     //Two selectors that differ only in the offset still name the exact same physical
     //register, so comparing the whole 8bit selector breaks everything.
     //The fix is only match using base_id and apply offset only at the end
-    logic [31:0] FWD_rx0, FWD_rx1, FWD_rxi, FWD_rx0_signed, FWD_rx1_signed;
-    logic [31:0] FWD_rx0_full, FWD_rx1_full, FWD_rxi_full;
+    logic [31:0] FWD_rx0, FWD_rx1, FWD_rxi;
+    logic [31:0] FWD_rx1_full;
     logic MEM_fwd0, WB_fwd0, MEM_fwd1, WB_fwd1, MEM_fwd2, WB_fwd2;
 
     //This checks whether the write in MEM/WB touches the register this read wants
@@ -904,8 +921,6 @@ module CORE(
     //Just snuck up in here, so it previosely just zero extended fragmented registers
     //Now if opcode is one of where its vital, we just sign extend it,
     //precisely that fixed: SRA and SDIV
-    assign FWD_rx0_signed = (opcode == 6'b001010) || (opcode == 6'b001001) ? br_sext(rx0[2:0], FWD_rx0) : FWD_rx0;
-    assign FWD_rx1_signed = (opcode == 6'b001001) ? br_sext(rx1[2:0], FWD_rx1) : FWD_rx1;
 
 
     //So yeah this is just verilator function, they are automatic because it
@@ -939,6 +954,26 @@ module CORE(
             3'b101:  fwd_align = {8'h00, val[7:0], 16'h0000};    //rz2
             3'b110:  fwd_align = {val[7:0], 24'h000000};         //rz3
             default: fwd_align = val;                            //rx
+        endcase
+    endfunction
+
+    function automatic [7:0] slice_pick(input [2:0] fragment);
+        unique case (fragment)
+            3'b001:  slice_pick = 8'b00_00_01_00;
+            3'b010:  slice_pick = 8'b00_00_11_10;
+            3'b011:  slice_pick = 8'b00_00_00_00;
+            3'b100:  slice_pick = 8'b00_00_00_01;
+            3'b101:  slice_pick = 8'b00_00_00_10;
+            3'b110:  slice_pick = 8'b00_00_00_11;
+            default: slice_pick = 8'b11_10_01_00;
+        endcase
+    endfunction
+
+    function automatic [3:0] slice_keep(input [2:0] fragment);
+        unique case (fragment)
+            3'b001, 3'b010:                 slice_keep = 4'b0011;
+            3'b011, 3'b100, 3'b101, 3'b110: slice_keep = 4'b0001;
+            default:                        slice_keep = 4'b1111;
         endcase
     endfunction
 
@@ -992,37 +1027,48 @@ module CORE(
         for (int lane = 0; lane < 4; lane++) begin
             //This notation is pretty scary but its just 8 subsequent bits
             //after 8*lane
-            if (MEM_fwd0 && MEM_lanes[lane])     FWD_rx0_full[8*lane +: 8] = MEM_aligned[8*lane +: 8];
-            else if (WB_fwd0 && WB_lanes[lane])  FWD_rx0_full[8*lane +: 8] = WB_aligned[8*lane +: 8];
-            else                              FWD_rx0_full[8*lane +: 8] = EX_gpr0[8*lane +: 8];
-
             if (MEM_fwd1 && MEM_lanes[lane])     FWD_rx1_full[8*lane +: 8] = MEM_aligned[8*lane +: 8];
             else if (WB_fwd1 && WB_lanes[lane])  FWD_rx1_full[8*lane +: 8] = WB_aligned[8*lane +: 8];
             else                              FWD_rx1_full[8*lane +: 8] = EX_gpr1[8*lane +: 8];
-
-            if (MEM_fwd2 && MEM_lanes[lane])     FWD_rxi_full[8*lane +: 8] = MEM_aligned[8*lane +: 8];
-            else if (WB_fwd2 && WB_lanes[lane])  FWD_rxi_full[8*lane +: 8] = WB_aligned[8*lane +: 8];
-            else                              FWD_rxi_full[8*lane +: 8] = EX_gpr2[8*lane +: 8];
         end
     end
 
-    assign FWD_rx0 = fwd_slice(rx0[2:0], FWD_rx0_full);
-    assign FWD_rx1 = fwd_slice(rx1[2:0], FWD_rx1_full);
-    assign FWD_rxi = fwd_slice(rxi[2:0], FWD_rxi_full);
+    logic [1:0] pick0, pick1, pick2;
+    always_comb begin
+        for (int b = 0; b < 4; b++) begin
+            pick0 = EX_pick0[2*b +: 2];
+            pick1 = EX_pick1[2*b +: 2];
+            pick2 = EX_pick2[2*b +: 2];
+
+            if (!EX_keep0[b])                        FWD_rx0[8*b +: 8] = 8'h0;
+            else if (MEM_fwd0 && MEM_lanes[pick0])   FWD_rx0[8*b +: 8] = MEM_aligned[8*pick0 +: 8];
+            else if (WB_fwd0 && WB_lanes[pick0])     FWD_rx0[8*b +: 8] = WB_aligned[8*pick0 +: 8];
+            else                                     FWD_rx0[8*b +: 8] = EX_gpr0[8*pick0 +: 8];
+
+            if (!EX_keep1[b])                        FWD_rx1[8*b +: 8] = 8'h0;
+            else if (MEM_fwd1 && MEM_lanes[pick1])   FWD_rx1[8*b +: 8] = MEM_aligned[8*pick1 +: 8];
+            else if (WB_fwd1 && WB_lanes[pick1])     FWD_rx1[8*b +: 8] = WB_aligned[8*pick1 +: 8];
+            else                                     FWD_rx1[8*b +: 8] = EX_gpr1[8*pick1 +: 8];
+
+            if (!EX_keep2[b])                        FWD_rxi[8*b +: 8] = 8'h0;
+            else if (MEM_fwd2 && MEM_lanes[pick2])   FWD_rxi[8*b +: 8] = MEM_aligned[8*pick2 +: 8];
+            else if (WB_fwd2 && WB_lanes[pick2])     FWD_rxi[8*b +: 8] = WB_aligned[8*pick2 +: 8];
+            else                                     FWD_rxi[8*b +: 8] = EX_gpr2[8*pick2 +: 8];
+        end
+    end
 
     //Declarations
     logic [31:0] EPC;
     logic [31:0] EX_EPC, MEM_EPC_val;
     logic        MEM_EPC_write;
-    assign MEM_EPC_write = (isMEM_valid && MEM_EPCWrite) || (MEM_mmio_write && MEM_memTarget[7:0] == 8'h10);
-    assign MEM_EPC_val   = MEM_mmio_write ? MEM_rx0_val : (MEM_irq ? MEM_PC : MEM_PCNext);
+    assign MEM_EPC_write = isMEM_valid && MEM_EPCWrite;
+    assign MEM_EPC_val   = MEM_irq ? MEM_PC : MEM_PCNext;
     assign EX_EPC        = MEM_EPC_write ? MEM_EPC_val : EPC;
 
     logic  [31:0] SP, GP, KGP, KSP, LR, KScratch;
-    logic  [31:0] EX_SP, EX_KSP, EX_GP, EX_KGP, EX_LR, MEM_SP_val;
-    assign MEM_SP_val  = MEM_mmio_write ? MEM_rx0_val : SPRNext;
-    assign EX_SP  = MEM_SP_write  ? MEM_SP_val : SP;
-    assign EX_KSP = MEM_KSP_write ? MEM_SP_val : KSP;
+    logic  [31:0] EX_SP, EX_KSP, EX_GP, EX_KGP, EX_LR;
+    assign EX_SP  = MEM_SP_write  ? SPRNext : SP;
+    assign EX_KSP = MEM_KSP_write ? SPRNext : KSP;
     assign EX_GP  = MEM_GP_write  ? SPRNext : GP;
     assign EX_KGP = MEM_KGP_write ? SPRNext : KGP;
     assign EX_LR  = MEM_LR_write  ? MEM_LR_val : LR;
@@ -1131,8 +1177,19 @@ module CORE(
         endcase
     end
 
+    logic [31:0] spr_result;
+    always_comb begin
+        unique case (SPRSrc)
+            3'b100:  spr_result = memTarget;                              // PUSH
+            3'b101:  spr_result = ActiveSP + {29'd0, push_pop_bytes};     // POP
+            3'b110:  spr_result = SelectedSPR + FWD_rx0 + sign_ext_imm16; // SPRADD
+            3'b111:  spr_result = SelectedSPR - FWD_rx0 - sign_ext_imm16; // SPRSUB
+            default: spr_result = SelectedSPR;
+        endcase
+    end
+
     //Muxes
-    assign AluMuxX = (aluSrcX == 1'b1) ? (EX_PC + 32'd4) : FWD_rx0_signed;
+    assign AluMuxX = (aluSrcX == 1'b1) ? (EX_PC + 32'd4) : FWD_rx0;
 
     always_comb begin
         unique case (aluSrcY)
@@ -1146,7 +1203,7 @@ module CORE(
                     6'b000101,
                     6'b001001,
                     6'b001011:
-                        AluMuxY = FWD_rx1_signed + sign_ext_imm2;
+                        AluMuxY = FWD_rx1;
 
                     default:   AluMuxY = FWD_rx1 + zero_ext_imm10; // 2-operand logic
                 endcase
@@ -1189,22 +1246,19 @@ module CORE(
         unique case (MEM_SPRSrc)
             3'b000:  SPRNext = MEM_SelectedSPR;                        // hold
             3'b011:  SPRNext = MEM_rx0_val;                            // SPRSET
-            3'b100:  SPRNext = MEM_activeSP - {29'd0, MEM_push_pop_bytes}; // PUSH
-            3'b101:  SPRNext = MEM_activeSP + {29'd0, MEM_push_pop_bytes}; // POP
-            3'b110:  SPRNext = MEM_SelectedSPR + MEM_spr_operand; // SPRADD
-            3'b111:  SPRNext = MEM_SelectedSPR - MEM_spr_operand; // SPRSUB
+            3'b100:  SPRNext = MEM_spr_result; // PUSH
+            3'b101:  SPRNext = MEM_spr_result; // POP
+            3'b110:  SPRNext = MEM_spr_result; // SPRADD
+            3'b111:  SPRNext = MEM_spr_result; // SPRSUB
             default: SPRNext = MEM_SelectedSPR;
         endcase
     end
 
     //This does look kinda scary but trust me its just SPRs write and banking
-    logic MEM_mmio_write;
-    assign MEM_mmio_write = isMEM_valid && MEM_memWrite && MEM_mmio_cs && MEM_kernelMode;
-
     logic  MEM_SP_write, MEM_KSP_write, MEM_GP_write, MEM_KGP_write, MEM_LR_write;
     logic [31:0] MEM_LR_val;
-    assign MEM_SP_write  = (isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) && !MEM_kernelMode) || (MEM_mmio_write && MEM_memTarget[7:0] == 8'h14);
-    assign MEM_KSP_write = (isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) &&  MEM_kernelMode) || (MEM_mmio_write && MEM_memTarget[7:0] == 8'h18);
+    assign MEM_SP_write  = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) && !MEM_kernelMode;
+    assign MEM_KSP_write = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) &&  MEM_kernelMode;
     assign MEM_GP_write  = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) && !MEM_kernelMode;
     assign MEM_KGP_write = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) &&  MEM_kernelMode;
     assign MEM_LR_write  = isMEM_valid && (MEM_is_call || (MEM_SPRWrite && (MEM_spr_target_sel == 2'b01)));
@@ -1390,6 +1444,9 @@ module CORE(
         .x(AluMuxX),
         .y(AluMuxY),
         .opcode(AluOpcode),
+        .imm2(alu_imm2),
+        .x_fragment(rx0[2:0]),
+        .y_fragment(rx1[2:0]),
         .isDiv_valid(isEX_valid), //Not demolish bc it has a long of irrelivant data that just slows it dow
         .mem_stall(mem_stall),
         .shift_amount(shift_amount),
@@ -1437,7 +1494,7 @@ module CORE(
 
     VRAM system_vram (
         .clk(clk),
-        .addrRead(mem_stall ? MEM_vram_addr : (memTarget - 32'h04000000)),
+        .addrRead(mem_stall ? MEM_vram_addr : ({12'b0, memTarget[19:0]})), //memTarget - 0x04000000 but much faster
         .addrWrite(vram_addr),
         .data_in(vram_data_out),
         .byte_enable(MEM_ram_byte_enable),
