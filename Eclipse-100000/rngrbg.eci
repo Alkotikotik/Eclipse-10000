@@ -1,0 +1,33 @@
+#org 60
+~JmpBoot:
+	jmp ~boot
+	
+#org 100   >_ 0x64 Syscall Vector
+	retu
+	
+#org 104   >_ 0x68 Timer Vector
+	retu
+	
+#org 108   >_ 0x6C Key Interrupt Vector
+	retu
+	
+#org 112   >_ 0x70 Memory Fault Vector
+	retu
+	
+#org 116 >_ 0x74 ZeroDiv
+	retu
+~boot:
+
+
+~init:
+    lma rx3 <- 0x04000000
+    xor rx0, rx0
+    load rx4 <- 4
+
+~main:
+    rng -> rx0
+    stx rx0 -> rx3, rx1 << 0, 0
+    add rx1 <- rx1, rx4
+    jmp ~main
+
+

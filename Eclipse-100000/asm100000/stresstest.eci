@@ -5,7 +5,6 @@
     LOAD rx4 <- 40
 
 ~WriteLoop:
-    >_ Hammer RAM forward
     STR rx2, [rx1 + 0]
     ADD [rx1, rx3]
     ADD [rx2, rx3]
@@ -15,11 +14,11 @@
     LDR rx5, [rx1 - 4]
     SUB [rx2, rx3]
     SUB [rx1, rx3]
-    
+
     BNE rx5, rx2, ~Trap
-    
+
     LOAD rx6 <- 0
-    BG rx2, rx6, ~ReadLoo
+    BG rx2, rx6, ~ReadLoop
 
 ~Success:
     XOR [rx31, rx31]

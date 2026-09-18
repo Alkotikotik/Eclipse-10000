@@ -228,6 +228,10 @@ module CORE(
     //No rx2 I just use ID_IR_2[something:something]
 
     logic ID_wb_hit0, ID_wb_hit1, ID_wb_hit2;
+    logic ID_banked0, ID_banked1, ID_banked2;
+    assign ID_banked0 = (ID_rx0[7:3] <= 5'd1);
+    assign ID_banked1 = (ID_rx1[7:3] <= 5'd1);
+    assign ID_banked2 = (ID_IR_2[31:27] <= 5'd1);
 
     //For later when memory would take actual clock cycles to reach
     //Well its later now
@@ -316,9 +320,9 @@ module CORE(
             EX_IR <= ID_IR;
             EX_64 <= ID_64;
             EX_IR_2 <= ID_IR_2;
-            EX_rx0_val <= ID_rx0_val;
-            EX_rx1_val <= ID_rx1_val;
-            EX_rx2_val <= ID_rx2_val;
+            EX_rx0_val <= (ID_banked0 && kernel_mode_next) ? (ID_rx0[3]     ? KGPR1_next : KGPR0_next) : ID_rx0_val;
+            EX_rx1_val <= (ID_banked1 && kernel_mode_next) ? (ID_rx1[3]     ? KGPR1_next : KGPR0_next) : ID_rx1_val;
+            EX_rx2_val <= (ID_banked2 && kernel_mode_next) ? (ID_IR_2[27] ? KGPR1_next : KGPR0_next) : ID_rx2_val;
             EX_branch <= ID_branch;
             EX_early_target <= ID_early_target;
             EX_pht_idx <= ID_pht_idx;
@@ -327,9 +331,9 @@ module CORE(
 
             //The forwarding check moves to the ID now, only check forwarding itself
             //still stays in EX
-            EX_banked0 <= (ID_rx0[7:3] <= 5'd1);
-            EX_banked1 <= (ID_rx1[7:3] <= 5'd1);
-            EX_banked2 <= (ID_IR_2[31:27] <= 5'd1);
+            EX_banked0 <= ID_banked0;
+            EX_banked1 <= ID_banked1;
+            EX_banked2 <= ID_banked2;
             EX_pick0 <= slice_pick(ID_rx0[2:0]);
             EX_pick1 <= slice_pick(ID_rx1[2:0]);
             EX_pick2 <= slice_pick(ID_IR_2[26:24]);
@@ -410,10 +414,12 @@ module CORE(
     //This is forwarding too, EX needs to know the new mode immediately after
     //MEM made the change, becase kernel mode now changes in MEM
     //In always_ff bc its a flop
-    logic  EX_kernel_mode;
+    logic  EX_kernel_mode, kernel_mode_next;
+    assign kernel_mode_next = (!mem_stall && isEX_valid && !stall && !MEM_fault && !MEM_redirect) ? isKernelMode : (MEM_fault || EX_kernel_mode);
+
     always_ff @(posedge clk or posedge reset) begin
         if (reset) EX_kernel_mode <= 0;
-        else EX_kernel_mode <= (!mem_stall && isEX_valid && !stall && !MEM_fault && !MEM_redirect) ? isKernelMode : (MEM_fault || EX_kernel_mode);
+        else EX_kernel_mode <= kernel_mode_next;
     end
 
     logic [4:0] shift_amount;
@@ -911,8 +917,8 @@ module CORE(
     assign WB_fwd0  = EX_wb_hit0  && (!EX_banked0 || WB_kernelMode  == EX_kernel_mode);
     assign MEM_fwd1 = EX_mem_hit1 && (!EX_banked1 || MEM_kernelMode == EX_kernel_mode);
     assign WB_fwd1  = EX_wb_hit1  && (!EX_banked1 || WB_kernelMode  == EX_kernel_mode);
-    assign MEM_fwd2 = EX_mem_hit2 && (rxi[7:3] > 5'd1 || MEM_kernelMode == EX_kernel_mode);
-    assign WB_fwd2  = EX_wb_hit2  && (rxi[7:3] > 5'd1 || WB_kernelMode  == EX_kernel_mode);
+    assign MEM_fwd2 = EX_mem_hit2 && (!EX_banked2 || MEM_kernelMode == EX_kernel_mode);
+    assign WB_fwd2  = EX_wb_hit2  && (!EX_banked2 || WB_kernelMode  == EX_kernel_mode);
 
     //Just snuck up in here, so it previosely just zero extended fragmented registers
     //Now if opcode is one of where its vital, we just sign extend it,
@@ -985,6 +991,17 @@ module CORE(
         endcase
     endfunction
 
+    logic  wb_writes_kgpr;
+    assign wb_writes_kgpr = isWB_valid && WB_gpr_write && (WB_gpr_dest[7:3] <= 5'd1) && WB_kernelMode;
+
+    logic [31:0] KGPR0_next, KGPR1_next;
+    always_comb begin
+        for (int lane = 0; lane < 4; lane++) begin
+            KGPR0_next[8*lane +: 8] = (wb_writes_kgpr && !WB_gpr_dest[3] && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : KGPR0[8*lane +: 8];
+            KGPR1_next[8*lane +: 8] = (wb_writes_kgpr &&  WB_gpr_dest[3] && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : KGPR1[8*lane +: 8];
+        end
+    end
+
     //Reading one cycle earier - introduces the similar hazard to when it was
     //in EX just gotta expand on that 1 cycle more.
     logic  wb_writes_array;
@@ -1011,9 +1028,9 @@ module CORE(
     //yet, so we always just get the KGPRs and then in EX deduce whether we
     //use GPRs or KGPRs
     logic [31:0] EX_gpr0, EX_gpr1, EX_gpr2;
-    assign EX_gpr0 = (EX_banked0 && EX_kernel_mode) ? (rx0[3] ? KGPR1 : KGPR0) : EX_rx0_val;
-    assign EX_gpr1 = (EX_banked1 && EX_kernel_mode) ? (rx1[3] ? KGPR1 : KGPR0) : EX_rx1_val;
-    assign EX_gpr2 = (EX_banked2 && EX_kernel_mode) ? (rxi[3] ? KGPR1 : KGPR0) : EX_rx2_val;
+    assign EX_gpr0 = EX_rx0_val;
+    assign EX_gpr1 = EX_rx1_val;
+    assign EX_gpr2 = EX_rx2_val;
 
 
     //Here automatic comes in play, function gets called more than ones in
