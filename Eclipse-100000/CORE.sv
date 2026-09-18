@@ -352,8 +352,6 @@ module CORE(
     /* verilator lint_off UNUSEDSIGNAL */
     logic [7:0] rx0, rx1, rx2, rxi; //rxi for LDX/STX, a lot of special stuff for it, But I love them nontheless(for that reason too)
     /* verilator lint_on UNUSEDSIGNAL */
-    logic [11:0] immediate;
-    logic [31:0] j_imm_signed;
 
     assign opcode = EX_IR[31:26];
     assign rx0 = EX_IR[25:18];
@@ -362,8 +360,6 @@ module CORE(
     assign rxi = EX_IR_2[31:24];
     assign op_64 = EX_IR[9:4];
     assign branch_op = EX_IR[9:5];
-    assign immediate = EX_IR[11:0];
-    assign j_imm_signed = {{6{EX_IR[25]}}, EX_IR[25:0]};
 
     logic [31:0] sign_ext_imm10;
     assign sign_ext_imm10 = { {22{EX_IR[9]}}, EX_IR[9:0] };
@@ -696,7 +692,7 @@ module CORE(
     end
 
     logic [31:0] MEM_vram_addr;
-    assign MEM_vram_addr = MEM_memTarget - 32'h04000000;
+    assign MEM_vram_addr = {12'b0, MEM_memTarget[19:0]};
 
     //Moving the memFault from CU to here, because CU runs only in EX and
     //since im moving mem stuff into MEM this is the only way
@@ -1091,8 +1087,6 @@ module CORE(
     logic [31:0] memTarget;
     logic [1:0] spr_target_sel;
 
-    logic aluSrcX;
-    logic [1:0] aluSrcY;
     logic [3:0] PCSrc;
     logic [2:0] GPRsSrc;
     logic [2:0] SPRSrc;
@@ -1111,8 +1105,6 @@ module CORE(
     logic [31:0] AluMuxY;
     logic [31:0] AluResult;
     logic [63:0] mul_product;
-    logic [1:0] aluOpSel;
-    logic [5:0] AluOpcode;
     logic div_stall;
 
     logic [31:0] ram_data_out;
@@ -1189,30 +1181,19 @@ module CORE(
     end
 
     //Muxes
-    assign AluMuxX = (aluSrcX == 1'b1) ? (EX_PC + 32'd4) : FWD_rx0;
+    assign AluMuxX = FWD_rx0;
 
     always_comb begin
-        unique case (aluSrcY)
-            2'b00: AluMuxY = 32'd4;
+        unique case (opcode)
+            6'b000001,
+            6'b000011,
+            6'b000111,
+            6'b000101,
+            6'b001001,
+            6'b001011:
+                AluMuxY = FWD_rx1;
 
-            2'b01: begin
-                unique case (opcode)
-                    6'b000001,
-                    6'b000011,
-                    6'b000111,
-                    6'b000101,
-                    6'b001001,
-                    6'b001011:
-                        AluMuxY = FWD_rx1;
-
-                    default:   AluMuxY = FWD_rx1 + zero_ext_imm10; // 2-operand logic
-                endcase
-            end
-
-            2'b10: AluMuxY = j_imm_signed;
-            2'b11: AluMuxY = { {20{immediate[11]}}, immediate };
-
-            default: AluMuxY = FWD_rx1;
+            default:   AluMuxY = FWD_rx1 + zero_ext_imm10; // 2-operand logic
         endcase
     end
 
@@ -1335,16 +1316,6 @@ module CORE(
     end
 
 
-    always_comb begin
-        unique case (aluOpSel)
-            2'b00: AluOpcode = 6'b000001; // PC + 4
-            2'b01: AluOpcode = 6'b000011; // Sub for cmp
-            2'b10: AluOpcode = opcode;    // IR opcode for regular ALUs
-
-            default: AluOpcode = 6'b000001;
-        endcase
-    end
-
     // Address Map:
     // 64MB System RAM : 0x00000000 - 0x03FFFFFF
     // 1MB VRAM        : 0x04000000 - 0x040FFFFF
@@ -1428,11 +1399,8 @@ module CORE(
         .key_interrupt_taken(key_interrupt_taken),
         .memRead(memRead),
         .memWrite(memWrite),
-        .aluSrcX(aluSrcX),
-        .aluSrcY(aluSrcY),
         .PCSrc(PCSrc),
         .GPRsSrc(GPRsSrc),
-        .aluOpSel(aluOpSel),
         .isCallState(isCallState),
         .SPRWrite(SPRWrite),
         .SPRSrc(SPRSrc)
@@ -1443,7 +1411,7 @@ module CORE(
         .reset(reset),
         .x(AluMuxX),
         .y(AluMuxY),
-        .opcode(AluOpcode),
+        .opcode(opcode),
         .imm2(alu_imm2),
         .x_fragment(rx0[2:0]),
         .y_fragment(rx1[2:0]),

@@ -28,12 +28,9 @@ module CU(
     output logic memRead,
     output logic memWrite,
 
-    output logic aluSrcX, //X, PC
-    output logic [1:0] aluSrcY, //fetch: 4, alu_exe/branch = y, mem_calc = spare
     output logic [3:0] PCSrc, //pc+4, effective address
     output logic [2:0] GPRsSrc, //alu result, memory, spare
 
-    output logic [1:0] aluOpSel,
     output logic isCallState,
 
     output logic SPRWrite,
@@ -80,9 +77,7 @@ module CU(
         GPRsWrite = 0;
         EPCWrite = 0; isKernelMode = current_kernel_mode;
         memRead = 0; memWrite = 0;
-        aluSrcX = 0; aluSrcY = 2'b00;
         PCSrc = 4'b0000; GPRsSrc = 3'b000;
-        aluOpSel = 2'b00;
         isCallState = 0;
         SPRWrite = 0; SPRSrc = 3'b000;
         PCWrite = 0;
@@ -110,15 +105,10 @@ module CU(
                         default ;
                     endcase
                 end else begin
-                    aluSrcY = 2'b01;
-                    aluOpSel = 2'b10;
                     GPRsWrite = 1;
                 end
             end
             2'b11: begin // conditional branch default
-                aluSrcX = 1;
-                aluSrcY = 2'b10;
-                aluOpSel = 2'b00;
                 PCSrc = 4'b0000;
                 //The CU no longer decides whether branch was taken, bc its
                 //now in MEM
@@ -147,7 +137,6 @@ module CU(
                 PCWrite = 1;
             end
             6'b111000: begin //CALL
-                aluSrcX = 1; aluSrcY = 2'b10; aluOpSel = 2'b00;
                 PCSrc   = 4'b0001;
                 PCWrite = 1;
                 isCallState = 1;
@@ -161,7 +150,6 @@ module CU(
                 PCWrite = 1;
             end
             6'b111111: begin //JMP
-                aluSrcX = 1; aluSrcY = 2'b10; aluOpSel = 2'b00;
                 PCSrc   = 4'b0001;
                 PCWrite = 1;
             end
