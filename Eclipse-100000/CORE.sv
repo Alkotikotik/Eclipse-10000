@@ -1172,7 +1172,7 @@ module CORE(
     logic [31:0] spr_result;
     always_comb begin
         unique case (SPRSrc)
-            3'b100:  spr_result = memTarget;                              // PUSH
+            3'b100:  spr_result = ActiveSP - {29'd0, push_pop_bytes};    // PUSH
             3'b101:  spr_result = ActiveSP + {29'd0, push_pop_bytes};     // POP
             3'b110:  spr_result = SelectedSPR + FWD_rx0 + sign_ext_imm16; // SPRADD
             3'b111:  spr_result = SelectedSPR - FWD_rx0 - sign_ext_imm16; // SPRSUB
