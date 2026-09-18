@@ -21,34 +21,24 @@ outline];
 
 func main() {
     u32 ptr = 0x04000000;
-
-    u16 px0 = 0;
-    u16 px1 = 0;
-
+    u32 pxs = 0xF0FF;
     u8 phase = 0;
 
     while [true] {
-        u32 color = (px0 << 16) | px1;
-        [ptr] = color;
+        [ptr] = pxs;
         ptr = ptr + 4;
 
         if [phase == 0] {
-            px0 += 1;
-            px1 -= (1 << 8);
             if [px0 == 15] {
                 phase = 1;
             }
         }
         else if [phase == 1] {
-            px0 -= 1;
-            px1 += (1 << 8);
             if [px1 >= 239] {
                 phase = 2;
             }
         }
         else if [phase == 2] {
-            px1 -= (1 << 8);
-            px0 += (1 << 8);
             if [px0 >= 239] {
                 phase = 0;
             }

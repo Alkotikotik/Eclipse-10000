@@ -12,12 +12,18 @@ module CU(
     input logic [7:0] key_in,
     input logic isEX_valid,
 
+    input logic timer_interrupt_commit,
+    input logic key_interrupt_commit,
+
     output logic PCWrite,
     output logic GPRsWrite,
 
     output logic EPCWrite,
     output logic irq_taken,
     output logic isKernelMode,
+
+    output logic timer_interrupt_taken,
+    output logic key_interrupt_taken,
 
     output logic memRead,
     output logic memWrite,
@@ -44,8 +50,6 @@ module CU(
     logic [7:0] prev_key_in;
     logic key_interrupt_pending;
 
-    logic timer_interrupt_taken, key_interrupt_taken;
-
     //Just interrupt handling
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -61,11 +65,11 @@ module CU(
                 counter <= counter - 1;
             end
 
-            if (timer_interrupt_taken)
+            if (timer_interrupt_commit)
                 timer_interrupt_pending <= 0;
 
             prev_key_in <= key_in;
-            if (key_interrupt_taken)
+            if (key_interrupt_commit)
                 key_interrupt_pending <= 0;
             if (key_in != 8'hFF && key_in != prev_key_in)
                 key_interrupt_pending <= 1;

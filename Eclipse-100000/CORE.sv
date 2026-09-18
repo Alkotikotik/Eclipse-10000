@@ -407,6 +407,9 @@ module CORE(
     logic [4:0] shift_amount;
     assign shift_amount = FWD_rx1[4:0] + EX_IR[4:0];
 
+    logic key_interrupt_taken;
+    logic timer_interrupt_taken;
+
 
     //== RNG ==//
     //literally a random number generator. I am using the xoshiro128**
@@ -612,6 +615,9 @@ module CORE(
     logic [1:0]  MEM_spr_target_sel;
     logic MEM_is_call;
 
+    logic MEM_irq_timer;
+    logic MEM_irq_key;
+
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             isMEM_valid <= 0;
@@ -665,6 +671,9 @@ module CORE(
             MEM_rx0_val     <= FWD_rx0;
             MEM_spr_operand <= spr_operand;
             MEM_is_call     <= isCallState && (opcode ==6'b111000); //CALL
+
+            MEM_irq_timer <= timer_interrupt_taken;
+            MEM_irq_key   <= key_interrupt_taken;
         end
     end
 
@@ -691,9 +700,6 @@ module CORE(
     logic  mem_ready;
     logic  mem_stall;
 
-    /* verilator lint_off UNUSEDSIGNAL */
-    logic [31:0] store_load_diff;
-    /* verilator lint_on UNUSEDSIGNAL */ 
     //Alright so memRead is not quite 1 atm, we've got another hazard here,
     //since new read at the start of MEM and write at the start of MEM happens
     //at the same clock edge, the read seems the old memory, and that's no good.
@@ -701,11 +707,11 @@ module CORE(
     //not within 4bytes of each other(because of fragmented registers), well
     //nothing happens, but if they are we wait for it to write, and only then
     //read
-    assign store_load_diff = MEM_memTarget - WB_memTarget;
-
     logic  store_load_overlap;
     assign store_load_overlap = isMEM_valid && MEM_memRead && isWB_valid && WB_memWrite &&
-                                ((store_load_diff[31:2] == 30'h0) || (store_load_diff[31:2] == 30'h3FFFFFFF));
+                                ((MEM_memTarget[31:2] == WB_word) ||
+                                 (MEM_memTarget[31:2] == WB_word_plus1) ||
+                                 (MEM_memTarget[31:2] == WB_word_minus1));
 
     logic  MEM_reread;
     always_ff @(posedge clk or posedge reset) begin
@@ -832,7 +838,7 @@ module CORE(
     logic WB_is_lomul, WB_is_himul;
 
     logic        WB_memWrite;
-    logic [31:0] WB_memTarget;
+    logic [29:0] WB_word, WB_word_plus1, WB_word_minus1;
 
     logic [31:0] WB_aligned;
     logic [3:0]  WB_lanes;
@@ -851,7 +857,9 @@ module CORE(
             WB_is_himul <= MEM_is_himul;
 
             WB_memWrite <= MEM_memWrite;
-            WB_memTarget<= MEM_memTarget;
+            WB_word       <= MEM_memTarget[31:2];
+            WB_word_plus1 <= MEM_memTarget[31:2] + 30'd1;
+            WB_word_minus1<= MEM_memTarget[31:2] - 30'd1;
 
             WB_aligned  <= fwd_align(MEM_gpr_dest[2:0], MEM_val);
             WB_lanes    <= fwd_lanes(MEM_gpr_dest[2:0]);
@@ -1354,12 +1362,16 @@ module CORE(
         .mmio_timer_reg(mmio_timer_reg),
         .current_kernel_mode(EX_kernel_mode),
         .key_in(ENC_10K_KeyIn),
-        .isEX_valid(isEX_valid && !MEM_fault && !mem_stall && !MEM_redirect),
+        .isEX_valid(isEX_valid), //Split the check in 2
+        .timer_interrupt_commit(isMEM_valid && MEM_irq_timer),
+        .key_interrupt_commit(isMEM_valid && MEM_irq_key),
         .PCWrite(PCWrite),
         .GPRsWrite(GPRsWrite),
         .EPCWrite(EPCWrite),
         .irq_taken(irq_taken),
         .isKernelMode(isKernelMode),
+        .timer_interrupt_taken(timer_interrupt_taken),
+        .key_interrupt_taken(key_interrupt_taken),
         .memRead(memRead),
         .memWrite(memWrite),
         .aluSrcX(aluSrcX),
@@ -1378,7 +1390,7 @@ module CORE(
         .x(AluMuxX),
         .y(AluMuxY),
         .opcode(AluOpcode),
-        .isDiv_valid(isEX_valid && !irq_taken && !MEM_redirect), //Not demolish bc it has a long of irrelivant data that just slows it dow
+        .isDiv_valid(isEX_valid), //Not demolish bc it has a long of irrelivant data that just slows it dow
         .mem_stall(mem_stall),
         .shift_amount(shift_amount),
 

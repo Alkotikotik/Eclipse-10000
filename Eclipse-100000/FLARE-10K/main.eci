@@ -21,8 +21,8 @@
 
 ~main:
 	LMA rx27 <- 67108864
-	LOAD ry281 <- 0
-	LOAD ry280 <- 0
+	LOAD ry281 <- 255
+	LOAD ry280 <- 255
 	LOAD rz260 <- 0
 
 ~Lab_while_start_0:
@@ -35,11 +35,8 @@
 
 	IBNE <-< [rz260 <-> 0] >-> ~Lab_else_2
 
-	ADD ry281 <- [ry281, rx31 1]
-	LOAD rx30 <- 1
-	MOV rx29 <- rx30 0
-	SHL [rx29, rx31 8]
-	SUB ry280 <- [ry280, rx29 0]
+	XOR [ry281, ry280 0]
+	OR  [ry280, ry281 0]
 
 	IBNE <-< [ry281 <-> 15] >-> ~Lab_endif_5
 
@@ -53,11 +50,8 @@
 
 	IBNE <-< [rz260 <-> 1] >-> ~Lab_else_6
 
-	SUB ry281 <- [ry281, rx31 1]
-	LOAD rx30 <- 1
-	MOV rx29 <- rx30 0
-	SHL [rx29, rx31 8]
-	ADD ry280 <- [ry280, rx29 0]
+	AND [ry281, ry280 0]
+	XOR [ry280, ry281 0]
 
 	IBSU <-< [ry280 <-> 239] >-> ~Lab_endif_9
 
@@ -71,14 +65,8 @@
 
 	IBNE <-< [rz260 <-> 2] >-> ~Lab_endif_11
 
-	LOAD rx30 <- 1
-	MOV rx29 <- rx30 0
-	SHL [rx29, rx31 8]
-	SUB ry280 <- [ry280, rx29 0]
-	LOAD rx30 <- 1
-	MOV rx29 <- rx30 0
-	SHL [rx29, rx31 8]
-	ADD ry281 <- [ry281, rx29 0]
+	OR  [ry280, ry281 0]
+	AND [ry281, ry280 0]
 
 	IBSU <-< [ry281 <-> 239] >-> ~Lab_endif_13
 
