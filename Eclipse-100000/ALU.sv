@@ -11,7 +11,10 @@ module ALU (
     input  logic mem_stall,
     input  logic [4:0] shift_amount, //separate input, should reduct logic levels
 
-    output logic [31:0] result,
+    output logic [31:0] add_result,
+    output logic [31:0] bitwise_result,
+    output logic [31:0] shift_result,
+    output logic [31:0] div_result,
     output logic [63:0] mul_product,
     output logic div_stall,
 
@@ -46,7 +49,6 @@ module ALU (
     logic [31:0] add_y;
     assign add_y = is_sub_op ? ~y : y;
 
-    logic [31:0] add_result;
     logic [31:0] add_imm;
     assign add_imm = is_sub_op ? (32'd1 - imm2) : imm2;
 
@@ -86,8 +88,7 @@ module ALU (
     /* verilator lint_on UNUSEDSIGNAL */
     assign sh_wide = $signed({sh_fill, sh_src}) >>> shift_amount;
 
-    logic [31:0] sh_result;
-    assign sh_result = is_shl ? rev32(sh_wide[31:0]) : sh_wide[31:0];
+    assign shift_result = is_shl ? rev32(sh_wide[31:0]) : sh_wide[31:0];
 
 
     //== Quick-Radix-4 Div Unit ==//
@@ -297,55 +298,20 @@ module ALU (
     end
 
     logic [31:0] div_raw, div_out;
+    assign div_result = (y_div == 32'b0) ? 32'b0 : div_out;
+    assign ZeroDivException = is_div && (y_div == 32'b0);
     assign div_raw = is_mod_op ? remainder : quotinent;
     assign div_out = (is_mod_op ? is_neg_remainder : is_neg_quotinent) ? (~div_raw + 32'd1) : div_raw;
 
 
     //Doesn't care about clk
     always_comb begin
-        result = 32'b0;
-        ZeroDivException = 0;
-
-        case (opcode)
-            6'b000001: result = add_result; //Add
-            6'b000011: result = add_result; //sub
-            6'b000010: result = x ^ y;
-            6'b000110: result = x | y;
-            6'b001110: result = x & y;
-            6'b001111: result = ~x   ;
-            6'b001000: result = sh_result; //SHL
-            6'b001100: result = sh_result; //SHR
-            6'b001010: result = sh_result; //SRA for singed shift right iirc
-            6'b000100: result = y; //MOV
-            //Replace later for FPGA for quick div gonna do it soon, already
-            //did it dumbass
-            6'b000101: begin // DIV
-                if (y_div == 32'b0) begin
-                    ZeroDivException = 1;
-                    result = 32'b0;
-                end else begin
-                    result = div_out;
-                end
-            end
-
-            6'b001011: begin // MOD
-                if (y_div == 32'b0) begin
-                    ZeroDivException = 1'b1;
-                    result = 32'b0;
-                end else begin
-                    result = div_out;
-                end
-            end
-            6'b001001: begin // SDIV (signed)
-                if (y_div == 32'b0) begin
-                    ZeroDivException = 1;
-                    result = 32'b0;
-                end else begin
-                    result = div_out;
-                end
-            end
-            //no SMOD unfortunately duo to the lack of encoding space
-            default: result = 32'b0;
+        unique case (opcode)
+            6'b000010: bitwise_result = x ^ y;
+            6'b000110: bitwise_result = x | y;
+            6'b001110: bitwise_result = x & y;
+            6'b001111: bitwise_result = ~x   ;
+            default:   bitwise_result = y; //MOV
         endcase
     end
 

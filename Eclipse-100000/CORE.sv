@@ -398,6 +398,29 @@ module CORE(
     logic [31:0] alu_imm2;
     assign alu_imm2 = is_imm2_op ? sign_ext_imm2 : 32'd0;
 
+    //Just diveded into several concurrent muxes instead of one bit ALU mux
+    //lets see
+    logic [2:0] alu_sel;
+    always_comb begin
+        unique case (opcode)
+            6'b000001, 6'b000011:            alu_sel = 3'd0; // ADD/SUB
+            6'b001000, 6'b001100, 6'b001010: alu_sel = 3'd2; // SHL/SHR/SRA
+            6'b000101, 6'b001011, 6'b001001: alu_sel = 3'd3; // DIV/MOD/SDIV
+            default:                         alu_sel = 3'd1; // bitwise + MOV
+        endcase
+    end
+
+    logic [2:0] result_sel;
+    always_comb begin
+        unique case (GPRsSrc)
+            3'b011:  result_sel = 3'd4; // LOAD
+            3'b101:  result_sel = 3'd5; // SPRLEA
+            3'b110:  result_sel = 3'd6; // LMA
+            3'b111:  result_sel = 3'd7; // RNG
+            default: result_sel = alu_sel;
+        endcase
+    end
+
     logic[31:0] LDX_base, LDX_idx, LDX_imm29; //Just enough to cover all 256MB signed
 
     assign LDX_base = (rx1[7:3] == 5'd31) ? 32'b0 : FWD_rx1_full; //Theoretically it is base +- imm29, but usually base is 0 so rx31
@@ -1120,9 +1143,13 @@ module CORE(
 
     logic [31:0] AluMuxX;
     logic [31:0] AluMuxY;
-    logic [31:0] AluResult;
     logic [63:0] mul_product;
     logic div_stall;
+
+    logic [31:0] shift_result;
+    logic [31:0] div_result;
+    logic [31:0] add_result;
+    logic [31:0] bitwise_result;
 
     logic [31:0] ram_data_out;
 
@@ -1387,12 +1414,15 @@ module CORE(
 
     //No 3'b001 arm anymore, MEM fixes the load in one cycle later
     always_comb begin
-        case (GPRsSrc)
-            3'b011:  GPRs_data_in = sign_ext_imm18; //LOAD
-            3'b101:  GPRs_data_in = memTarget; //SPRLEA
-            3'b110:  GPRs_data_in = EX_IR_2; //LMA
-            3'b111:  GPRs_data_in = rng_result; //RNG
-            default: GPRs_data_in = AluResult; //regular
+        unique case (result_sel)
+            3'd0: GPRs_data_in = add_result; //self expanotory
+            3'd1: GPRs_data_in = bitwise_result;
+            3'd2: GPRs_data_in = shift_result;
+            3'd3: GPRs_data_in = div_result;
+            3'd4: GPRs_data_in = sign_ext_imm18;
+            3'd5: GPRs_data_in = memTarget;
+            3'd6: GPRs_data_in = EX_IR_2;
+            3'd7: GPRs_data_in = rng_result;
         endcase
     end
 
@@ -1436,7 +1466,10 @@ module CORE(
         .mem_stall(mem_stall),
         .shift_amount(shift_amount),
 
-        .result(AluResult),
+        .add_result(add_result),
+        .bitwise_result(bitwise_result),
+        .shift_result(shift_result),
+        .div_result(div_result),
         .mul_product(mul_product),
         .div_stall(div_stall),
 
