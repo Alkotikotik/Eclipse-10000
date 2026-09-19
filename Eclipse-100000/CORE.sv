@@ -399,7 +399,7 @@ module CORE(
     assign alu_imm2 = is_imm2_op ? sign_ext_imm2 : 32'd0;
 
     //Just diveded into several concurrent muxes instead of one bit ALU mux
-    //lets see
+    //lets see. Hell yeah it did 9.848ns bitch
     logic [2:0] alu_sel;
     always_comb begin
         unique case (opcode)
@@ -663,6 +663,12 @@ module CORE(
         if (reset) begin
             isMEM_valid <= 0;
         end else if (!mem_stall) begin
+            isMEM_valid     <= isEX_valid & !stall & !MEM_fault & !MEM_redirect;
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!mem_stall) begin
             //That many variables are actually harmless, because they live in
             //FFs which are free, there are a lot of unused FFs in logic slices.
             MEM_result      <= GPRs_data_in;
@@ -681,7 +687,6 @@ module CORE(
             MEM_gpr_write   <= GPRsWrite;
             MEM_gpr_dest    <= gpr_rw0_sel;
             MEM_kernelMode  <= EX_kernel_mode;
-            isMEM_valid     <= isEX_valid & !stall & !MEM_fault & !MEM_redirect;
             MEM_is_lomul    <= (opcode == 6'b000111);
             MEM_is_himul    <= (opcode == 6'b001101);
             MEM_zeroDiv     <= ZeroDivException && !irq_taken;
@@ -889,8 +894,13 @@ module CORE(
         if (reset) begin
             isWB_valid <= 0;
         end else if (!mem_stall) begin
-            WB_result<= MEM_val;
             isWB_valid <= isMEM_valid & !MEM_fault;
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!mem_stall) begin
+            WB_result<= MEM_val;
             WB_gpr_dest <= MEM_gpr_dest;
             WB_gpr_write <= MEM_gpr_write;
             WB_kernelMode <= MEM_kernelMode;

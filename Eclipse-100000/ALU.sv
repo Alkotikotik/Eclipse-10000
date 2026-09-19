@@ -256,30 +256,45 @@ module ALU (
             div_working  <= 1'b0;
             div_finished <= 1'b0;
         end else if (div_start) begin
+            div_init <= 1'b1;
+        end else if (div_init) begin
+            div_init <= 1'b0;
+            div_init2 <= 1'b1;
+        end else if (div_init2) begin
+            div_init2 <= 1'b0;
+            div_init3 <= 1'b1;
+        end else if (div_init3) begin
+            div_working <= !div_shift_r[4]; //Read above
+            div_finished <= div_shift_r[4];
+            div_init3 <= 1'b0;
+        end else if (div_working) begin
+            div_working <= (div_cycles_left != 0);
+            div_finished <= (div_cycles_left == 0);
+        end else begin
+            div_finished <= 0;
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (mem_stall) begin
+        end else if ((div_init || div_init2 || div_init3 || div_working) && !div_req) begin
+        end else if (div_start) begin
             x_div <= is_signed_div ? x_sext : x;
             y_div <= (is_signed_div ? frag_sext(y_fragment, y) : y) + imm2;
-            div_init <= 1'b1;
         end else if (div_init) begin
             x_abs <= x_nice;
             y_abs <= y_nice;
             is_neg_quotinent <= is_signed_div && (x_div[31] ^ y_div[31]);
             is_neg_remainder <= is_signed_div && x_div[31];
-            div_init <= 1'b0;
-            div_init2 <= 1'b1;
         end else if (div_init2) begin
             remainder <= x_abs;
             quotinent <= 32'b0;
             div_shift_r <= div_shift[5:1];
             y3_abs <= {2'b00, y_abs} + {1'b0, y_abs, 1'b0};
-            div_init2 <= 1'b0;
-            div_init3 <= 1'b1;
         end else if (div_init3) begin
             sd <= y_abs << {div_shift_r[3:0], 1'b0};
             sd3 <= y3_abs << {div_shift_r[3:0], 1'b0};
             div_cycles_left <= div_shift_r[3:0];
-            div_working <= !div_shift_r[4]; //Read above
-            div_finished <= div_shift_r[4];
-            div_init3 <= 1'b0;
         end else if (div_working) begin
             remainder <=(count_fits == 2'd3) ? sub3[31:0] :
                         (count_fits == 2'd2) ? sub2[31:0] :
@@ -290,10 +305,6 @@ module ALU (
             sd <= {2'b00, sd[31:2]};
             sd3 <= {2'b00, sd3[33:2]};
             div_cycles_left <= div_cycles_left - 4'h1;
-            div_working <= (div_cycles_left != 0);
-            div_finished <= (div_cycles_left == 0);
-        end else begin
-            div_finished <= 0;
         end
     end
 
