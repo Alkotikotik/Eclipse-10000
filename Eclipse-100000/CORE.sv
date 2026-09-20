@@ -300,6 +300,7 @@ module CORE(
     logic EX_branch;
     logic EX_64;
     logic [3:0] EX_lanes;
+    logic [1:0] EX_base;
 
     //Alright so there was a big always_ff block here previousely, which
     //apparantely led to high fanout, so just splitting it into 2 always_ff
@@ -706,8 +707,6 @@ module CORE(
             MEM_pht_val         <= EX_pht_val;
 
             MEM_is_load     <= (GPRsSrc == 3'b001);
-            MEM_ram_cs      <= RAM_cs;
-            MEM_vram_cs     <= VRAM_cs;
 
             MEM_SPRWrite    <= SPRWrite;
             MEM_SPRSrc      <= SPRSrc;
@@ -721,7 +720,7 @@ module CORE(
             MEM_irq_key   <= key_interrupt_taken;
 
             MEM_lanes     <= EX_lanes;
-            MEM_aligned   <= fwd_align(gpr_rw0_sel[2:0], GPRs_data_in);
+            MEM_base      <= EX_base;
         end
     end
 
@@ -784,9 +783,10 @@ module CORE(
             mem_read_data = 32'd0;
     end
 
-    logic [31:0] MEM_aligned;
+    logic [1:0]  MEM_base;
     logic [3:0]  MEM_lanes;
     assign EX_lanes   = fwd_lanes(gpr_rw0_sel[2:0]);
+    assign EX_base    = frag_base(gpr_rw0_sel[2:0]);
 
     //Specifically for mul, actually no - not anymore for loads too, actually
     //no not even for mul anymore, specifically for loads now
@@ -1012,6 +1012,16 @@ module CORE(
         endcase
     endfunction
 
+    function automatic [1:0] frag_base(input [2:0] fragment);
+        unique case (fragment)
+            3'b010:  frag_base = 2'd2; //ry1
+            3'b100:  frag_base = 2'd1; //rz1
+            3'b101:  frag_base = 2'd2; //rz2
+            3'b110:  frag_base = 2'd3; //rz3
+            default: frag_base = 2'd0;
+        endcase
+    endfunction
+
     function automatic [3:0] fwd_lanes(input [2:0] fragment);
         unique case (fragment)
             3'b001:  fwd_lanes = 4'b0011;
@@ -1069,35 +1079,41 @@ module CORE(
     //Here automatic comes in play, function gets called more than ones in
     //always_comb block so its neccessery
     //writing to exact lanes of fragmented registers
+    logic [1:0] rel_full;
     always_comb begin
         for (int lane = 0; lane < 4; lane++) begin
             //This notation is pretty scary but its just 8 subsequent bits
             //after 8*lane
-            if (MEM_fwd1 && MEM_lanes[lane])     FWD_rx1_full[8*lane +: 8] = MEM_aligned[8*lane +: 8];
+            rel_full = 2'(lane) - MEM_base;
+            if (MEM_fwd1 && MEM_lanes[lane])     FWD_rx1_full[8*lane +: 8] = MEM_result[8*rel_full +: 8];
             else if (WB_fwd1 && WB_lanes[lane])  FWD_rx1_full[8*lane +: 8] = WB_aligned[8*lane +: 8];
             else                              FWD_rx1_full[8*lane +: 8] = EX_gpr1[8*lane +: 8];
         end
     end
 
     logic [1:0] pick0, pick1, pick2;
+    logic [1:0] rel0, rel1, rel2;
     always_comb begin
         for (int b = 0; b < 4; b++) begin
             pick0 = EX_pick0[2*b +: 2];
+            rel0  = pick0 - MEM_base;
             pick1 = EX_pick1[2*b +: 2];
+            rel1  = pick1 - MEM_base;
             pick2 = EX_pick2[2*b +: 2];
+            rel2  = pick2 - MEM_base;
 
             if (!EX_keep0[b])                        FWD_rx0[8*b +: 8] = 8'h0;
-            else if (MEM_fwd0 && MEM_lanes[pick0])   FWD_rx0[8*b +: 8] = MEM_aligned[8*pick0 +: 8];
+            else if (MEM_fwd0 && MEM_lanes[pick0])   FWD_rx0[8*b +: 8] = MEM_result[8*rel0 +: 8];
             else if (WB_fwd0 && WB_lanes[pick0])     FWD_rx0[8*b +: 8] = WB_aligned[8*pick0 +: 8];
             else                                     FWD_rx0[8*b +: 8] = EX_gpr0[8*pick0 +: 8];
 
             if (!EX_keep1[b])                        FWD_rx1[8*b +: 8] = 8'h0;
-            else if (MEM_fwd1 && MEM_lanes[pick1])   FWD_rx1[8*b +: 8] = MEM_aligned[8*pick1 +: 8];
+            else if (MEM_fwd1 && MEM_lanes[pick1])   FWD_rx1[8*b +: 8] = MEM_result[8*rel1 +: 8];
             else if (WB_fwd1 && WB_lanes[pick1])     FWD_rx1[8*b +: 8] = WB_aligned[8*pick1 +: 8];
             else                                     FWD_rx1[8*b +: 8] = EX_gpr1[8*pick1 +: 8];
 
             if (!EX_keep2[b])                        FWD_rxi[8*b +: 8] = 8'h0;
-            else if (MEM_fwd2 && MEM_lanes[pick2])   FWD_rxi[8*b +: 8] = MEM_aligned[8*pick2 +: 8];
+            else if (MEM_fwd2 && MEM_lanes[pick2])   FWD_rxi[8*b +: 8] = MEM_result[8*rel2 +: 8];
             else if (WB_fwd2 && WB_lanes[pick2])     FWD_rxi[8*b +: 8] = WB_aligned[8*pick2 +: 8];
             else                                     FWD_rxi[8*b +: 8] = EX_gpr2[8*pick2 +: 8];
         end
@@ -1163,8 +1179,6 @@ module CORE(
 
     logic [31:0] ram_data_out;
 
-    logic RAM_cs; //Chip select
-    logic VRAM_cs;
     logic [15:0] mmio_timer_reg;
 
     logic ZeroDivException;
@@ -1375,14 +1389,14 @@ module CORE(
     // 1MB VRAM        : 0x04000000 - 0x040FFFFF
     // MMIO Registers  : I/O stuff
     always_comb begin
-        RAM_cs  = 0;
-        VRAM_cs = 0;
+        MEM_ram_cs  = 0;
+        MEM_vram_cs = 0;
 
-        if (memTarget[31:26] == 6'b0) begin //A little optimizations
-            RAM_cs = 1;
+        if (MEM_memTarget[31:26] == 6'b0) begin //A little optimizations
+            MEM_ram_cs = 1;
         end
-        else if (memTarget[31:20] == 12'h040) begin
-            VRAM_cs = 1;
+        else if (MEM_memTarget[31:20] == 12'h040) begin
+            MEM_vram_cs = 1;
         end
         //Else memFault, not really actually its either IO_cs or memFault,
         //I moved IO_cs to MEM because it doesn't really gate anything earlier,
