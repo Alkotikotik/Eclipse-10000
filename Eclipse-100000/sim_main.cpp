@@ -31,10 +31,42 @@ static uint64_t g_retired_instructions = 0;
 static uint64_t g_cond_branches = 0;
 static uint64_t g_branch_mispredicts = 0;
 
+static uint64_t g_lost_mem_stall = 0;
+static uint64_t g_lost_div_stall = 0;
+static uint64_t g_lost_bubble = 0;
+static uint64_t g_redirects = 0;
+static uint64_t g_faults = 0;
+static constexpr uint64_t FLUSH_PENALTY =
+    3; // MEM_redirect kills IF, ID and EX - measured, not assumed
+
 static inline double current_cpi() {
     return g_retired_instructions
                ? static_cast<double>(g_total_cycles) / static_cast<double>(g_retired_instructions)
                : 0.0;
+}
+
+static void print_cpi_waterfall() {
+    const double instrs =
+        g_retired_instructions ? static_cast<double>(g_retired_instructions) : 1.0;
+    const uint64_t flush = (g_redirects + g_faults) * FLUSH_PENALTY;
+    const uint64_t named = g_lost_mem_stall + g_lost_div_stall + g_lost_bubble + flush;
+    const uint64_t lost =
+        g_total_cycles > g_retired_instructions ? g_total_cycles - g_retired_instructions : 0;
+
+    std::cout << "\n--- CPI WATERFALL ---" << std::endl;
+    std::cout << std::fixed << std::setprecision(4);
+    std::cout << "  1.0000  retired instructions" << std::endl;
+    std::cout << "  " << flush / instrs << "  redirect flush (" << g_redirects
+              << " mispredict/demolish, " << g_faults << " fault)" << std::endl;
+    std::cout << "  " << g_lost_bubble / instrs << "  load-use / mul-use bubble" << std::endl;
+    std::cout << "  " << g_lost_div_stall / instrs << "  div_stall" << std::endl;
+    std::cout << "  " << g_lost_mem_stall / instrs << "  mem_stall (store->load overlap)"
+              << std::endl;
+    std::cout << "  " << (lost > named ? (lost - named) / instrs : 0.0)
+              << "  residual (unattributed)" << std::endl;
+    std::cout << "  ------" << std::endl;
+    std::cout << "  " << current_cpi() << "  measured CPI" << std::endl;
+    std::cout << "  MPKI: " << 1000.0 * g_branch_mispredicts / instrs << std::endl;
 }
 
 static inline double current_mispredict_pct() {
@@ -66,11 +98,8 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     auto top = std::make_unique<VCORE>();
 
-    // VRAM lives in the RTL now, point straight at it instead of
-    // mirroring writes, that way byte enables are honoured for free
     uint8_t *vram_buffer = &top->rootp->CORE__DOT__system_vram__DOT__vramm[0];
 
-    // Reset sequence
     top->reset = 1;
     top->clk = 0;
     top->eval();
@@ -105,10 +134,23 @@ int main(int argc, char **argv) {
                 vram_dirty = true;
             }
 
-            //== CPI sampling, right after the posedge settles ==//
             g_total_cycles++;
-            if (top->rootp->CORE__DOT__isWB_valid) {
+            if (top->rootp->CORE__DOT__isWB_valid && !top->rootp->CORE__DOT__mem_stall) {
                 g_retired_instructions++;
+            }
+
+            if (top->rootp->CORE__DOT__mem_stall) {
+                g_lost_mem_stall++;
+            } else if (top->rootp->CORE__DOT__stall) {
+                g_lost_div_stall++;
+            } else if (top->rootp->CORE__DOT__bubble) {
+                g_lost_bubble++;
+            }
+            if (top->rootp->CORE__DOT__MEM_redirect) {
+                g_redirects++;
+            }
+            if (top->rootp->CORE__DOT__MEM_fault) {
+                g_faults++;
             }
             if (top->rootp->CORE__DOT__isMEM_valid && top->rootp->CORE__DOT__MEM_branch &&
                 !top->rootp->CORE__DOT__MEM_irq && !top->rootp->CORE__DOT__mem_stall) {
@@ -191,6 +233,8 @@ int main(int argc, char **argv) {
     std::cout << "Conditional branches:  " << g_cond_branches << std::endl;
     std::cout << "Mispredicts:           " << g_branch_mispredicts << " ("
               << current_mispredict_pct() << "%)" << std::endl;
+
+    print_cpi_waterfall();
 
     std::cout << "\n--- VRAM DUMP ---" << std::endl;
     for (uint32_t vram_offset = 0; vram_offset <= 0x200; vram_offset += 4) {

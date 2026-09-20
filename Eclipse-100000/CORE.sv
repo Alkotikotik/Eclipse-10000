@@ -320,8 +320,8 @@ module CORE(
             EX_IR <= ID_IR;
             EX_64 <= ID_64;
             EX_IR_2 <= ID_IR_2;
-            EX_rx0_val <= (ID_banked0 && kernel_mode_next) ? (ID_rx0[3]     ? KGPR1_next : KGPR0_next) : ID_rx0_val;
-            EX_rx1_val <= (ID_banked1 && kernel_mode_next) ? (ID_rx1[3]     ? KGPR1_next : KGPR0_next) : ID_rx1_val;
+            EX_rx0_val <= (ID_banked0 && kernel_mode_next) ? (ID_rx0[3]   ? KGPR1_next : KGPR0_next) : ID_rx0_val;
+            EX_rx1_val <= (ID_banked1 && kernel_mode_next) ? (ID_rx1[3]   ? KGPR1_next : KGPR0_next) : ID_rx1_val;
             EX_rx2_val <= (ID_banked2 && kernel_mode_next) ? (ID_IR_2[27] ? KGPR1_next : KGPR0_next) : ID_rx2_val;
             EX_branch <= ID_branch;
             EX_early_target <= ID_early_target;
