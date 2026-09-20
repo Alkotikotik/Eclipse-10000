@@ -446,6 +446,7 @@ module CORE(
         else EX_kernel_mode <= kernel_mode_next;
     end
 
+
     logic [4:0] shift_amount;
     assign shift_amount = FWD_rx1[4:0] + EX_IR[4:0];
 
