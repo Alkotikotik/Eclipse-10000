@@ -7,6 +7,8 @@ use std::process;
 const LMA_SUBOP: u32 = 0b010001;
 const STX_SUBOP: u32 = 0b010000;
 const LDX_SUBOP: u32 = 0b011111;
+const MDLX_SUBOP: u32 = 0b011110;
+const MDCX_SUBOP: u32 = 0b011101;
 
 fn branch_info(mnemonic: &str) -> Option<(u32, bool)> {
     Some(match mnemonic {
@@ -40,7 +42,7 @@ fn is_long_instr(line: &str) -> bool {
         .next()
         .unwrap_or("")
         .to_uppercase();
-    head == "LMA" || head == "LDX" || head == "STX" || branch_info(&head).is_some()
+    head == "LMA" || head == "LDX" || head == "STX" || head == "MDLX" || head == "MDCX" || branch_info(&head).is_some()
 }
 
 fn parse_imm64(token: &str) -> i64 {
@@ -138,6 +140,8 @@ fn main() -> io::Result<()> {
     opcodes.insert("LDR", 0b100011);
     opcodes.insert("STR", 0b100111);
     opcodes.insert("LDX", 0b000000);
+    opcodes.insert("MDLX", 0b000000);
+    opcodes.insert("MDCX", 0b000000);
     opcodes.insert("STX", 0b000000);
 
     for name in ["BEQ", "BNE", "BGU", "BSU", "BGEU", "BSEU", "BGS", "BSS", "BGES", "BSES",
@@ -205,6 +209,8 @@ fn main() -> io::Result<()> {
         let mut immediate: i64 = 0;
         let mut branch_target: i64 = 0;
         let mut word1: Option<u32> = None;
+        let mut mdx_stride: i64 = 0;
+        let mut mdx_dest: u32 = 0;
 
         match instr.as_str() {
             "LOAD" => {
@@ -226,6 +232,44 @@ fn main() -> io::Result<()> {
                     } else {
                         immediate = parse_imm64(tokens[2]);
                     }
+                }
+            }
+            "MDLX" | "MDCX" => {
+                // MDLX rx1 <=< [rb1, rx0 * stride, rb0 << val + imm13]
+                // '*' survives the tokenizer, and a lone '-' negates whatever follows it
+                let mut ops: Vec<String> = Vec::new();
+                let mut negate = false;
+                for t in tokens[1..].iter() {
+                    if *t == "*" { continue; }
+                    if *t == "-" { negate = true; continue; }
+                    ops.push(if negate { format!("-{}", t) } else { t.to_string() });
+                    negate = false;
+                }
+                if ops.len() < 6 {
+                    panic!("Assembler Error: {} needs dest, base, index, stride, shift reg and scale, got {:?}", instr, ops);
+                }
+                let full = |name: &str, what: &str| -> u32 {
+                    let sel = parse_reg(name);
+                    if sel & 0b111 != 0 {
+                        panic!("Assembler Error: {} {} '{}' must be a full rx register", instr, what, name);
+                    }
+                    sel >> 3
+                };
+                mdx_dest   = parse_reg(&ops[0]);
+                rx1        = full(&ops[1], "base");
+                index_reg  = full(&ops[2], "index");
+                mdx_stride = parse_imm64(&ops[3]);
+                rx0        = full(&ops[4], "shift register");
+                scale      = parse_imm64(&ops[5]) as u32;
+                immediate  = if ops.len() > 6 { parse_imm64(&ops[6]) } else { 0 };
+                if !(-8192..=8191).contains(&mdx_stride) {
+                    panic!("Assembler Error: {} stride {} does not fit in signed 14 bits", instr, mdx_stride);
+                }
+                if scale > 3 {
+                    panic!("Assembler Error: {} shift {} must be 0..3", instr, scale);
+                }
+                if !(-4096..=4095).contains(&immediate) {
+                    panic!("Assembler Error: {} offset {} does not fit in signed imm13", instr, immediate);
                 }
             }
             "LDX" | "STX" => {
@@ -278,7 +322,7 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-            "ADD" | "SUB" | "MUL" | "LOMUL" | "HIMUL" | "DIV" | "MOD" | "SDIV" => {
+            "ADD" | "SUB" | "MUL" | "LOMUL" | "DIV" | "MOD" | "SDIV" => {
                 let mut dest_reg: u32 = 0;
                 let mut src1_reg: u32 = 0;
                 let src2_reg: u32;
@@ -470,6 +514,22 @@ fn main() -> io::Result<()> {
                     | (((i >> 26) & 0x7) << 10)
                     | ((subop & 0x3F) << 4)
                     | ((i >> 22) & 0xF)
+            }
+            "MDLX" | "MDCX" => {
+                let subop = if instr == "MDLX" { MDLX_SUBOP } else { MDCX_SUBOP };
+                let st = (mdx_stride as u32) & 0x3FFF;
+                word1 = Some(((index_reg & 0x1F) << 27)
+                    | ((mdx_dest & 0xFF) << 19)
+                    | ((scale & 0x3) << 17)
+                    | ((st & 0xF) << 13)
+                    | (imm_u32 & 0x1FFF));
+                ((opcode & 0x3F) << 26)
+                    | ((rx0 & 0x1F) << 21)
+                    | (((st >> 11) & 0x7) << 18)
+                    | ((rx1 & 0x1F) << 13)
+                    | (((st >> 8) & 0x7) << 10)
+                    | ((subop & 0x3F) << 4)
+                    | ((st >> 4) & 0xF)
             }
             "LMA" => {
                 word1 = Some(imm_u32);

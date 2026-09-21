@@ -5,6 +5,7 @@ module ALU (
     input  logic [31:0] y,
     input  logic [5:0] opcode,
     input  logic [31:0] imm2,
+    input  logic [31:0] mul_y_in,
     input  logic [2:0] x_fragment,
     input  logic [2:0] y_fragment,
     input  logic isDiv_valid,
@@ -34,7 +35,7 @@ module ALU (
     always_ff @(posedge clk) begin //No reset :(
         if (!mem_stall) begin //vivado maps it onto DSP register input ports, meaning they freeze on mem_stall
             mul_x <= x;
-            mul_y <= y + imm2; //moved + imm2 to here this should reduce critical path
+            mul_y <= mul_y_in; //moved + imm2 to here this should reduce critical path
             mul_product <= mul_x * mul_y;
         end
     end
@@ -85,8 +86,16 @@ module ALU (
 
     /* verilator lint_off UNUSEDSIGNAL */
     logic [32:0] sh_wide;
-    /* verilator lint_on UNUSEDSIGNAL */
-    assign sh_wide = $signed({sh_fill, sh_src}) >>> shift_amount;
+    /* verilator lint_on UNUSEDSIGNAL */ 
+
+    //Split into separate bits might work might not
+    logic signed [32:0] sh_s0, sh_s1, sh_s2, sh_s3, sh_s4;
+    assign sh_s0   = $signed({sh_fill, sh_src});
+    assign sh_s1   = shift_amount[0] ? sh_s0 >>> 1  : sh_s0;
+    assign sh_s2   = shift_amount[1] ? sh_s1 >>> 2  : sh_s1;
+    assign sh_s3   = shift_amount[2] ? sh_s2 >>> 4  : sh_s2;
+    assign sh_s4   = shift_amount[3] ? sh_s3 >>> 8  : sh_s3;
+    assign sh_wide = shift_amount[4] ? sh_s4 >>> 16 : sh_s4;
 
     assign shift_result = is_shl ? rev32(sh_wide[31:0]) : sh_wide[31:0];
 

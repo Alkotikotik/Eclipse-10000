@@ -447,6 +447,10 @@ module CORE(
         endcase
     end
 
+    logic [31:0] mul_imm, mul_y_in;
+    assign mul_imm  = (opcode == 6'b001101) ? zero_ext_imm10 : alu_imm2; //HIMUL is rx1 + imm10, LOMUL is rx2 +- imm2
+    assign mul_y_in = FWD_rx1 + mul_imm;
+
     logic[31:0] LDX_base, LDX_idx, LDX_imm29; //Just enough to cover all 256MB signed
 
     assign LDX_base = (rx1[7:3] == 5'd31) ? 32'b0 : FWD_rx1_full; //Theoretically it is base +- imm29, but usually base is 0 so rx31
@@ -1512,6 +1516,7 @@ module CORE(
         .y(AluMuxY),
         .opcode(opcode),
         .imm2(alu_imm2),
+        .mul_y_in(mul_y_in),
         .x_fragment(rx0[2:0]),
         .y_fragment(rx1[2:0]),
         .isDiv_valid(isEX_valid), //Not demolish bc it has a long of irrelivant data that just slows it dow
