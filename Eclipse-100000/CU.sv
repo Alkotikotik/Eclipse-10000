@@ -111,6 +111,9 @@ module CU(
                             GPRsSrc = 3'b101;
                             GPRsWrite = 1;
                         end
+                        6'b011100: begin //MDSX
+                            memWrite = 1;
+                        end
                         default ;
                     endcase
                 end else begin

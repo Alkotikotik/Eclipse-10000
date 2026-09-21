@@ -216,7 +216,7 @@ module CORE(
 
     //==Multi-dimensional operations - sounds cool asf
     logic isID_mdx;
-    assign isID_mdx = ID_64 && (ID_IR[9:4] == 6'b011110 || ID_IR[9:4] == 6'b011101);
+    assign isID_mdx = ID_64 && (ID_IR[9:4] == 6'b011110 || ID_IR[9:4] == 6'b011101 || ID_IR[9:4] == 6'b011100);
 
     //DSP accepts signed and signed only
     logic signed [24:0] ID_mdx_ri;
@@ -254,6 +254,14 @@ module CORE(
     assign ID_banked0 = (ID_rx0[7:3] <= 5'd1);
     assign ID_banked1 = (ID_rx1[7:3] <= 5'd1);
     assign ID_banked2 = (ID_IR_2[31:27] <= 5'd1);
+
+    //Ladies and gentlemen we are currentely wintessing a crime scene: EX steams ID's rr2!!!
+    //In reality though: MDSX needs to read 4 registers and I don't feel like
+    //adding 4th LUTRAM read port bc its gonna copy LUTRAM which i just don't
+    //want to do. And because address only arrives at EX we can freely just
+    //steal this read from ID.
+    logic [4:0] rr2_sel;
+    assign rr2_sel = (isEX_valid && isEX_mdsx) ? EX_IR_2[26:22] : ID_IR_2[31:27];
 
     //For later when memory would take actual clock cycles to reach
     //Well its later now
@@ -1082,7 +1090,7 @@ module CORE(
                              !(WB_gpr_dest[7:3] <= 5'd1 && WB_kernelMode);
     assign ID_wb_hit0 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx0[7:3]);
     assign ID_wb_hit1 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx1[7:3]);
-    assign ID_wb_hit2 = wb_writes_array && (WB_gpr_dest[7:3] == ID_IR_2[31:27]);
+    assign ID_wb_hit2 = wb_writes_array && (WB_gpr_dest[7:3] == rr2_sel);
 
     //Do once
     logic [31:0] WB_val_aligned;
@@ -1543,7 +1551,7 @@ module CORE(
         //Again - read in ID
         .rr0(ID_rx0[7:3]),
         .rr1(ID_rx1[7:3]), //Natevily base
-        .rr2(ID_IR_2[31:27]), //Index selector
+        .rr2(rr2_sel), //Index selector
         .rw0(WB_gpr_dest),
         .data_in(WB_val),
         .data_out0(GPRs_data_out0),
