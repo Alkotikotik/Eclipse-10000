@@ -214,6 +214,28 @@ module CORE(
         //else: stall holds PC and IR as they are
     end
 
+    //==Multi-dimensional operations - sounds cool asf
+    logic isID_mdx;
+    assign isID_mdx = ID_64 && (ID_IR[9:4] == 6'b011110 || ID_IR[9:4] == 6'b011101);
+
+    //DSP accepts signed and signed only
+    logic signed [24:0] ID_mdx_ri;
+    logic signed [13:0] ID_stride;
+    logic signed [31:0] ID_imm13;
+    assign ID_mdx_ri = {1'b0, ID_rx2_val[23:0]};
+    assign ID_stride = {ID_IR[20:18], ID_IR[12:10], ID_IR[3:0], ID_IR_2[16:13]};
+    assign ID_imm13  = {{19{ID_IR_2[12]}}, ID_IR_2[12:0]};
+
+    //Finishes at the start of EX
+    //So thats a cool one: DSP supports fused add multiply and I really love
+    //fused add multiply. I remember first learning vfmadd231pd and I was
+    //quite faschinated by it. Now I finally implement it myself
+    logic [31:0] EX_mdx_product;
+    (* use_dsp = "yes" *)
+    always_ff @(posedge clk) begin
+        if (!stall) EX_mdx_product <= 32'(ID_mdx_ri * ID_stride + ID_imm13);
+    end
+
     //We need to compare those registers to EX's ones it case they
     //overlap - stall
     //So the regfile read is moved to the ID, saves up on critical path and ID
@@ -293,6 +315,7 @@ module CORE(
     logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
     logic EX_mem_hit0, EX_mem_hit1, EX_mem_hit2, EX_wb_hit0, EX_wb_hit1, EX_wb_hit2;
     logic EX_banked0, EX_banked1, EX_banked2;
+    logic isEX_mdx;
     logic [7:0] EX_pick0, EX_pick1, EX_pick2;
     logic [3:0] EX_keep0, EX_keep1, EX_keep2;
     logic EX_predicted_taken;
@@ -347,6 +370,8 @@ module CORE(
             EX_wb_hit0  <= isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx0[7:3]);
             EX_wb_hit1  <= isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx1[7:3]);
             EX_wb_hit2  <= isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_IR_2[31:27]);
+
+            isEX_mdx <= isID_mdx;
         end
     end
 
@@ -1203,9 +1228,11 @@ module CORE(
             endcase
         end
 
+    logic [31:0] MDX_idx;
+    assign MDX_idx = FWD_rx0 << EX_IR_2[18:17];
     always_comb begin
         unique case (opcode)
-            6'b000000: memTarget = (LDX_base + LDX_imm29) + LDX_idx;
+            6'b000000: memTarget = (LDX_base + (isEX_mdx ? EX_mdx_product : LDX_imm29)) + (isEX_mdx ? MDX_idx : LDX_idx); //STX/MDX
             6'b100100: memTarget = (ActiveSP - {29'd0, push_pop_bytes}); // PUSH
             6'b100101: memTarget = ActiveSP;                            // POP
             6'b101000,
@@ -1445,7 +1472,7 @@ module CORE(
             3'd2: GPRs_data_in = shift_result;
             3'd3: GPRs_data_in = div_result;
             3'd4: GPRs_data_in = sign_ext_imm18;
-            3'd5: GPRs_data_in = memTarget;
+            3'd5: GPRs_data_in = SelectedSPR + sign_ext_imm16; //SPRLEA
             3'd6: GPRs_data_in = EX_IR_2;
             3'd7: GPRs_data_in = rng_result;
         endcase

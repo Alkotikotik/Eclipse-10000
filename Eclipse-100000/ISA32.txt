@@ -129,8 +129,31 @@ Second word:
 [21:0]  imm[21:0]
 
 STX/LDX
-010000 : STX rx0 >=> [rx1, rx2 << val + addr] <=< //Stores rx0 at rx1 + ((rx2 << val) + addr)
-011111 : LDX rx0 <=< [rx1, rx2 << val + addr] >=>
+010000 : STX rx0 >=> [rx1, rx2 << val + addr] //Stores rx0 at rx1 + ((rx2 << val) + addr)
+011111 : LDX rx0 <=< [rx1, rx2 << val + addr]
+
+MD-type (MDLX/MDCX) <<== Multi-Dimensional
+First word:
+[31:26] 000000  (escape opcode to 64-bit instructions)
+[25:21] rb0      (shift index, only full registers can be used)
+[20:18] stride[13:11]
+[17:13] rb1   (register base, only full registers can be used)
+[12:10] stride[10:8]
+[9:4]   sub-op
+[3:0]   stride[7:4]
+Second word:
+[31:27] rx0      (multiply index)
+[26:19] rx1      (dest)
+[18:17] val     (scale for rb0, 0-3)
+[16:13] stride[3:0]
+[12:0]  imm13   (signed offset)
+==>>
+
+addr = rb1 + (rx0 * stride) + (rb0 << val) + imm13
+
+MDLX/MDCX
+011110 : MDLX rx1 <=< [rb1, rx0 * stride, rb0 << val + imm13]  //Loads to rx1 from addr
+011101 : MDCX rx1 <=< [rb1, rx0 * stride, rb0 << val]         //Computes that into rx1, theoretically used for calculating address and then storing value in that address
 
 Fused CMP and branch, separated into pure register and pure immediate forms, in order to avoid useless wait for ALU in pure register form
 Register Form <<==
