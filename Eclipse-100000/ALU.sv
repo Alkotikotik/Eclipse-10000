@@ -88,14 +88,7 @@ module ALU (
     logic [32:0] sh_wide;
     /* verilator lint_on UNUSEDSIGNAL */ 
 
-    //Split into separate bits might work might not
-    logic signed [32:0] sh_s0, sh_s1, sh_s2, sh_s3, sh_s4;
-    assign sh_s0   = $signed({sh_fill, sh_src});
-    assign sh_s1   = shift_amount[0] ? sh_s0 >>> 1  : sh_s0;
-    assign sh_s2   = shift_amount[1] ? sh_s1 >>> 2  : sh_s1;
-    assign sh_s3   = shift_amount[2] ? sh_s2 >>> 4  : sh_s2;
-    assign sh_s4   = shift_amount[3] ? sh_s3 >>> 8  : sh_s3;
-    assign sh_wide = shift_amount[4] ? sh_s4 >>> 16 : sh_s4;
+    assign sh_wide = $signed({sh_fill, sh_src}) >>> shift_amount;
 
     assign shift_result = is_shl ? rev32(sh_wide[31:0]) : sh_wide[31:0];
 
