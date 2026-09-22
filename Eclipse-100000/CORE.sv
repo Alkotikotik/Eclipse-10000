@@ -38,7 +38,7 @@ module CORE(
                         !((opcode == 6'b010000 || opcode == 6'b111101) && early_target_ok)));
 
     assign stall     = div_stall || mem_stall;
-    assign bubble    = (mul_use_hazard || load_use_hazard || rr2_conflict) && !stall; //If we already stall no point in bubble, it also breaks div
+    assign bubble    = (mul_use_hazard || load_use_hazard || rr2_conflict || mdx_idx_hazard) && !stall; //If we already stall no point in bubble, it also breaks div
 
     //== IF(Instruction Fetch) ==//
     logic [31:0] IF_PC;
@@ -228,7 +228,15 @@ module CORE(
     logic signed [24:0] ID_mdx_ri;
     logic signed [13:0] ID_stride;
     logic signed [31:0] ID_imm13;
-    assign ID_mdx_ri = {1'b0, ID_rx2_val[23:0]};
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [31:0] ID_mdx_idx;
+    /* verilator lint_on UNUSEDSIGNAL */ 
+    //ri can be only up to 2^24 signed because its the limitation of one DSP
+    //slice which is 18x25bits, unfornutely increasing it to 2 chained slices
+    //leads to a critical path. Not a big deal tho im not gonna use arrays
+    //past 16MB considering my whole memory is 256MB
+    assign ID_mdx_idx = (ID_banked2 && EX_kernel_mode) ? (ID_IR_2[27] ? KGPR1_next : KGPR0_next) : ID_rx2_val;
+    assign ID_mdx_ri  = ID_mdx_idx[24:0];
     assign ID_stride = {ID_IR[20:18], ID_IR[12:10], ID_IR[3:0], ID_IR_2[16:13]};
     assign ID_imm13  = {{19{ID_IR_2[12]}}, ID_IR_2[12:0]};
 
@@ -270,6 +278,11 @@ module CORE(
     assign rr2_sel = (isEX_valid && isEX_mdsx) ? EX_IR_2[26:22] : ID_IR_2[31:27];
 
     //Not freely tho, if next instruction needs 3 read ports we gotta bubble.
+    logic mdx_idx_hazard;
+    assign mdx_idx_hazard = isID_valid && isID_mdx &&
+                            ((isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_IR_2[31:27])) ||
+                             (isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_IR_2[31:27])));
+
     logic rr2_conflict;
     assign rr2_conflict = isEX_valid && isEX_mdsx && isID_valid && ID_uses_rr2;
 
@@ -377,10 +390,10 @@ module CORE(
             EX_banked0 <= ID_banked0;
             EX_banked1 <= ID_banked1;
             EX_banked2 <= ID_banked2;
-            EX_pick0 <= slice_pick(ID_rx0[2:0]);
+            EX_pick0 <= slice_pick(isID_mdx ? 3'b000 : ID_rx0[2:0]);
             EX_pick1 <= slice_pick(ID_rx1[2:0]);
             EX_pick2 <= slice_pick(ID_IR_2[26:24]);
-            EX_keep0 <= slice_keep(ID_rx0[2:0]);
+            EX_keep0 <= slice_keep(isID_mdx ? 3'b000 : ID_rx0[2:0]);
             EX_keep1 <= slice_keep(ID_rx1[2:0]);
             EX_keep2 <= slice_keep(ID_IR_2[26:24]);
             EX_mem_hit0 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx0[7:3]);
@@ -1264,7 +1277,7 @@ module CORE(
     logic [3:0] ram_byte_enable;
     logic [31:0] ram_data_in_aligned;
 
-    assign gpr_rw0_sel =
+    assign gpr_rw0_sel = isEX_mdx ? EX_IR_2[26:19] :
                 //3 register ALU type
                 (opcode == 6'b000001 || opcode == 6'b000011 || opcode == 6'b000111 || opcode == 6'b000101 || opcode == 6'b001011 || opcode == 6'b001001) ? rx2 :
                 rx0;
@@ -1280,6 +1293,9 @@ module CORE(
 
     logic [31:0] MDX_idx;
     assign MDX_idx = FWD_rx0 << EX_IR_2[18:17];
+
+    logic [31:0] mdx_addr;
+    assign mdx_addr = (LDX_base + EX_mdx_product) + MDX_idx;
     always_comb begin
         unique case (opcode)
             6'b000000: memTarget = (LDX_base + (isEX_mdx ? EX_mdx_product : LDX_imm29)) + (isEX_mdx ? MDX_idx : LDX_idx); //STX/MDX
@@ -1530,7 +1546,7 @@ module CORE(
             3'd2: GPRs_data_in = shift_result;
             3'd3: GPRs_data_in = div_result;
             3'd4: GPRs_data_in = sign_ext_imm18;
-            3'd5: GPRs_data_in = SelectedSPR + sign_ext_imm16; //SPRLEA
+            3'd5: GPRs_data_in = isEX_mdx ? mdx_addr : SelectedSPR + sign_ext_imm16; //MDCX/SPRLEA
             3'd6: GPRs_data_in = EX_IR_2;
             3'd7: GPRs_data_in = rng_result;
         endcase
