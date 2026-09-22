@@ -38,7 +38,7 @@ module CORE(
                         !((opcode == 6'b010000 || opcode == 6'b111101) && early_target_ok)));
 
     assign stall     = div_stall || mem_stall;
-    assign bubble    = (mul_use_hazard || load_use_hazard) && !stall; //If we already stall no point in bubble, it also breaks div
+    assign bubble    = (mul_use_hazard || load_use_hazard || rr2_conflict) && !stall; //If we already stall no point in bubble, it also breaks div
 
     //== IF(Instruction Fetch) ==//
     logic [31:0] IF_PC;
@@ -218,6 +218,12 @@ module CORE(
     logic isID_mdx;
     assign isID_mdx = ID_64 && (ID_IR[9:4] == 6'b011110 || ID_IR[9:4] == 6'b011101 || ID_IR[9:4] == 6'b011100);
 
+    logic isID_mdsx;
+    assign isID_mdsx = ID_64 && (ID_IR[9:4] == 6'b011100);
+
+    logic ID_uses_rr2; //LDX, STX, MDLX, MDCX, MDSX
+    assign ID_uses_rr2 = ID_64 && (ID_IR[9:4] == 6'b011111 || ID_IR[9:4] == 6'b010000 || isID_mdx);
+
     //DSP accepts signed and signed only
     logic signed [24:0] ID_mdx_ri;
     logic signed [13:0] ID_stride;
@@ -262,6 +268,10 @@ module CORE(
     //steal this read from ID.
     logic [4:0] rr2_sel;
     assign rr2_sel = (isEX_valid && isEX_mdsx) ? EX_IR_2[26:22] : ID_IR_2[31:27];
+
+    //Not freely tho, if next instruction needs 3 read ports we gotta bubble.
+    logic rr2_conflict;
+    assign rr2_conflict = isEX_valid && isEX_mdsx && isID_valid && ID_uses_rr2;
 
     //For later when memory would take actual clock cycles to reach
     //Well its later now
@@ -310,7 +320,8 @@ module CORE(
     assign ID_uses_MEM_dest = (MEM_gpr_dest[7:3] == ID_rx0[7:3]) || (MEM_gpr_dest[7:3] == ID_rx1[7:3]) || (ID_64 && (MEM_gpr_dest[7:3] == ID_IR_2[31:27]));
 
     logic  mul_use_hazard;
-    assign mul_use_hazard = isID_valid && ((EX_is_mul && ID_uses_EX_dest) || (MEM_is_mul && ID_uses_MEM_dest));
+    assign mul_use_hazard = isID_valid && ((EX_is_mul && ID_uses_EX_dest) || (MEM_is_mul && ID_uses_MEM_dest) ||
+                                           (EX_is_mul && isID_mdsx && (gpr_rw0_sel[7:3] == ID_IR_2[26:22])));
 
 
     //== EX(Execute) ==//
@@ -323,7 +334,7 @@ module CORE(
     logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
     logic EX_mem_hit0, EX_mem_hit1, EX_mem_hit2, EX_wb_hit0, EX_wb_hit1, EX_wb_hit2;
     logic EX_banked0, EX_banked1, EX_banked2;
-    logic isEX_mdx;
+    logic isEX_mdx, isEX_mdsx;
     logic [7:0] EX_pick0, EX_pick1, EX_pick2;
     logic [3:0] EX_keep0, EX_keep1, EX_keep2;
     logic EX_predicted_taken;
@@ -380,6 +391,7 @@ module CORE(
             EX_wb_hit2  <= isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_IR_2[31:27]);
 
             isEX_mdx <= isID_mdx;
+            isEX_mdsx <= isID_mdsx;
         end
     end
 
@@ -784,6 +796,32 @@ module CORE(
     //the moment there is no mem waiting so its just 1 atm.
     logic  mem_ready;
     logic  mem_stall;
+
+    logic mdsx_banked;
+    assign mdsx_banked = (EX_IR_2[26:23] == 4'b0000);
+
+    logic mdsx_mem_hit, mdsx_kwb_hit;
+    assign mdsx_mem_hit = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == EX_IR_2[26:22]) &&
+                          (!mdsx_banked || MEM_kernelMode == EX_kernel_mode);
+    assign mdsx_kwb_hit = isWB_valid && WB_gpr_write && mdsx_banked && WB_kernelMode && EX_kernel_mode &&
+                          (WB_gpr_dest[7:3] == EX_IR_2[26:22]);
+
+    logic [31:0] mdsx_reg;
+    assign mdsx_reg = (mdsx_banked && EX_kernel_mode) ? (EX_IR_2[22] ? KGPR1 : KGPR0) : ID_rx2_val;
+
+    logic [31:0] mdsx_full;
+    logic [1:0]  mdsx_rel;
+    always_comb begin
+        for (int lane = 0; lane < 4; lane++) begin
+            mdsx_rel = 2'(lane) - MEM_base;
+            if (mdsx_mem_hit && MEM_lanes[lane])      mdsx_full[8*lane +: 8] = MEM_val[8*mdsx_rel +: 8];
+            else if (mdsx_kwb_hit && WB_lanes[lane])  mdsx_full[8*lane +: 8] = WB_val_aligned[8*lane +: 8];
+            else                                      mdsx_full[8*lane +: 8] = mdsx_reg[8*lane +: 8];
+        end
+    end
+
+    logic [31:0] mdsx_data;
+    assign mdsx_data = fwd_slice(EX_IR_2[21:19], mdsx_full);
 
     //Alright so memRead is not quite 1 atm, we've got another hazard here,
     //since new read at the start of MEM and write at the start of MEM happens
@@ -1444,19 +1482,27 @@ module CORE(
         //and they aren't even in critical path so it doesn't matter anyway.
     end
 
+    //Might be a little too much for just 1 instruction, but hey as long as
+    //it doesn't touch critical path - it doesn't matter. I can also reuse it
+    //If I ever want to make more 4reads instructions
+    logic [2:0] store_frag;
+    logic [31:0] store_val;
+    assign store_frag = isEX_mdsx ? EX_IR_2[21:19] : rx0[2:0];
+    assign store_val  = isEX_mdsx ? mdsx_data      : FWD_rx0;
+
     always_comb begin
-        unique case (rx0[2:0])
+        unique case (store_frag)
             3'b011, 3'b100, 3'b101, 3'b110: begin // 8-bit
                 ram_byte_enable = 4'b0001;
-                ram_data_in_aligned = {24'h0, FWD_rx0[7:0]};
+                ram_data_in_aligned = {24'h0, store_val[7:0]};
             end
             3'b001, 3'b010: begin // 16-bit
                 ram_byte_enable = 4'b0011;
-                ram_data_in_aligned = {16'h0, FWD_rx0[15:0]};
+                ram_data_in_aligned = {16'h0, store_val[15:0]};
             end
             default: begin // 32-bit
                 ram_byte_enable = 4'b1111;
-                ram_data_in_aligned = FWD_rx0;
+                ram_data_in_aligned = store_val;
             end
         endcase
     end

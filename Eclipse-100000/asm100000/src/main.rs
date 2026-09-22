@@ -9,6 +9,7 @@ const STX_SUBOP: u32 = 0b010000;
 const LDX_SUBOP: u32 = 0b011111;
 const MDLX_SUBOP: u32 = 0b011110;
 const MDCX_SUBOP: u32 = 0b011101;
+const MDSX_SUBOP: u32 = 0b011100;
 
 fn branch_info(mnemonic: &str) -> Option<(u32, bool)> {
     Some(match mnemonic {
@@ -42,7 +43,7 @@ fn is_long_instr(line: &str) -> bool {
         .next()
         .unwrap_or("")
         .to_uppercase();
-    head == "LMA" || head == "LDX" || head == "STX" || head == "MDLX" || head == "MDCX" || branch_info(&head).is_some()
+    head == "LMA" || head == "LDX" || head == "STX" || head == "MDLX" || head == "MDCX" || head == "MDSX" || branch_info(&head).is_some()
 }
 
 fn parse_imm64(token: &str) -> i64 {
@@ -142,6 +143,7 @@ fn main() -> io::Result<()> {
     opcodes.insert("LDX", 0b000000);
     opcodes.insert("MDLX", 0b000000);
     opcodes.insert("MDCX", 0b000000);
+    opcodes.insert("MDSX", 0b000000);
     opcodes.insert("STX", 0b000000);
 
     for name in ["BEQ", "BNE", "BGU", "BSU", "BGEU", "BSEU", "BGS", "BSS", "BGES", "BSES",
@@ -234,8 +236,9 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
-            "MDLX" | "MDCX" => {
+            "MDLX" | "MDCX" | "MDSX" => {
                 // MDLX rx1 <=< [rb1, rx0 * stride, rb0 << val + imm13]
+                // MDSX takes the same shape, its first register is the data to store
                 // '*' survives the tokenizer, and a lone '-' negates whatever follows it
                 let mut ops: Vec<String> = Vec::new();
                 let mut negate = false;
@@ -515,8 +518,8 @@ fn main() -> io::Result<()> {
                     | ((subop & 0x3F) << 4)
                     | ((i >> 22) & 0xF)
             }
-            "MDLX" | "MDCX" => {
-                let subop = if instr == "MDLX" { MDLX_SUBOP } else { MDCX_SUBOP };
+            "MDLX" | "MDCX" | "MDSX" => {
+                let subop = match instr.as_str() { "MDLX" => MDLX_SUBOP, "MDCX" => MDCX_SUBOP, _ => MDSX_SUBOP };
                 let st = (mdx_stride as u32) & 0x3FFF;
                 word1 = Some(((index_reg & 0x1F) << 27)
                     | ((mdx_dest & 0xFF) << 19)
