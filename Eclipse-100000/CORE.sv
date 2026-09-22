@@ -235,7 +235,7 @@ module CORE(
     //slice which is 18x25bits, unfornutely increasing it to 2 chained slices
     //leads to a critical path. Not a big deal tho im not gonna use arrays
     //past 16MB considering my whole memory is 256MB
-    assign ID_mdx_idx = (ID_banked2 && EX_kernel_mode) ? (ID_IR_2[27] ? KGPR1_next : KGPR0_next) : ID_rx2_val;
+    assign ID_mdx_idx = (ID_banked2 && EX_kernel_mode) ? (ID_IR_2[27] ? KGPR1 : KGPR0) : GPRs_data_out2;
     assign ID_mdx_ri  = ID_mdx_idx[24:0];
     assign ID_stride = {ID_IR[20:18], ID_IR[12:10], ID_IR[3:0], ID_IR_2[16:13]};
     assign ID_imm13  = {{19{ID_IR_2[12]}}, ID_IR_2[12:0]};
@@ -281,7 +281,8 @@ module CORE(
     logic mdx_idx_hazard;
     assign mdx_idx_hazard = isID_valid && isID_mdx &&
                             ((isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_IR_2[31:27])) ||
-                             (isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_IR_2[31:27])));
+                             (isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_IR_2[31:27])) ||
+                             (isWB_valid && WB_gpr_write && (WB_gpr_dest[7:3] == ID_IR_2[31:27])));
 
     logic rr2_conflict;
     assign rr2_conflict = isEX_valid && isEX_mdsx && isID_valid && ID_uses_rr2;
@@ -1298,7 +1299,7 @@ module CORE(
     assign mdx_addr = (LDX_base + EX_mdx_product) + MDX_idx;
     always_comb begin
         unique case (opcode)
-            6'b000000: memTarget = (LDX_base + (isEX_mdx ? EX_mdx_product : LDX_imm29)) + (isEX_mdx ? MDX_idx : LDX_idx); //STX/MDX
+            6'b000000: memTarget = isEX_mdx ? mdx_addr : (LDX_base + LDX_imm29) + LDX_idx; //STX/MDX
             6'b100100: memTarget = (ActiveSP - {29'd0, push_pop_bytes}); // PUSH
             6'b100101: memTarget = ActiveSP;                            // POP
             6'b101000,

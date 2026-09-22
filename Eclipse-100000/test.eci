@@ -1,5 +1,14 @@
 ~init:
-    load rx1 <- 101
-    load rx2 <- 10
-    div rx1, rx1, rx2
-    stx rx1 -> rx31, rx31 << 0, 4000
+    >_ 2D u8 2x2 array
+    LOAD rx1 <- 4000
+    LOAD rx20 <- 4004
+    LMA rx0 <- 0x110B2040 >_ a = 64, b = 32, c = 11, d = 17
+    STX rx0 -> rx31, rx1 << 0
+
+~loop:
+    MDLX rz20 <=< [rx1, rx31 * 0, rx3 << 0]
+    MDSX rz20 >=> [rx20, rx31 * 0, rx3 << 0]
+
+    ADD rx3 <- [rx3, rx31 + 1]
+    IBSU rx3 <-> 3 -> ~loop
+~finish:
