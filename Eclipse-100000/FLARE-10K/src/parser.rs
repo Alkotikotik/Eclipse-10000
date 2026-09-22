@@ -84,7 +84,7 @@ pub enum Type {
     Bool,
     Struct(String),
     Ptr(Box<Type>),
-    Array(Box<Type>, usize),
+    Array(Box<Type>, Vec<usize>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -697,19 +697,27 @@ impl<'a> Parser<'a> {
             );
         };
 
-        if let Some(&(Token::LBracket, _, _)) = self.tokens.peek() {
+        //Arrays
+        //So as you can see this is a while loop, meaning parser can parse an array of virtually
+        //infinite dimensions, ofc not.
+        let mut dims_vec = Vec::new();
+
+        while let Some(&(Token::LBracket, _, _)) = self.tokens.peek() {
             self.advance();
             let (size_tok, size_line, size_col) =
                 self.tokens.next().expect("Unexpected End of File");
-            let size = match size_tok {
+            let dim_size = match size_tok {
                 Token::IntLiteral(n) if n > 0 => n as usize,
                 other => panic!(
                     "Parser Error: Expected positive integer array size, found {:?} at line {}, character {}",
                     other, size_line, size_col
                 ),
             };
+            dims_vec.push(dim_size);
             self.expect(Token::RBracket);
-            ty = Type::Array(Box::new(ty), size);
+        }
+        if !dims_vec.is_empty() {
+            ty = Type::Array(Box::new(ty), dims_vec);
         }
 
         if let Some(&(Token::Equal, _, _)) = self.tokens.peek() {

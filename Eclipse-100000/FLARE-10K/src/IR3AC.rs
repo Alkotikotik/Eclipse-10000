@@ -116,7 +116,31 @@ pub enum IRInst {
         offset: i32,
         src: IROperand,
     },
-
+    Mdlx {
+        dest: IROperand,
+        base: IROperand,
+        mul_index: IROperand, //registers
+        sh_index: IROperand,
+        stride: i16,
+        val: u8,
+        offset: i16, //imm13
+    },
+    Mdsx {
+        src: IROperand,
+        base: IROperand,
+        mul_index: IROperand,
+        sh_index: IROperand,
+        stride: i16,
+        val: u8,
+        offset: i16,
+    },
+    Mdcx { //Its multi-dimensional computex indexed btw
+        dest: IROperand,
+        base: IROperand,
+        index: IROperand,
+        stride: i16,
+        val: u8,
+    },
     RegFieldRead {
         //Fields of regarches are accessed using sub-registers, even though IR doesn't
         //know about it
@@ -864,10 +888,11 @@ impl IR {
                 let is_local_struct = matches!(ty, Type::Struct(sname) if !self.structs[sname].is_reg);
 
                 match ty {
-                    Type::Array(elem_ty, count) => {
+                    Type::Array(elem_ty, vec_dims) => {
                         let elem_size = self.get_type_size(elem_ty);
                         let elem_align = self.get_type_align(elem_ty);
-                        let slot_size = elem_size * count;
+                        let slot_size = elem_size * vec_dims.iter().product::<usize>();
+
                         let offset = align_to(self.local_frame_size, elem_align);
                         self.local_frame_size = offset + slot_size;
                         self.local_slots.insert(name.clone(), offset);

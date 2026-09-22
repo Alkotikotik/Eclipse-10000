@@ -235,7 +235,25 @@ module CORE(
     //slice which is 18x25bits, unfornutely increasing it to 2 chained slices
     //leads to a critical path. Not a big deal tho im not gonna use arrays
     //past 16MB considering my whole memory is 256MB
-    assign ID_mdx_idx = (ID_banked2 && EX_kernel_mode) ? (ID_IR_2[27] ? KGPR1 : KGPR0) : GPRs_data_out2;
+    logic mdx_mem_hit, mdx_wb_hit;
+    assign mdx_mem_hit = isMEM_valid && MEM_gpr_write && !MEM_is_load && (MEM_gpr_dest[7:3] == ID_IR_2[31:27]) &&
+                         (!ID_banked2 || MEM_kernelMode == EX_kernel_mode);
+    assign mdx_wb_hit  = isWB_valid && WB_gpr_write && (WB_gpr_dest[7:3] == ID_IR_2[31:27]) &&
+                         (!ID_banked2 || WB_kernelMode == EX_kernel_mode);
+
+    logic [31:0] mdx_reg;
+    assign mdx_reg = (ID_banked2 && EX_kernel_mode) ? (ID_IR_2[27] ? KGPR1 : KGPR0) : GPRs_data_out2;
+
+    //mdx forwarding really a same thing to a regular forwarding
+    logic [1:0] mdx_rel;
+    always_comb begin
+        for (int lane = 0; lane < 4; lane++) begin
+            mdx_rel = 2'(lane) - MEM_base;
+            if (mdx_mem_hit && MEM_lanes[lane])     ID_mdx_idx[8*lane +: 8] = MEM_result[8*mdx_rel +: 8];
+            else if (mdx_wb_hit && WB_lanes[lane])  ID_mdx_idx[8*lane +: 8] = WB_aligned[8*lane +: 8];
+            else                                    ID_mdx_idx[8*lane +: 8] = mdx_reg[8*lane +: 8];
+        end
+    end
     assign ID_mdx_ri  = ID_mdx_idx[24:0];
     assign ID_stride = {ID_IR[20:18], ID_IR[12:10], ID_IR[3:0], ID_IR_2[16:13]};
     assign ID_imm13  = {{19{ID_IR_2[12]}}, ID_IR_2[12:0]};
@@ -281,8 +299,8 @@ module CORE(
     logic mdx_idx_hazard;
     assign mdx_idx_hazard = isID_valid && isID_mdx &&
                             ((isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_IR_2[31:27])) ||
-                             (isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_IR_2[31:27])) ||
-                             (isWB_valid && WB_gpr_write && (WB_gpr_dest[7:3] == ID_IR_2[31:27])));
+                             (isMEM_valid && MEM_gpr_write && (MEM_is_load || MEM_is_lomul || MEM_is_himul) && (MEM_gpr_dest[7:3] == ID_IR_2[31:27])) ||
+                             (isWB_valid && WB_gpr_write && (WB_is_lomul || WB_is_himul) && (WB_gpr_dest[7:3] == ID_IR_2[31:27])));
 
     logic rr2_conflict;
     assign rr2_conflict = isEX_valid && isEX_mdsx && isID_valid && ID_uses_rr2;
@@ -1295,8 +1313,11 @@ module CORE(
     logic [31:0] MDX_idx;
     assign MDX_idx = FWD_rx0 << EX_IR_2[18:17];
 
+    //Idk why it was in DSP like what was I thinking
+    (* use_dsp = "no" *)
     logic [31:0] mdx_addr;
     assign mdx_addr = (LDX_base + EX_mdx_product) + MDX_idx;
+
     always_comb begin
         unique case (opcode)
             6'b000000: memTarget = isEX_mdx ? mdx_addr : (LDX_base + LDX_imm29) + LDX_idx; //STX/MDX

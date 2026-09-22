@@ -12,3 +12,4 @@
     ADD rx3 <- [rx3, rx31 + 1]
     IBSU rx3 <-> 3 -> ~loop
 ~finish:
+    JMP ~finish
