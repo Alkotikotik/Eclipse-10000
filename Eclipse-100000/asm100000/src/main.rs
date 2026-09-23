@@ -77,6 +77,7 @@ fn main() -> io::Result<()> {
     let mut labels: HashMap<String, u32> = HashMap::new();
     let mut instrs: Vec<String> = Vec::new();
     let mut instr_addrs: Vec<u32> = Vec::new();
+    let mut data_blocks: Vec<(u32, Vec<u8>)> = Vec::new();
 
     let file = File::open(input_path)?;
     let reader = io::BufReader::new(file);
@@ -97,11 +98,10 @@ fn main() -> io::Result<()> {
             let parts: Vec<&str> = not_commented.split_whitespace().collect();
             if parts.len() > 1 {
                 let target_address = parse_imm64(parts[1]) as u32;
-
-                while address_counter < target_address {
-                    instrs.push("PAD".to_string());
-                    instr_addrs.push(address_counter);
-                    address_counter += 4;
+                if target_address % 4 == 0 {
+                    address_counter = target_address;
+                } else {
+                    panic!("Assembler Error: #ORG isn't 4 byte aligned: {}", target_address);
                 }
             }
             continue;
@@ -174,7 +174,9 @@ fn main() -> io::Result<()> {
 
             labels.insert(data_name, address_counter); //That label would be a base pointer to that declared data
             //strutucture, so you can do like LMA rx0 <- data_name to get a base pointer
+            let start = address_counter;
             address_counter += data_bytes.len() as u32;
+            data_blocks.push((start, data_bytes));
             continue
         }
 
@@ -251,6 +253,9 @@ fn main() -> io::Result<()> {
     opcodes.insert("POP",   0b100101);
 
     let mut output_file = File::create(output_path)?;
+
+    let mut image: Vec<u8> = Vec::new();
+    let mut used: Vec<bool> = Vec::new();
 
     // Second pass: Instruction construction cool rhyme
     for (current_address, inst_line) in instrs.iter().enumerate() {
@@ -636,17 +641,16 @@ fn main() -> io::Result<()> {
         };
 
         //Little endian btw
-        writeln!(output_file, "{:02X}", (machine_code & 0xFF) as u8)?;
-        writeln!(output_file, "{:02X}", ((machine_code >> 8) & 0xFF) as u8)?;
-        writeln!(output_file, "{:02X}", ((machine_code >> 16) & 0xFF) as u8)?;
-        writeln!(output_file, "{:02X}", ((machine_code >> 24) & 0xFF) as u8)?;
-
+        place_in_mem(&mut image, &mut used, current_pc, &machine_code.to_le_bytes());
         if let Some(w1) = word1 {
-            writeln!(output_file, "{:02X}", (w1 & 0xFF) as u8)?;
-            writeln!(output_file, "{:02X}", ((w1 >> 8) & 0xFF) as u8)?;
-            writeln!(output_file, "{:02X}", ((w1 >> 16) & 0xFF) as u8)?;
-            writeln!(output_file, "{:02X}", ((w1 >> 24) & 0xFF) as u8)?;
+            place_in_mem(&mut image, &mut used, current_pc + 4, &w1.to_le_bytes());
         }
+    }
+    for (addr, bytes) in &data_blocks {
+        place_in_mem(&mut image, &mut used, *addr, bytes);
+    }
+    for block in &image {
+        writeln!(output_file, "{:02X}", block)?;
     }
 
     Ok(())
@@ -696,6 +700,18 @@ fn parse_reg(reg_str: &str) -> u32 {
             let reg_id = num & 0x1F;
             (reg_id << 3) | 0b000
         }
+    }
+}
+
+//ORG overlaps with code or other data
+fn place_in_mem(image: &mut Vec<u8>, used: &mut Vec<bool>, addr: u32, bytes: &[u8]) {
+    let start = addr as usize;
+    let end = start + bytes.len();
+    if image.len() < end { image.resize(end, 0); used.resize(end, false); }
+    for (i, b) in bytes.iter().enumerate() {
+        if used[start + i] { panic!("Assembler Error: overlap at 0x{:X}", start + i); }
+        image[start + i] = *b;
+        used[start + i] = true;
     }
 }
 

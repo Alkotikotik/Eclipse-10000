@@ -1,3 +1,5 @@
+>_ Just a collection of all my tests bc I don't wanna delete them...
+
 ~Init:
     LOAD rx30 <- 0
     LOAD rx1 <- 1
@@ -55,3 +57,38 @@
     LOAD rx1 <- 4
     MOV [rx30, rx1]
     JR rx30
+
+>_>
+~boot:
+    JMP ~init
+
+#ORG 4088
+#[ init_db 4 =>>= date ]#
+    0x01, 0x02, 0x16, 0xFF,
+#[ end ]#
+
+#ORG 4000
+#[ init_db 4 =>>= date0 ]#
+    0x01, 0x02, 0x16, 0xFF,
+#[ end ]#
+
+~init:
+    >_ 2D u8 2x2 array
+    LOAD rx1 <- 4004
+    LOAD rx20 <- 4008
+    LMA rx0 <- 0x110B2040 >_ a = 64, b = 32, c = 11, d = 17
+    STX rx0 -> rx31, rx1 << 0
+
+~loop:
+    MDLX rz20 <=< [rx1, rx31 * 0, rx3 << 0]
+    MDSX rz20 >=> [rx20, rx31 * 0, rx3 << 0]
+
+    ADD rx3 <- [rx3, rx31 + 1]
+    IBSU rx3 <-> 3 -> ~loop
+~finish:
+    LMA rx0 <- ~date
+    LOAD rx2 <- 1
+    LDX rz10 <- rx0, rx31 << 0, 0
+    STX rz10 -> rx31, rx31 << 0, 4016
+
+    JMP ~finish

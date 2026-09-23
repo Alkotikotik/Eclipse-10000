@@ -1,29 +1,21 @@
+~boot:
+    JMP ~init
+
 #ORG 4092
-#[ init_db 8 =>>= date ]#
+#[ init_db 4 =>>= date ]#
     0x01, 0x02, 0x16, 0xFF,
-    0xaf, 0xfa, 0xba, 0xab
 #[ end ]#
 
-#ORG 4064
-#[ init_db 8 =>>= date ]#
+#ORG 4088
+#[ init_db 4 =>>= date0 ]#
     0x01, 0x02, 0x16, 0xFF,
-    0xaf, 0xfa, 0xba, 0xab
 #[ end ]#
 
+#ORG 64
 ~init:
-    >_ 2D u8 2x2 array
-    LOAD rx1 <- 4004
-    LOAD rx20 <- 4008
-    LMA rx0 <- 0x110B2040 >_ a = 64, b = 32, c = 11, d = 17
-    STX rx0 -> rx31, rx1 << 0
+    LMA rx0 <- ~date0
+    LOAD rx2 <- 1
+    LDX rz10 <- rx0, rx31 << 0, 3
+    STX rz10 -> rx31, rx31 << 0, 4016
 
-~loop:
-    MDLX rz20 <=< [rx1, rx31 * 0, rx3 << 0]
-    MDSX rz20 >=> [rx20, rx31 * 0, rx3 << 0]
-
-    ADD rx3 <- [rx3, rx31 + 1]
-    IBSU rx3 <-> 3 -> ~loop
-~finish:
-    LMA rx0 <- ~finish
-    STX rx0 -> rx31, rx31 << 0 40012
-    JMP ~finish
+    JMP ~init
