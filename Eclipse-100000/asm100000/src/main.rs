@@ -126,9 +126,66 @@ fn main() -> io::Result<()> {
         //LOAD rz300 <- 231
         //SPRSTR rz300 -> [GP 10]
         //Assembler can just generate 231 at that byte, and that's p much it.
-        if not_commented.to_lowercase().starts_with("#[ init_db") {
-            let db_bytes = Vec::new();
+        //Syntax example:
+        /*
+        #[ init_db 12 =>>= font_data ]#
 
+            0x64, 0x40, 0x20, 0x15,
+            0x12, 0x52, 0xaa, 0xbb,
+            0xaf, 0xab, 0xda, 0xcf,
+
+        #[ end ]#
+        */
+        //db is data_bytes btw not define_byte
+        if not_commented.to_lowercase().starts_with("#[ init") {
+            let mut init_data: Vec<i64> = Vec::new(); //For any data type
+
+            let data_init_tokens = not_commented.trim_start_matches("#[").trim_end_matches("]#").replace("=>>=", " ");
+            let parts: Vec<&str> = data_init_tokens.split_whitespace().collect();
+
+            let elem_size: usize = match parts[0].to_lowercase().as_str() {
+                "init_db" => 1, "init_dy" => 2, "init_dx" => 4, // In the name of FRs
+                // (first one is db because it looks kinda nice)
+                other => panic!("Assembler Error: unknown data declaration(use db, dy, dx)", other),
+            };
+            let (declared_size, data_name) = match parts.len() {
+                3 => (Some(parse_imm64(parts[1]) as usize), parts[2].to_string()), //Optional size
+                  //declaration is not ommitted
+                2 => (None, parts[1].to_string()), //It is ommitted
+                _ => panic!("Assembler Error: bad data header '{}'", not_commented),
+            };
+
+            //Iterate through numbers splitted by comma unil hitting end
+            while let Some(l) = lines.next() {
+                let l = l?;
+                let body = l.split(">_").next().unwrap().trim();
+                if body.is_empty() { continue; }
+                if body.to_lowercase().starts_with("#[") { break; }   // #[ end ]#
+                for tok in body.split(',') {
+                    let tok = tok.trim();
+                    if tok.is_empty() { continue; }   // trailing comma and blank lines
+                    init_data.push(parse_imm64(tok));
+                }
+            }
+            if let Some(declared) = declared_size {
+                if declared < init_data.len() {
+                    panic!("Assembler Error: {} declares {} elements but has {}", name, declared, init_data.len());
+                }
+                init_data.resize(declared, 0); //That automatically pads it with 0 to fill it up to declared size
+            }
+
+
+            let mut data_bytes: Vec<u8> = Vec::new();
+            for val in &init_data {
+                for i in 0..elem_size {
+                    data_bytes.push((val >> (8 * i)) as u8);
+                }
+            }
+            while data_bytes.len() % 4 != 0 { data_bytes.push(0); } //4byte aligned to not break anything
+
+            labels.insert(data_name); //That label would be a base pointer to that declared data
+            //strutucture, so you can do like LMA rx0 <- data_name to get a base pointer
+            address_counter += data_bytes.len() as u32;
         }
     }
 

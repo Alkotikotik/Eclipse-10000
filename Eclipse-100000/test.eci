@@ -12,13 +12,6 @@
     ADD rx3 <- [rx3, rx31 + 1]
     IBSU rx3 <-> 3 -> ~loop
 ~finish:
+    LMA rx0 <- ~finish
+    STX rx0 -> rx31, rx31 << 0 4008
     JMP ~finish
-
-
-#[ init_db 256 =>>= font_data ]#
-
-    0x64, 0x40, 0x20, 0x15,
-    0x12, 0x52, 0xaa, 0xbb,
-    0xaf, 0xab, 0xda, 0xcf,
-
-#[ end ]#
