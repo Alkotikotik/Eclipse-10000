@@ -86,7 +86,8 @@ fn main() -> io::Result<()> {
     // First pass: collect labels and instructions
     // Thats a regular two pass assembler, if you are
     // reading this ain't no way you don't know what that is
-    for line_result in reader.lines() {
+    let mut lines = reader.lines();
+    while let Some(line_result) = lines.next() {
         let line = line_result?;
         let not_commented = line.split(">_").next().unwrap().trim();
         if not_commented.is_empty() {
@@ -125,7 +126,7 @@ fn main() -> io::Result<()> {
         //LOAD rz300 <- 231
         //SPRSTR rz300 -> [GP 10]
         //Assembler can just generate 231 at that byte, and that's p much it.
-        if not_commented.to_lowercase().starts_with("#[init_db") {
+        if not_commented.to_lowercase().starts_with("#[ init_db") {
             let db_bytes = Vec::new();
 
         }

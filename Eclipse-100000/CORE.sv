@@ -1302,13 +1302,13 @@ module CORE(
                 rx0;
 
     logic [2:0] push_pop_bytes;
-        always_comb begin
-            unique case (rx0[2:0])
-                3'b011, 3'b100, 3'b101, 3'b110: push_pop_bytes = 3'd1; // rz - 8-bit
-                3'b001, 3'b010:                 push_pop_bytes = 3'd2; // ry - 16-bit
-                default:                        push_pop_bytes = 3'd4; // rx - 32-bit
-            endcase
-        end
+    always_comb begin
+        unique case (rx0[2:0])
+            3'b011, 3'b100, 3'b101, 3'b110: push_pop_bytes = 3'd1; // rz - 8-bit
+            3'b001, 3'b010:                 push_pop_bytes = 3'd2; // ry - 16-bit
+            default:                        push_pop_bytes = 3'd4; // rx - 32-bit
+        endcase
+    end
 
     logic [31:0] MDX_idx;
     assign MDX_idx = FWD_rx0 << EX_IR_2[18:17];
