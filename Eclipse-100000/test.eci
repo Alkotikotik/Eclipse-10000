@@ -1,7 +1,19 @@
+#ORG 4092
+#[ init_db 8 =>>= date ]#
+    0x01, 0x02, 0x16, 0xFF,
+    0xaf, 0xfa, 0xba, 0xab
+#[ end ]#
+
+#ORG 4064
+#[ init_db 8 =>>= date ]#
+    0x01, 0x02, 0x16, 0xFF,
+    0xaf, 0xfa, 0xba, 0xab
+#[ end ]#
+
 ~init:
     >_ 2D u8 2x2 array
-    LOAD rx1 <- 4000
-    LOAD rx20 <- 4004
+    LOAD rx1 <- 4004
+    LOAD rx20 <- 4008
     LMA rx0 <- 0x110B2040 >_ a = 64, b = 32, c = 11, d = 17
     STX rx0 -> rx31, rx1 << 0
 
@@ -13,5 +25,5 @@
     IBSU rx3 <-> 3 -> ~loop
 ~finish:
     LMA rx0 <- ~finish
-    STX rx0 -> rx31, rx31 << 0 4008
+    STX rx0 -> rx31, rx31 << 0 40012
     JMP ~finish

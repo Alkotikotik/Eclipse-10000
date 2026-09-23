@@ -44,8 +44,7 @@ fn is_long_instr(line: &str) -> bool {
         .next()
         .unwrap_or("")
         .to_uppercase();
-    head == "LMA" || head == "LDX" || head == "STX" || head == "MDLX" || head == "MDCX" || head == "MDSX" || branch_info(&head).is_some();
-
+    head == "LMA" || head == "LDX" || head == "STX" || head == "MDLX" || head == "MDCX" || head == "MDSX" || branch_info(&head).is_some()
 }
 
 //Just one universal parse_imm function and I just use the biggests imm I could have, technically it
@@ -107,16 +106,6 @@ fn main() -> io::Result<()> {
             }
             continue;
         }
-
-        if not_commented.starts_with('~') && not_commented.ends_with(':') {
-            let label = not_commented[1..not_commented.len() - 1].to_string();
-            labels.insert(label, address_counter);
-        } else {
-            instrs.push(not_commented.to_string());
-            instr_addrs.push(address_counter);
-            address_counter += if is_long_instr(not_commented) { 8 } else { 4 };
-        }
-
         //Alright so its a freaking .data section for a while I didn't enen look into it
         //Bc I had no idea how to implement it tbh idk why I didn't, maybe I thought it was a
         //Big change i want to reserve for later? Anyways that doesn't matter because .data
@@ -146,13 +135,13 @@ fn main() -> io::Result<()> {
             let elem_size: usize = match parts[0].to_lowercase().as_str() {
                 "init_db" => 1, "init_dy" => 2, "init_dx" => 4, // In the name of FRs
                 // (first one is db because it looks kinda nice)
-                other => panic!("Assembler Error: unknown data declaration(use db, dy, dx)", other),
+                other => panic!("Assembler Error: unknown data declaration(use db, dy, dx): {}", other),
             };
             let (declared_size, data_name) = match parts.len() {
                 3 => (Some(parse_imm64(parts[1]) as usize), parts[2].to_string()), //Optional size
                   //declaration is not ommitted
                 2 => (None, parts[1].to_string()), //It is ommitted
-                _ => panic!("Assembler Error: bad data header '{}'", not_commented),
+                _ => panic!("Assembler Error: bad data header you are cooked buddy {}", not_commented),
             };
 
             //Iterate through numbers splitted by comma unil hitting end
@@ -160,7 +149,7 @@ fn main() -> io::Result<()> {
                 let l = l?;
                 let body = l.split(">_").next().unwrap().trim();
                 if body.is_empty() { continue; }
-                if body.to_lowercase().starts_with("#[") { break; }   // #[ end ]#
+                if body.to_lowercase().starts_with("#[ end ]#") { break; }   // #[ end ]#
                 for tok in body.split(',') {
                     let tok = tok.trim();
                     if tok.is_empty() { continue; }   // trailing comma and blank lines
@@ -169,7 +158,7 @@ fn main() -> io::Result<()> {
             }
             if let Some(declared) = declared_size {
                 if declared < init_data.len() {
-                    panic!("Assembler Error: {} declares {} elements but has {}", name, declared, init_data.len());
+                    panic!("Assembler Error: {} declares {} elements but has {}", data_name, declared, init_data.len());
                 }
                 init_data.resize(declared, 0); //That automatically pads it with 0 to fill it up to declared size
             }
@@ -183,10 +172,23 @@ fn main() -> io::Result<()> {
             }
             while data_bytes.len() % 4 != 0 { data_bytes.push(0); } //4byte aligned to not break anything
 
-            labels.insert(data_name); //That label would be a base pointer to that declared data
+            labels.insert(data_name, address_counter); //That label would be a base pointer to that declared data
             //strutucture, so you can do like LMA rx0 <- data_name to get a base pointer
             address_counter += data_bytes.len() as u32;
+            continue
         }
+
+
+        if not_commented.starts_with('~') && not_commented.ends_with(':') {
+            let label = not_commented[1..not_commented.len() - 1].to_string();
+            labels.insert(label, address_counter);
+        } else {
+            instrs.push(not_commented.to_string());
+            instr_addrs.push(address_counter);
+            address_counter += if is_long_instr(not_commented) { 8 } else { 4 };
+        }
+
+
     }
 
     //Inserting all mnemonics and their opcodes into hash map
