@@ -699,7 +699,7 @@ impl<'a> Parser<'a> {
 
         //Arrays
         //So as you can see this is a while loop, meaning parser can parse an array of virtually
-        //infinite dimensions, ofc not.
+        //infinite dimensions. *[0]
         let mut dims_vec = Vec::new();
 
         while let Some(&(Token::LBracket, _, _)) = self.tokens.peek() {
@@ -1225,3 +1225,5 @@ impl<'a> Parser<'a> {
         }
     }
 }
+
+//[0] the comment is shamelessly lying it can only parse up to 18,446,744,073,709,551,615 dimensions on 64-bit machine
