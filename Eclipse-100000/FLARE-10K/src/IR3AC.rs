@@ -137,9 +137,11 @@ pub enum IRInst {
     Mdcx { //Its multi-dimensional computex indexed btw
         dest: IROperand,
         base: IROperand,
-        index: IROperand,
+        sh_index: IROperand,
+        mul_index: IROperand,
         stride: i16,
         val: u8,
+        offset: i16,
     },
     RegFieldRead {
         //Fields of regarches are accessed using sub-registers, even though IR doesn't
@@ -258,7 +260,7 @@ pub fn get_type_align(ty: &Type, structs: &HashMap<String, StructDef>) -> usize 
         Type::U8  | Type::I8  | Type::Bool => 1,
         Type::U16 | Type::I16  => 2,
         Type::U32 | Type::I32 | Type::Ptr(_) => 4,
-        Type::Array(elem_ty, vec_dims) => get_type_size(elem_ty) * vec_dims.iter().product::<usize>(),
+        Type::Array(elem_ty, _) => get_type_align(elem_ty, structs),
         Type::Struct(name) => {
             let struct_def = structs
                 .get(name)
@@ -281,8 +283,8 @@ pub fn get_type_size(ty: &Type, structs: &HashMap<String, StructDef>) -> usize {
     match ty {
         Type::U32 | Type::I32 | Type::Ptr(_) => 4,
         Type::U16 | Type::I16 => 2,
-        Type::U8 | Type::I8 | Type::Bool => 1,
-        Type::Array(elem_ty, count) => get_type_size(elem_ty, structs) * *count,
+        Type::U8  | Type::I8  | Type::Bool => 1,
+        Type::Array(elem_ty, dims_vec) => get_type_size(elem_ty, structs) * dims_vec.iter().product::<usize>(),
         Type::Struct(name) => {
             let struct_def = structs
                 .get(name)
@@ -401,6 +403,14 @@ fn expr_calls_function(expr: &Expr) -> bool {
             initial.as_ref().map(|e| expr_calls_function(e)).unwrap_or(false)
         }
         _ => false,
+    }
+}
+
+fn peel_dim(elem_ty: &Type, dims: &[usize]) -> Type {
+    if dims.len() <= 1 {
+        elem_ty.clone()
+    } else {
+        Type::Array(Box::new(elem_ty.clone()), dims[1..].to_vec())
     }
 }
 
@@ -546,7 +556,7 @@ impl IR {
             Expr::Index { array, .. } => {
                 let array_ty = self.infer_type(array);
                 match array_ty {
-                    Type::Array(elem_ty, _) => *elem_ty,
+                    Type::Array(elem_ty, dims_vec) => peel_dim(&elem_ty, &dims_vec),
                     Type::Ptr(elem_ty) => *elem_ty,
                     _ => panic!("Cannot index type {:?}", array_ty),
                 }

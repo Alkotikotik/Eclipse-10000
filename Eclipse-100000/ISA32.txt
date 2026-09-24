@@ -153,7 +153,7 @@ addr = rb1 + (rx0 * stride) + (rb0 << val) + imm13
 
 MDLX/MDCX
 011110 : MDLX rx1 <=< [rb1, rx0 * stride, rb0 << val + imm13]  //Loads to rx1 from addr
-011101 : MDCX rx1 <=< [rb1, rx0 * stride, rb0 << val]         //Computes that into rx1, theoretically used for calculating address and then storing value in that address
+011101 : MDCX rx1 <=< [rb1, rx0 * stride, rb0 << val + imm13] //Computes that into rx1, theoretically used for calculating address and then storing value in that address
 
 011100 : MDSX rx1 >=> [rb1, rx0 * stride, rb0 << val + imm13]
 
