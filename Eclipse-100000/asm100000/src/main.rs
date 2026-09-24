@@ -319,7 +319,7 @@ fn main() -> io::Result<()> {
                     rx0 = parse_reg(tokens[1]);
                 }
                 if tokens.len() > 2 {
-                    let target = tokens[2].trim_start_matches('~');
+                    let target = tokens[2].trim_start_matches(['~', '*']);
                     if let Some(&label_addr) = labels.get(target) {
                         immediate = label_addr as i64;
                     } else {

@@ -2,18 +2,14 @@
     JMP ~init
 
 #ORG 4092
-#[ init_db 4 =>>= date ]#
-    0x01, 0x02, 0x16, 0xFF,
-#[ end ]#
-
-#ORG 4088
-#[ init_db 4 =>>= date0 ]#
-    0x01, 0x02, 0x16, 0xFF,
+#[ init_dy 4 =>>= date ]#
+    0x0102, 0x16FF,
+    0x0102, 0x16F8,
 #[ end ]#
 
 #ORG 64
 ~init:
-    LMA rx0 <- ~date0
+    LMA rx0 <- *date
     LOAD rx2 <- 1
     LDX rz10 <- rx0, rx31 << 0, 3
     STX rz10 -> rx31, rx31 << 0, 4016

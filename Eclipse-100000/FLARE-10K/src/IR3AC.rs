@@ -255,10 +255,10 @@ pub struct IR {
 //this for fun.
 pub fn get_type_align(ty: &Type, structs: &HashMap<String, StructDef>) -> usize {
     match ty {
-        Type::U8 | Type::I8 | Type::Bool => 1,
-        Type::U16 | Type::I16 => 2,
+        Type::U8  | Type::I8  | Type::Bool => 1,
+        Type::U16 | Type::I16  => 2,
         Type::U32 | Type::I32 | Type::Ptr(_) => 4,
-        Type::Array(elem_ty, _) => get_type_align(elem_ty, structs),
+        Type::Array(elem_ty, vec_dims) => get_type_size(elem_ty) * vec_dims.iter().product::<usize>(),
         Type::Struct(name) => {
             let struct_def = structs
                 .get(name)
