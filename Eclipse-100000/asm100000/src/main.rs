@@ -63,6 +63,25 @@ fn parse_imm64(token: &str) -> i64 {
     }
 }
 
+
+//Thats just for LDX/STX and stuff
+fn parse_imm64_strict(token: &str) -> i64 {
+    let clean = token.trim_start_matches('~');
+    let (negative, digits) = match clean.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, clean),
+    };
+    let magnitude = if digits.starts_with("0x") || digits.starts_with("0X") {
+        i64::from_str_radix(&digits[2..], 16)
+    } else {
+        digits.parse::<i64>()
+    };
+    let magnitude = magnitude.unwrap_or_else(|_| {
+        panic!("Assembler Error: {} is not a number nor a lable", token)
+    });
+    if negative { -magnitude } else { magnitude }
+}
+
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
 
@@ -319,12 +338,7 @@ fn main() -> io::Result<()> {
                     rx0 = parse_reg(tokens[1]);
                 }
                 if tokens.len() > 2 {
-                    let target = tokens[2].trim_start_matches(['~', '*']);
-                    if let Some(&label_addr) = labels.get(target) {
-                        immediate = label_addr as i64;
-                    } else {
-                        immediate = parse_imm64(tokens[2]);
-                    }
+                    immediate = resolve_sum(&tokens[2..], &labels);
                 }
             }
             //If yk ISA you should have to questions
@@ -353,7 +367,7 @@ fn main() -> io::Result<()> {
                 mdx_stride = parse_imm64(&ops[3]);
                 rx0        = full(&ops[4], "shift register");
                 scale      = parse_imm64(&ops[5]) as u32;
-                immediate  = if ops.len() > 6 { parse_imm64(&ops[6]) } else { 0 };
+                immediate  = ops[6..].iter().map(|o| resolve_abs(o, &labels)).sum();
                 if !(-8192..=8191).contains(&mdx_stride) {
                     panic!("Assembler Error: {} stride {} does not fit in signed 14 bits", instr, mdx_stride);
                 }
@@ -361,7 +375,7 @@ fn main() -> io::Result<()> {
                     panic!("Assembler Error: {} shift {} must be 0..3", instr, scale);
                 }
                 if !(-4096..=4095).contains(&immediate) {
-                    panic!("Assembler Error: {} offset {} does not fit in signed imm13", instr, immediate);
+                    panic!("Assembler Error: {} offset {} does not fit in signed imm13, put the address in the base register with LMA instead", instr, immediate);
                 }
             }
             "LDX" | "STX" => {
@@ -379,10 +393,8 @@ fn main() -> io::Result<()> {
                 if scale > 3 {
                     panic!("Assembler Error: {} shift {} must be 0..3", instr, scale);
                 }
-                immediate = if tokens.len() > 6 && tokens[5] == "-" {
-                    -parse_imm64(tokens[6])
-                } else if tokens.len() > 5 {
-                    parse_imm64(tokens[5])
+                immediate = if tokens.len() > 5 {
+                    resolve_sum(&tokens[5..], &labels)
                 } else {
                     0
                 };
@@ -722,6 +734,32 @@ fn parse_spr(name: &str) -> u32 {
         "GP" => 0b10,
         other => panic!("Assembler Error: unknown SPR '{}'", other),
     }
+}
+
+//So we can basically do this LDX rx0 <=< [rx31, rx5 << 2 + *font_data]
+//Which is so sick
+fn resolve_abs(token: &str, labels: &HashMap<String, u32>) -> i64 {
+    let name = token.trim_start_matches(['~', '*']);
+    match labels.get(name) {
+        Some(&addr) => addr as i64,
+        None => parse_imm64_strict(token),
+    }
+}
+
+//For label + imm(29th bit of LDX/STX its just perfect)
+fn resolve_sum(tokens: &[&str], labels: &HashMap<String, u32>) -> i64 {
+    let mut total: i64 = 0;
+    let mut negate = false;
+    for token in tokens {
+        if *token == "-" {
+            negate = true;
+            continue;
+        }
+        let value = resolve_abs(token, labels);
+        total += if negate { -value } else { value };
+        negate = false;
+    }
+    total
 }
 
 fn expand_spr_sugar(instr: &str) -> Option<(&'static str, &'static str)> {

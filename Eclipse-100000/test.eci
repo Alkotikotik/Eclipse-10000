@@ -2,16 +2,15 @@
     JMP ~init
 
 #ORG 4092
-#[ init_dy 4 =>>= date ]#
+#[ init_dy 4 =>>= data ]#
     0x0102, 0x16FF,
     0x0102, 0x16F8,
 #[ end ]#
 
 #ORG 64
 ~init:
-    LMA rx0 <- *date
-    LOAD rx2 <- 1
-    LDX rz10 <- rx0, rx31 << 0, 3
-    STX rz10 -> rx31, rx31 << 0, 4016
+    LOAD rx2 <- 3
+    LDX ry00 <- rx31, rx2 << 1, *data
+    STX ry00 -> rx31, rx31 << 0, 4016
 
     JMP ~init
