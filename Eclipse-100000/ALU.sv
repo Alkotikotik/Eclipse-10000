@@ -3,6 +3,7 @@ module ALU (
     input  logic reset,
     input  logic [31:0] x,
     input  logic [31:0] y,
+    input  logic [31:0] y_imm,
     input  logic [5:0] opcode,
     input  logic [31:0] imm2,
     input  logic [31:0] mul_y_in,
@@ -13,6 +14,7 @@ module ALU (
     input  logic [4:0] shift_amount, //separate input, should reduct logic levels
 
     output logic [31:0] add_result,
+    output logic [31:0] sub_result,
     output logic [31:0] bitwise_result,
     output logic [31:0] shift_result,
     output logic [31:0] div_result,
@@ -45,25 +47,17 @@ module ALU (
     //Im doing this purely for LUT savings, as far as im aware it has to impact on the worst
     //critical path
     //==Adder==//
-    logic is_sub_op;
-    assign is_sub_op = (opcode == 6'b000011);
-    logic [31:0] add_y;
-    assign add_y = is_sub_op ? ~y : y;
-
-    logic [31:0] add_imm;
-    assign add_imm = is_sub_op ? (32'd1 - imm2) : imm2;
-
-    assign add_result = x + add_y + add_imm; //Had to change it, because turns out it does have an effect
+    assign add_result = x + y + imm2; //Had to change it, because turns out it does have an effect
     //On the critical path, because instead of just chaining carry4 vivado
     //just added some bs there, eaasy fix though.
 
-    //==Barrel==// 
-    //A left shift is just a right shift with the bits flipped on both ends, and flipping is just writing,
-    //actually no LUTs involved
-    function automatic [31:0] rev32(input [31:0] v);
-        for (int i = 0; i < 32; i++) rev32[i] = v[31-i];
-    endfunction
+    //yeah so separate adders for each - improves critical path at the cost of
+    //CARRY4s
+    assign sub_result = x + ~y + (32'd1 - imm2);
 
+    //adder looks very pathetic now lmao
+
+    //==Barrel==//
     logic  is_shl, is_sra;
     assign is_shl = (opcode == 6'b001000);
     assign is_sra = (opcode == 6'b001010);
@@ -81,16 +75,25 @@ module ALU (
 
     logic [31:0] sh_src;
     logic        sh_fill;
-    assign sh_src  = is_shl ? rev32(x) : (is_sra ? x_sext : x);
+    assign sh_src  = is_sra ? x_sext : x;
     assign sh_fill = is_sra & x_sext[31];  //33rd bit carries the sign for SRA
 
     /* verilator lint_off UNUSEDSIGNAL */
     logic [32:0] sh_wide;
-    /* verilator lint_on UNUSEDSIGNAL */ 
+    /* verilator lint_on UNUSEDSIGNAL */
 
-    assign sh_wide = $signed({sh_fill, sh_src}) >>> shift_amount;
+    //Shifter works in stages, and there are actually 2 shifters, SHL is
+    //separate one. Again - sacraficing LUTs for critical path
+    logic [32:0] shr_a, shr_b;
+    logic [31:0] shl_a, shl_b, shl_c;
+    assign shr_a   = $signed({sh_fill, sh_src}) >>> shift_amount[1:0];
+    assign shr_b   = $signed(shr_a) >>> {shift_amount[3:2], 2'b00};
+    assign sh_wide = $signed(shr_b) >>> {shift_amount[4], 4'b0000};
+    assign shl_a   = x << shift_amount[1:0];
+    assign shl_b   = shl_a << {shift_amount[3:2], 2'b00};
+    assign shl_c   = shl_b << {shift_amount[4], 4'b0000};
 
-    assign shift_result = is_shl ? rev32(sh_wide[31:0]) : sh_wide[31:0];
+    assign shift_result = is_shl ? shl_c : sh_wide[31:0];
 
 
     //== Quick-Radix-4 Div Unit ==//
@@ -185,14 +188,14 @@ module ALU (
     /* verilator lint_on UNUSEDSIGNAL */
     always_comb begin
         unique case (clz_x[4:2])
-            3'd0: sub_clz_x = x_abs[31:28];
-            3'd1: sub_clz_x = x_abs[27:24];
-            3'd2: sub_clz_x = x_abs[23:20];
-            3'd3: sub_clz_x = x_abs[19:16];
-            3'd4: sub_clz_x = x_abs[15:12];
-            3'd5: sub_clz_x = x_abs[11:8];
-            3'd6: sub_clz_x = x_abs[7:4];
-            3'd7: sub_clz_x = x_abs[3:0];
+            3'b000: sub_clz_x = x_abs[31:28];
+            3'b001: sub_clz_x = x_abs[27:24];
+            3'b010: sub_clz_x = x_abs[23:20];
+            3'b011: sub_clz_x = x_abs[19:16];
+            3'b100: sub_clz_x = x_abs[15:12];
+            3'b101: sub_clz_x = x_abs[11:8];
+            3'b110: sub_clz_x = x_abs[7:4];
+            3'b111: sub_clz_x = x_abs[3:0];
         endcase
     end
 
@@ -203,14 +206,14 @@ module ALU (
     /* verilator lint_on UNUSEDSIGNAL */
     always_comb begin
         unique case (clz_y[4:2])
-            3'd0: sub_clz_y = y_abs[31:28];
-            3'd1: sub_clz_y = y_abs[27:24];
-            3'd2: sub_clz_y = y_abs[23:20];
-            3'd3: sub_clz_y = y_abs[19:16];
-            3'd4: sub_clz_y = y_abs[15:12];
-            3'd5: sub_clz_y = y_abs[11:8];
-            3'd6: sub_clz_y = y_abs[7:4];
-            3'd7: sub_clz_y = y_abs[3:0];
+            3'b000: sub_clz_y = y_abs[31:28];
+            3'b001: sub_clz_y = y_abs[27:24];
+            3'b010: sub_clz_y = y_abs[23:20];
+            3'b011: sub_clz_y = y_abs[19:16];
+            3'b100: sub_clz_y = y_abs[15:12];
+            3'b101: sub_clz_y = y_abs[11:8];
+            3'b110: sub_clz_y = y_abs[7:4];
+            3'b111: sub_clz_y = y_abs[3:0];
         endcase
     end
 
@@ -320,11 +323,11 @@ module ALU (
     //Doesn't care about clk
     always_comb begin
         unique case (opcode)
-            6'b000010: bitwise_result = x ^ y;
-            6'b000110: bitwise_result = x | y;
-            6'b001110: bitwise_result = x & y;
+            6'b000010: bitwise_result = x ^ y_imm; //y_imm removes a carry chain from ADD
+            6'b000110: bitwise_result = x | y_imm;
+            6'b001110: bitwise_result = x & y_imm;
             6'b001111: bitwise_result = ~x   ;
-            default:   bitwise_result = y; //MOV
+            default:   bitwise_result = y_imm; //MOV
         endcase
     end
 

@@ -24,19 +24,13 @@ module RAM(
 
     //Sync read, was async previosely which obviosely is impossible on the
     //actual FPGA, unless LUTRAM ofc but its either BRAM or ddr3
+    //Reads give the whole word, MEM picks the fragment, so as usual
     always_ff @(posedge clk) begin
         if (mem_read) begin
-            if (byte_enable == 4'b1111)
-                data_out <= {ramm[addrRead[25:0]    ],
-                             ramm[addrRead[25:0] + 1],
-                             ramm[addrRead[25:0] + 2],
-                             ramm[addrRead[25:0] + 3]};
-            else if (byte_enable == 4'b0011)
-                data_out <= {16'h0,
-                             ramm[addrRead[25:0]    ],
-                             ramm[addrRead[25:0] + 1]};
-            else
-                data_out <= {24'h0, ramm[addrRead[25:0]]};
+            data_out <= {ramm[addrRead[25:0]    ],
+                         ramm[addrRead[25:0] + 1],
+                         ramm[addrRead[25:0] + 2],
+                         ramm[addrRead[25:0] + 3]};
         end
     end
 

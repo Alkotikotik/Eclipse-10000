@@ -16,17 +16,10 @@ module VRAM(
 
     always_ff @(posedge clk) begin
         if (mem_read) begin
-            if (byte_enable == 4'b1111)
-                data_out <= {vramm[addrRead[19:0]    ],
-                             vramm[addrRead[19:0] + 1],
-                             vramm[addrRead[19:0] + 2],
-                             vramm[addrRead[19:0] + 3]};
-            else if (byte_enable == 4'b0011)
-                data_out <= {16'h0,
-                             vramm[addrRead[19:0]    ],
-                             vramm[addrRead[19:0] + 1]};
-            else
-                data_out <= {24'h0, vramm[addrRead[19:0]]};
+            data_out <= {vramm[addrRead[19:0]    ],
+                         vramm[addrRead[19:0] + 1],
+                         vramm[addrRead[19:0] + 2],
+                         vramm[addrRead[19:0] + 3]};
         end
 
         if (mem_write) begin

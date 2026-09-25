@@ -262,11 +262,51 @@ module CORE(
     //So thats a cool one: DSP supports fused add multiply and I really love
     //fused add multiply. I remember first learning vfmadd231pd and I was
     //quite faschinated by it. Now I finally implement it myself
+    //
+    //Uhh there goes my nice looking dsp like I didn't do it myself, first of
+    //all DSP48E1 has intermediate Pipilined M register which is A * B, so we
+    //save that register at the end of ID and when add C to it at the start of
+    //Otherwise its just dsp with a few modifications. Refer to UG479 if you
+    //are interested, its pretty interesting ngl glad I got to use information
+    //From there bc I initially read it for fun.
     logic [31:0] EX_mdx_product;
-    (* use_dsp = "yes" *)
-    always_ff @(posedge clk) begin
-        if (!stall) EX_mdx_product <= 32'(ID_mdx_ri * ID_stride + ID_imm13);
-    end
+    `ifdef SYNTHESIS //for vivado(actual FPGA)
+        /* verilator lint_off UNUSEDSIGNAL */
+        logic [47:0] mdx_p;
+        /* verilator lint_on UNUSEDSIGNAL */
+        DSP48E1 #(
+            .AREG(0), .ACASCREG(0), .BREG(0), .BCASCREG(0), .CREG(1), .DREG(0), .ADREG(0),
+            .MREG(1), .PREG(0), .ALUMODEREG(0), .CARRYINREG(0), .CARRYINSELREG(0),
+            .INMODEREG(0), .OPMODEREG(0), .USE_MULT("MULTIPLY"), .USE_DPORT("FALSE")
+        ) mdx_dsp (
+            .CLK(clk),
+            .A({{5{ID_mdx_ri[24]}}, ID_mdx_ri}),
+            .B({{4{ID_stride[13]}}, ID_stride}),
+            .C({{16{ID_imm13[31]}}, ID_imm13}),
+            .D(25'd0),
+            .OPMODE(7'b0110101), //P(result) = M + C
+            .ALUMODE(4'b0000), .INMODE(5'b00000), .CARRYINSEL(3'b000), .CARRYIN(1'b0),
+            .CEM(!stall), .CEC(!stall),
+            .CEA1(1'b0), .CEA2(1'b0), .CEB1(1'b0), .CEB2(1'b0), .CED(1'b0), .CEAD(1'b0), .CEP(1'b0),
+            .CEALUMODE(1'b0), .CECTRL(1'b0), .CECARRYIN(1'b0), .CEINMODE(1'b0),
+            .RSTA(1'b0), .RSTB(1'b0), .RSTC(1'b0), .RSTD(1'b0), .RSTM(1'b0), .RSTP(1'b0),
+            .RSTALLCARRYIN(1'b0), .RSTALUMODE(1'b0), .RSTCTRL(1'b0), .RSTINMODE(1'b0),
+            .ACIN(30'd0), .BCIN(18'd0), .PCIN(48'd0), .CARRYCASCIN(1'b0), .MULTSIGNIN(1'b0),
+            .P(mdx_p),
+            .ACOUT(), .BCOUT(), .PCOUT(), .CARRYOUT(), .CARRYCASCOUT(), .MULTSIGNOUT(),
+            .OVERFLOW(), .UNDERFLOW(), .PATTERNDETECT(), .PATTERNBDETECT()
+        );
+        assign EX_mdx_product = mdx_p[31:0];
+    `else // for verilator
+        logic [31:0] EX_mdx_mul, EX_imm13;
+        always_ff @(posedge clk) begin
+            if (!stall) begin
+                EX_mdx_mul <= 32'(ID_mdx_ri * ID_stride);
+                EX_imm13   <= ID_imm13;
+            end
+        end
+        assign EX_mdx_product = EX_mdx_mul + EX_imm13;
+    `endif
 
     //We need to compare those registers to EX's ones it case they
     //overlap - stall
@@ -286,6 +326,71 @@ module CORE(
     assign ID_banked0 = (ID_rx0[7:3] <= 5'd1);
     assign ID_banked1 = (ID_rx1[7:3] <= 5'd1);
     assign ID_banked2 = (ID_IR_2[31:27] <= 5'd1);
+
+    //Basically MDXs shifter register overlap with LDX/STX rxi so they share
+    //1 index operand, and we can kinda abuse that
+    logic [4:0]  ID_rxi_base;
+    logic        ID_rxi_banked;
+    logic [31:0] ID_rxi_val;
+    assign ID_rxi_base   = isID_mdx ? ID_rx0[7:3] : ID_IR_2[31:27];
+    assign ID_rxi_banked = isID_mdx ? ID_banked0  : ID_banked2;
+    assign ID_rxi_val    = isID_mdx ? ID_rx0_val  : ID_rx2_val;
+
+    //== FWD(Forwarding) ==//
+    //I moved forwarding into ID only now??
+
+    //So its a pretty interesting one, if instruction needs result(EX) that hasn't
+    //been written to GPRs yet(end of WB), instead of stalling I check for this
+    //condition, if its true I just use MEM/WB result, otherwise read from registers
+
+    //The problem is sub registers: a selector is {base_id[4:0], offset[2:0]} and the
+    //offset picks which slice of the 32bit register you actually touch:
+    //000 - rx, 001 - ry0, 010 - ry1, 011 - rz0, 100 - rz1, 101 - rz2, 110 - rz3
+    //Two selectors that differ only in the offset still name the exact same physical
+    //register, so comparing the whole 8bit selector breaks everything.
+    //The fix is only match using base_id and apply offset only at the end
+    logic [7:0] ID_pick0, ID_pick1, ID_pick2;
+    logic [3:0] ID_keep0, ID_keep1, ID_keep2;
+    assign ID_pick0 = slice_pick(isID_mdx ? 3'b000 : ID_rx0[2:0]); //Which fragment value does instruction use
+    assign ID_pick1 = slice_pick(ID_uses_rr2 ? 3'b000 : ID_rx1[2:0]);
+    assign ID_pick2 = slice_pick(isID_mdx ? 3'b000 : ID_IR_2[26:24]);
+    assign ID_keep0 = slice_keep(isID_mdx ? 3'b000 : ID_rx0[2:0]); //Which output fragment value exists at all
+    assign ID_keep1 = (ID_uses_rr2 && ID_rx1[7:3] == 5'd31) ? 4'b0000 : slice_keep(ID_uses_rr2 ? 3'b000 : ID_rx1[2:0]);
+    assign ID_keep2 = slice_keep(isID_mdx ? 3'b000 : ID_IR_2[26:24]);
+
+    logic  mem_go0, mem_go1, mem_go2, wb_go0, wb_go1, wb_go2; //Will the instrction that would be in MEM on next cycle write to pick?
+    assign mem_go0 = isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx0[7:3]) && (!ID_banked0 || isKernelMode == EX_kernel_mode);
+    assign mem_go1 = isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx1[7:3]) && (!ID_banked1 || isKernelMode == EX_kernel_mode);
+    assign mem_go2 = isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rxi_base) && (!ID_rxi_banked || isKernelMode == EX_kernel_mode);
+    assign wb_go0  = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx0[7:3]) && (!ID_banked0 || MEM_kernelMode == kernel_mode_go);
+    assign wb_go1  = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx1[7:3]) && (!ID_banked1 || MEM_kernelMode == kernel_mode_go);
+    assign wb_go2  = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rxi_base) && (!ID_rxi_banked || MEM_kernelMode == kernel_mode_go);
+
+    logic [3:0] ID_msel0, ID_msel1, ID_msel2, ID_wsel0, ID_wsel1, ID_wsel2;
+    logic [7:0] ID_mrel0, ID_mrel1, ID_mrel2;
+    always_comb begin //Final select based on allat data, whether they actually collide or not
+        for (int b = 0; b < 4; b++) begin
+            ID_msel0[b] = ID_keep0[b] && mem_go0 && EX_lanes[ID_pick0[2*b +: 2]];
+            ID_msel1[b] = ID_keep1[b] && mem_go1 && EX_lanes[ID_pick1[2*b +: 2]];
+            ID_msel2[b] = ID_keep2[b] && mem_go2 && EX_lanes[ID_pick2[2*b +: 2]];
+            ID_wsel0[b] = ID_keep0[b] && wb_go0  && MEM_lanes[ID_pick0[2*b +: 2]];
+            ID_wsel1[b] = ID_keep1[b] && wb_go1  && MEM_lanes[ID_pick1[2*b +: 2]];
+            ID_wsel2[b] = ID_keep2[b] && wb_go2  && MEM_lanes[ID_pick2[2*b +: 2]];
+            ID_mrel0[2*b +: 2] = ID_pick0[2*b +: 2] - EX_base;
+            ID_mrel1[2*b +: 2] = ID_pick1[2*b +: 2] - EX_base;
+            ID_mrel2[2*b +: 2] = ID_pick2[2*b +: 2] - EX_base;
+        end
+    end
+
+    //SPR bypassing into ID as well
+    logic [1:0] ID_spr_sel;
+    logic       ID_spr_hit;
+    assign ID_spr_sel =
+        (ID_IR[31:26] == 6'b101000 || ID_IR[31:26] == 6'b101001 || ID_IR[31:26] == 6'b101010 ||
+        ID_IR[31:26] == 6'b101011 || ID_IR[31:26] == 6'b101100 || ID_IR[31:26] == 6'b101101) ? ID_IR[17:16] : 2'b00;
+    assign ID_spr_hit = ((ID_spr_sel == 2'b00) && SPRWrite && (spr_target_sel == 2'b00) && (isKernelMode == EX_kernel_mode)) ||
+                        ((ID_spr_sel == 2'b01) && ((isCallState && opcode == 6'b111000) || (SPRWrite && spr_target_sel == 2'b01))) ||
+                        ((ID_spr_sel == 2'b10) && SPRWrite && (spr_target_sel == 2'b10) && (isKernelMode == EX_kernel_mode));
 
     //Ladies and gentlemen we are currentely wintessing a crime scene: EX steams ID's rr2!!!
     //In reality though: MDSX needs to read 4 registers and I don't feel like
@@ -315,10 +420,12 @@ module CORE(
     //This would increase the CPI, but by a small amount, there is no way to
     //avoid it though, at least as far as im aware.
     logic  EX_is_load;
-    assign EX_is_load = isEX_valid && memRead;
+    assign EX_is_load = isEX_valid && (GPRsSrc == 3'b001);
 
     logic  load_use_hazard;
-    assign load_use_hazard = isID_valid && EX_is_load && ID_uses_EX_dest;
+    //MDSX will bubble if prev instruction was load into used register so not
+    //a big deal
+    assign load_use_hazard = isID_valid && EX_is_load && (ID_uses_EX_dest || (isID_mdsx && (gpr_rw0_sel[7:3] == ID_IR_2[26:22])));
 
     //the CPU will get mul result only at the end of MEM, hence it introduces
     //mul-use hazard, if next instruction uses mul and we don't have the
@@ -364,8 +471,9 @@ module CORE(
     logic [13:0] EX_pht_idx;
     logic [1:0]  EX_pht_val;
     logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
-    logic EX_mem_hit0, EX_mem_hit1, EX_mem_hit2, EX_wb_hit0, EX_wb_hit1, EX_wb_hit2;
-    logic EX_banked0, EX_banked1, EX_banked2;
+    logic [3:0] EX_msel0, EX_msel1, EX_msel2, EX_wsel0, EX_wsel1, EX_wsel2;
+    logic [7:0] EX_mrel0, EX_mrel1, EX_mrel2;
+    logic       EX_spr_hit;
     logic isEX_mdx, isEX_mdsx;
     logic [7:0] EX_pick0, EX_pick1, EX_pick2;
     logic [3:0] EX_keep0, EX_keep1, EX_keep2;
@@ -374,7 +482,7 @@ module CORE(
     logic EX_branch;
     logic EX_64;
     logic [3:0] EX_lanes;
-    logic [1:0] EX_base;
+    logic [1:0] EX_base, EX_idx_sh;
 
     //Alright so there was a big always_ff block here previousely, which
     //apparantely led to high fanout, so just splitting it into 2 always_ff
@@ -388,39 +496,39 @@ module CORE(
             isEX_valid <= isID_valid;
         end
     end
-
     always_ff @(posedge clk) begin
         if (!stall) begin
             EX_PC <= ID_PC; //Handing instruction to the EX
             EX_IR <= ID_IR;
             EX_64 <= ID_64;
             EX_IR_2 <= ID_IR_2;
-            EX_rx0_val <= (ID_banked0 && kernel_mode_next) ? (ID_rx0[3]   ? KGPR1_next : KGPR0_next) : ID_rx0_val;
-            EX_rx1_val <= (ID_banked1 && kernel_mode_next) ? (ID_rx1[3]   ? KGPR1_next : KGPR0_next) : ID_rx1_val;
-            EX_rx2_val <= (ID_banked2 && kernel_mode_next) ? (ID_IR_2[27] ? KGPR1_next : KGPR0_next) : ID_rx2_val;
+            EX_rx0_val <= (ID_banked0 && kernel_mode_go) ? (ID_rx0[3]   ? KGPR1_next : KGPR0_next) : ID_rx0_val;
+            EX_rx1_val <= (ID_banked1 && kernel_mode_go) ? (ID_rx1[3]   ? KGPR1_next : KGPR0_next) : ID_rx1_val;
+            EX_rx2_val <= (ID_rxi_banked && kernel_mode_go) ? (ID_rxi_base[0] ? KGPR1_next : KGPR0_next) : ID_rxi_val;
+            EX_idx_sh  <= isID_mdx ? ID_IR_2[18:17] : ID_IR_2[23:22];
             EX_branch <= ID_branch;
             EX_early_target <= ID_early_target;
             EX_pht_idx <= ID_pht_idx;
             EX_pht_val <= ID_pht_val;
             EX_predicted_taken <= ID_predicted_taken;
 
-            //The forwarding check moves to the ID now, only check forwarding itself
-            //still stays in EX
-            EX_banked0 <= ID_banked0;
-            EX_banked1 <= ID_banked1;
-            EX_banked2 <= ID_banked2;
-            EX_pick0 <= slice_pick(isID_mdx ? 3'b000 : ID_rx0[2:0]);
-            EX_pick1 <= slice_pick(ID_rx1[2:0]);
-            EX_pick2 <= slice_pick(ID_IR_2[26:24]);
-            EX_keep0 <= slice_keep(isID_mdx ? 3'b000 : ID_rx0[2:0]);
-            EX_keep1 <= slice_keep(ID_rx1[2:0]);
-            EX_keep2 <= slice_keep(ID_IR_2[26:24]);
-            EX_mem_hit0 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx0[7:3]);
-            EX_mem_hit1 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx1[7:3]);
-            EX_mem_hit2 <= isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_IR_2[31:27]);
-            EX_wb_hit0  <= isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx0[7:3]);
-            EX_wb_hit1  <= isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx1[7:3]);
-            EX_wb_hit2  <= isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_IR_2[31:27]);
+            //Forwarding entirely in ID now yayyy
+            EX_pick0 <= ID_pick0;
+            EX_pick1 <= ID_pick1;
+            EX_pick2 <= ID_pick2;
+            EX_keep0 <= ID_keep0;
+            EX_keep1 <= ID_keep1;
+            EX_keep2 <= ID_keep2;
+            EX_msel0 <= ID_msel0;
+            EX_msel1 <= ID_msel1;
+            EX_msel2 <= ID_msel2;
+            EX_wsel0 <= ID_wsel0;
+            EX_wsel1 <= ID_wsel1;
+            EX_wsel2 <= ID_wsel2;
+            EX_mrel0 <= ID_mrel0;
+            EX_mrel1 <= ID_mrel1;
+            EX_mrel2 <= ID_mrel2;
+            EX_spr_hit <= ID_spr_hit;
 
             isEX_mdx <= isID_mdx;
             isEX_mdsx <= isID_mdsx;
@@ -481,20 +589,21 @@ module CORE(
     logic [2:0] alu_sel;
     always_comb begin
         unique case (opcode)
-            6'b000001, 6'b000011:            alu_sel = 3'd0; // ADD/SUB
-            6'b001000, 6'b001100, 6'b001010: alu_sel = 3'd2; // SHL/SHR/SRA
-            6'b000101, 6'b001011, 6'b001001: alu_sel = 3'd3; // DIV/MOD/SDIV
-            default:                         alu_sel = 3'd1; // bitwise + MOV
+            6'b000001: alu_sel = 3'b000; // ADD
+            6'b000011: alu_sel = 3'b100; //SUB
+            6'b001000, 6'b001100, 6'b001010: alu_sel = 3'b010; // SHL/SHR/SRA
+            6'b000101, 6'b001011, 6'b001001: alu_sel = 3'b011; // DIV/MOD/SDIV
+            default:                         alu_sel = 3'b001; // bitwise + MOV
         endcase
     end
 
     logic [2:0] result_sel;
     always_comb begin
         unique case (GPRsSrc)
-            3'b011:  result_sel = 3'd4; // LOAD
-            3'b101:  result_sel = 3'd5; // SPRLEA
-            3'b110:  result_sel = 3'd6; // LMA
-            3'b111:  result_sel = 3'd7; // RNG
+            3'b011:  result_sel = 3'b011; // LOAD
+            3'b101:  result_sel = isEX_mdx ? 3'b101 : 3'b110; // MDCX : SPRLEA
+            3'b110:  result_sel = 3'b011; // LMA
+            3'b111:  result_sel = 3'b011; // RNG
             default: result_sel = alu_sel;
         endcase
     end
@@ -505,11 +614,11 @@ module CORE(
 
     logic[31:0] LDX_base, LDX_idx, LDX_imm29; //Just enough to cover all 256MB signed
 
-    assign LDX_base = (rx1[7:3] == 5'd31) ? 32'b0 : FWD_rx1_full; //Theoretically it is base +- imm29, but usually base is 0 so rx31
+    assign LDX_base = FWD_rx1; //Theoretically it is base +- imm29, but usually base is 0 so rx31
     //I don't even know why Im making it that way because in case RAM would
     //become more than 256MB basically whole architecture would be cooked, but whatever. Oh wait I remembered - its for accesses 
     //That are unknown at the compile-time, literally thought of that like 4 hours ago
-    assign LDX_idx = FWD_rxi << EX_IR_2[23:22];
+    assign LDX_idx = FWD_rxi << EX_idx_sh;
     assign LDX_imm29 = {{3{EX_IR[12]}}, EX_IR[12:10], EX_IR[3:0], EX_IR_2[21:0]};
 
     //Same this as IF_PC_plus4_or8
@@ -521,6 +630,11 @@ module CORE(
     //In always_ff bc its a flop
     logic  EX_kernel_mode, kernel_mode_next;
     assign kernel_mode_next = (!mem_stall && isEX_valid && !stall && !MEM_fault && !MEM_redirect) ? isKernelMode : (MEM_fault || EX_kernel_mode);
+
+    logic  kernel_mode_go;
+    //Kernel mode when nohgin stalls, faults or redirectrs, which is known earlier
+    assign kernel_mode_go = isEX_valid ? isKernelMode : EX_kernel_mode;
+
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) EX_kernel_mode <= 0;
@@ -733,7 +847,7 @@ module CORE(
 
     //Moving SPRs stuff into MEM
     logic MEM_SPRWrite;
-    logic [31:0] MEM_rx0_val, MEM_SelectedSPR, MEM_activeSP, MEM_activeGP;
+    logic [31:0] MEM_rx0_val, MEM_activeSP;
     logic [31:0] MEM_spr_result;
     logic [2:0]  MEM_SPRSrc;
     logic [1:0]  MEM_spr_target_sel;
@@ -846,7 +960,7 @@ module CORE(
     always_comb begin
         for (int lane = 0; lane < 4; lane++) begin
             mdsx_rel = 2'(lane) - MEM_base;
-            if (mdsx_mem_hit && MEM_lanes[lane])      mdsx_full[8*lane +: 8] = MEM_val[8*mdsx_rel +: 8];
+            if (mdsx_mem_hit && MEM_lanes[lane])      mdsx_full[8*lane +: 8] = MEM_result[8*mdsx_rel +: 8];
             else if (mdsx_kwb_hit && WB_lanes[lane])  mdsx_full[8*lane +: 8] = WB_val_aligned[8*lane +: 8];
             else                                      mdsx_full[8*lane +: 8] = mdsx_reg[8*lane +: 8];
         end
@@ -880,13 +994,33 @@ module CORE(
 
     logic [31:0] mem_read_data;
     logic [31:0] vram_data_read;
+
+    //Big endian
+    logic [31:0] ram_data_sized, vram_data_sized;
+    always_comb begin
+        unique case (MEM_ram_byte_enable)
+            4'b0001: begin
+                ram_data_sized  = {24'h0, ram_data_out[31:24]};
+                vram_data_sized = {24'h0, vram_data_read[31:24]};
+            end
+            4'b0011: begin
+                ram_data_sized  = {16'h0, ram_data_out[31:16]};
+                vram_data_sized = {16'h0, vram_data_read[31:16]};
+            end
+            default: begin
+                ram_data_sized  = ram_data_out;
+                vram_data_sized = vram_data_read;
+            end
+        endcase
+    end
+
     always_comb begin
         if (MEM_ram_cs)
-            mem_read_data = ram_data_out;
+            mem_read_data = ram_data_sized;
         else if (MEM_io_cs)
             mem_read_data = io_data_out;
         else if (MEM_vram_cs)
-            mem_read_data = vram_data_read;
+            mem_read_data = vram_data_sized;
         else
             mem_read_data = 32'd0;
     end
@@ -1037,40 +1171,12 @@ module CORE(
             WB_val = WB_result;
     end
 
-    //== Forwarding ==//
-    //So its a pretty interesting one, if instruction needs result(EX) that hasn't
-    //been written to GPRs yet(end of WB), instead of stalling I check for this
-    //condition, if its true I just use MEM/WB result, otherwise read from registers
-
-    //The problem is sub registers: a selector is {base_id[4:0], offset[2:0]} and the
-    //offset picks which slice of the 32bit register you actually touch:
-    //000 - rx, 001 - ry0, 010 - ry1, 011 - rz0, 100 - rz1, 101 - rz2, 110 - rz3
-    //Two selectors that differ only in the offset still name the exact same physical
-    //register, so comparing the whole 8bit selector breaks everything.
-    //The fix is only match using base_id and apply offset only at the end
     logic [31:0] FWD_rx0, FWD_rx1, FWD_rxi;
-    logic [31:0] FWD_rx1_full;
-    logic MEM_fwd0, WB_fwd0, MEM_fwd1, WB_fwd1, MEM_fwd2, WB_fwd2;
-
-    //This checks whether the write in MEM/WB touches the register this read wants
-    //Also account for rx0, rx1 banking
-    assign MEM_fwd0 = EX_mem_hit0 && (!EX_banked0 || MEM_kernelMode == EX_kernel_mode);
-    assign WB_fwd0  = EX_wb_hit0  && (!EX_banked0 || WB_kernelMode  == EX_kernel_mode);
-    assign MEM_fwd1 = EX_mem_hit1 && (!EX_banked1 || MEM_kernelMode == EX_kernel_mode);
-    assign WB_fwd1  = EX_wb_hit1  && (!EX_banked1 || WB_kernelMode  == EX_kernel_mode);
-    assign MEM_fwd2 = EX_mem_hit2 && (!EX_banked2 || MEM_kernelMode == EX_kernel_mode);
-    assign WB_fwd2  = EX_wb_hit2  && (!EX_banked2 || WB_kernelMode  == EX_kernel_mode);
-
-    //Just snuck up in here, so it previosely just zero extended fragmented registers
-    //Now if opcode is one of where its vital, we just sign extend it,
-    //precisely that fixed: SRA and SDIV
-
 
     //So yeah this is just verilator function, they are automatic because it
     //means that each call gets its own unique set of argumenst, like in
     //regular C stack allocation, regularly though, it gives everyone the same
     //argumetns. Best thing is that it costs nothing in hardware
-
     function automatic [31:0] fwd_slice(input [2:0] fragment, input [31:0] val);
         unique case (fragment)
             3'b001:  fwd_slice = {16'h0000,   val[15:0]};
@@ -1175,55 +1281,34 @@ module CORE(
         end
     end
 
-    //So at ID we don't know if instruction should be executed in kernel mode
-    //yet, so we always just get the KGPRs and then in EX deduce whether we
-    //use GPRs or KGPRs
     logic [31:0] EX_gpr0, EX_gpr1, EX_gpr2;
     assign EX_gpr0 = EX_rx0_val;
     assign EX_gpr1 = EX_rx1_val;
     assign EX_gpr2 = EX_rx2_val;
 
 
-    //Here automatic comes in play, function gets called more than ones in
-    //always_comb block so its neccessery
-    //writing to exact lanes of fragmented registers
-    logic [1:0] rel_full;
-    always_comb begin
-        for (int lane = 0; lane < 4; lane++) begin
-            //This notation is pretty scary but its just 8 subsequent bits
-            //after 8*lane
-            rel_full = 2'(lane) - MEM_base;
-            if (MEM_fwd1 && MEM_lanes[lane])     FWD_rx1_full[8*lane +: 8] = MEM_result[8*rel_full +: 8];
-            else if (WB_fwd1 && WB_lanes[lane])  FWD_rx1_full[8*lane +: 8] = WB_aligned[8*lane +: 8];
-            else                              FWD_rx1_full[8*lane +: 8] = EX_gpr1[8*lane +: 8];
-        end
-    end
-
     logic [1:0] pick0, pick1, pick2;
-    logic [1:0] rel0, rel1, rel2;
     always_comb begin
         for (int b = 0; b < 4; b++) begin
             pick0 = EX_pick0[2*b +: 2];
-            rel0  = pick0 - MEM_base;
             pick1 = EX_pick1[2*b +: 2];
-            rel1  = pick1 - MEM_base;
             pick2 = EX_pick2[2*b +: 2];
-            rel2  = pick2 - MEM_base;
 
-            if (!EX_keep0[b])                        FWD_rx0[8*b +: 8] = 8'h0;
-            else if (MEM_fwd0 && MEM_lanes[pick0])   FWD_rx0[8*b +: 8] = MEM_result[8*rel0 +: 8];
-            else if (WB_fwd0 && WB_lanes[pick0])     FWD_rx0[8*b +: 8] = WB_aligned[8*pick0 +: 8];
-            else                                     FWD_rx0[8*b +: 8] = EX_gpr0[8*pick0 +: 8];
+            //Write for 8 consequetve bits starting from 8*b
+            if (EX_msel0[b])       FWD_rx0[8*b +: 8] = MEM_result[8*EX_mrel0[2*b +: 2] +: 8];
+            else if (EX_wsel0[b])  FWD_rx0[8*b +: 8] = WB_aligned[8*pick0 +: 8];
+            else if (EX_keep0[b])  FWD_rx0[8*b +: 8] = EX_gpr0[8*pick0 +: 8];
+            else                   FWD_rx0[8*b +: 8] = 8'h0;
 
-            if (!EX_keep1[b])                        FWD_rx1[8*b +: 8] = 8'h0;
-            else if (MEM_fwd1 && MEM_lanes[pick1])   FWD_rx1[8*b +: 8] = MEM_result[8*rel1 +: 8];
-            else if (WB_fwd1 && WB_lanes[pick1])     FWD_rx1[8*b +: 8] = WB_aligned[8*pick1 +: 8];
-            else                                     FWD_rx1[8*b +: 8] = EX_gpr1[8*pick1 +: 8];
+            if (EX_msel1[b])       FWD_rx1[8*b +: 8] = MEM_result[8*EX_mrel1[2*b +: 2] +: 8];
+            else if (EX_wsel1[b])  FWD_rx1[8*b +: 8] = WB_aligned[8*pick1 +: 8];
+            else if (EX_keep1[b])  FWD_rx1[8*b +: 8] = EX_gpr1[8*pick1 +: 8];
+            else                   FWD_rx1[8*b +: 8] = 8'h0;
 
-            if (!EX_keep2[b])                        FWD_rxi[8*b +: 8] = 8'h0;
-            else if (MEM_fwd2 && MEM_lanes[pick2])   FWD_rxi[8*b +: 8] = MEM_result[8*rel2 +: 8];
-            else if (WB_fwd2 && WB_lanes[pick2])     FWD_rxi[8*b +: 8] = WB_aligned[8*pick2 +: 8];
-            else                                     FWD_rxi[8*b +: 8] = EX_gpr2[8*pick2 +: 8];
+            if (EX_msel2[b])       FWD_rxi[8*b +: 8] = MEM_result[8*EX_mrel2[2*b +: 2] +: 8];
+            else if (EX_wsel2[b])  FWD_rxi[8*b +: 8] = WB_aligned[8*pick2 +: 8];
+            else if (EX_keep2[b])  FWD_rxi[8*b +: 8] = EX_gpr2[8*pick2 +: 8];
+            else                   FWD_rxi[8*b +: 8] = 8'h0;
         end
     end
 
@@ -1236,17 +1321,8 @@ module CORE(
     assign EX_EPC        = MEM_EPC_write ? MEM_EPC_val : EPC;
 
     logic  [31:0] SP, GP, KGP, KSP, LR, KScratch;
-    logic  [31:0] EX_SP, EX_KSP, EX_GP, EX_KGP, EX_LR;
-    assign EX_SP  = MEM_SP_write  ? SPRNext : SP;
-    assign EX_KSP = MEM_KSP_write ? SPRNext : KSP;
-    assign EX_GP  = MEM_GP_write  ? SPRNext : GP;
-    assign EX_KGP = MEM_KGP_write ? SPRNext : KGP;
+    logic  [31:0] EX_LR;
     assign EX_LR  = MEM_LR_write  ? MEM_LR_val : LR;
-
-    logic [31:0] ActiveSP;
-    logic [31:0] ActiveGP;
-    assign ActiveSP = EX_kernel_mode ? EX_KSP : EX_SP;
-    assign ActiveGP = EX_kernel_mode ? EX_KGP : EX_GP;
 
     logic [31:0] PCNext;
     logic [31:0] SPRNext;
@@ -1283,6 +1359,7 @@ module CORE(
     logic [31:0] shift_result;
     logic [31:0] div_result;
     logic [31:0] add_result;
+    logic [31:0] sub_result;
     logic [31:0] bitwise_result;
 
     logic [31:0] ram_data_out;
@@ -1310,31 +1387,29 @@ module CORE(
         endcase
     end
 
-    logic [31:0] MDX_idx;
-    assign MDX_idx = FWD_rx0 << EX_IR_2[18:17];
-
     //Idk why it was in DSP like what was I thinking
     (* use_dsp = "no" *)
-    logic [31:0] mdx_addr;
-    assign mdx_addr = (LDX_base + EX_mdx_product) + MDX_idx;
+    logic [31:0] idx_addr;
+    assign idx_addr = LDX_base + (isEX_mdx ? EX_mdx_product : LDX_imm29) + LDX_idx;
 
+    logic [31:0] other_addr;
     always_comb begin
         unique case (opcode)
-            6'b000000: memTarget = isEX_mdx ? mdx_addr : (LDX_base + LDX_imm29) + LDX_idx; //STX/MDX
-            6'b100100: memTarget = (ActiveSP - {29'd0, push_pop_bytes}); // PUSH
-            6'b100101: memTarget = ActiveSP;                            // POP
+            6'b100100: other_addr = (SelectedSPR - {29'd0, push_pop_bytes}); // PUSH
+            6'b100101: other_addr = SelectedSPR;                            // POP
             6'b101000,
             6'b101001,
-            6'b101101: memTarget = SelectedSPR + sign_ext_imm16;      // SPRLDR/SPRSTR/SPRLEA
+            6'b101101: other_addr = SelectedSPR + sign_ext_imm16;      // SPRLDR/SPRSTR/SPRLEA
 
             default: begin
                 if (opcode[5:4] == 2'b10)
-                    memTarget = FWD_rx1 + sign_ext_imm10;
+                    other_addr = FWD_rx1 + sign_ext_imm10;
                 else
-                    memTarget = FWD_rx1;
+                    other_addr = FWD_rx1;
             end
         endcase
     end
+    assign memTarget = (opcode == 6'b000000) ? idx_addr : other_addr; //STX/MDXs
     assign memViolation =   (!MEM_kernelMode && (MEM_memRead || MEM_memWrite) &&
                             ((MEM_memTarget < memBase) ||
                             (33'(MEM_memTarget) >= memEnd)));
@@ -1343,26 +1418,30 @@ module CORE(
         (opcode == 6'b101000 || opcode == 6'b101001 || opcode == 6'b101010 ||
         opcode == 6'b101011 || opcode == 6'b101100 || opcode == 6'b101101) ? EX_IR[17:16] : 2'b00;
 
-    logic [31:0] SelectedSPR;
+    logic [31:0] spr_reg, SelectedSPR;
     always_comb begin
         unique case (spr_target_sel)
-            2'b00:   SelectedSPR = ActiveSP;
-            2'b01:   SelectedSPR = EX_LR;
-            2'b10:   SelectedSPR = ActiveGP;
-            default: SelectedSPR = 32'd0; // reserved
+            2'b00:   spr_reg = EX_kernel_mode ? KSP : SP;
+            2'b01:   spr_reg = LR;
+            2'b10:   spr_reg = EX_kernel_mode ? KGP : GP;
+            default: spr_reg = 32'd0; // reserved
+        endcase
+    end
+    assign SelectedSPR = (EX_spr_hit && isMEM_valid) ? MEM_LR_val : spr_reg;
+
+    logic [31:0] spr_other;
+    always_comb begin
+        unique case (SPRSrc)
+            3'b100:  spr_other = SelectedSPR - {29'd0, push_pop_bytes};    // PUSH
+            3'b101:  spr_other = SelectedSPR + {29'd0, push_pop_bytes};     // POP
+            default: spr_other = SelectedSPR;
         endcase
     end
 
-    logic [31:0] spr_result;
-    always_comb begin
-        unique case (SPRSrc)
-            3'b100:  spr_result = ActiveSP - {29'd0, push_pop_bytes};    // PUSH
-            3'b101:  spr_result = ActiveSP + {29'd0, push_pop_bytes};     // POP
-            3'b110:  spr_result = SelectedSPR + FWD_rx0 + sign_ext_imm16; // SPRADD
-            3'b111:  spr_result = SelectedSPR - FWD_rx0 - sign_ext_imm16; // SPRSUB
-            default: spr_result = SelectedSPR;
-        endcase
-    end
+    logic [31:0] spr_add, spr_sub, spr_result;
+    assign spr_add = SelectedSPR + FWD_rx0 + sign_ext_imm16;           // SPRADD
+    assign spr_sub = SelectedSPR + ~FWD_rx0 + (32'd1 - sign_ext_imm16); // SPRSUB
+    assign spr_result = (SPRSrc[2:1] == 2'b11) ? (SPRSrc[0] ? spr_sub : spr_add) : spr_other;
 
     //Muxes
     assign AluMuxX = FWD_rx0;
@@ -1396,36 +1475,12 @@ module CORE(
     end
 
     assign MEM_activeSP = MEM_kernelMode ? KSP : SP;
-    assign MEM_activeGP = MEM_kernelMode ? KGP : GP;
 
-    always_comb begin
-        unique case (MEM_spr_target_sel)
-            2'b00:   MEM_SelectedSPR = MEM_activeSP;
-            2'b01:   MEM_SelectedSPR = LR;
-            2'b10:   MEM_SelectedSPR = MEM_activeGP;
-            default: MEM_SelectedSPR = 32'd0;
-        endcase
-    end
+    //This literally can be a 2:1 mux im dumb
+    assign SPRNext = (MEM_SPRSrc == 3'b011) ? MEM_rx0_val : MEM_spr_result; //SPRSET, else PUSH/POP/SPRADD/SPRSUB
 
-    always_comb begin
-        unique case (MEM_SPRSrc)
-            3'b000:  SPRNext = MEM_SelectedSPR;                        // hold
-            3'b011:  SPRNext = MEM_rx0_val;                            // SPRSET
-            3'b100:  SPRNext = MEM_spr_result; // PUSH
-            3'b101:  SPRNext = MEM_spr_result; // POP
-            3'b110:  SPRNext = MEM_spr_result; // SPRADD
-            3'b111:  SPRNext = MEM_spr_result; // SPRSUB
-            default: SPRNext = MEM_SelectedSPR;
-        endcase
-    end
-
-    //This does look kinda scary but trust me its just SPRs write and banking
-    logic  MEM_SP_write, MEM_KSP_write, MEM_GP_write, MEM_KGP_write, MEM_LR_write;
+    logic  MEM_LR_write;
     logic [31:0] MEM_LR_val;
-    assign MEM_SP_write  = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) && !MEM_kernelMode;
-    assign MEM_KSP_write = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b00) &&  MEM_kernelMode;
-    assign MEM_GP_write  = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) && !MEM_kernelMode;
-    assign MEM_KGP_write = isMEM_valid && MEM_SPRWrite && (MEM_spr_target_sel == 2'b10) &&  MEM_kernelMode;
     assign MEM_LR_write  = isMEM_valid && (MEM_is_call || (MEM_SPRWrite && (MEM_spr_target_sel == 2'b01)));
     assign MEM_LR_val    = MEM_is_call ? MEM_PCNext : SPRNext;
 
@@ -1560,17 +1615,29 @@ module CORE(
         endcase
     end
 
+    //literally a early result at EX, moved it to separe MUX bc with sub_result
+    //result_sel doesn't have avaliable bit combination for it, moving it here
+    //Costs literally nothing so its technically better.
+    logic [31:0] early_result;
+    always_comb begin
+        unique case (GPRsSrc)
+            3'b011:  early_result = sign_ext_imm18; // LOAD
+            3'b110:  early_result = EX_IR_2;        // LMA
+            3'b111:  early_result = rng_result;
+            default: early_result = div_result;     // DIV/MOD/SDIV
+        endcase
+    end
+
     //No 3'b001 arm anymore, MEM fixes the load in one cycle later
     always_comb begin
         unique case (result_sel)
-            3'd0: GPRs_data_in = add_result; //self expanotory
-            3'd1: GPRs_data_in = bitwise_result;
-            3'd2: GPRs_data_in = shift_result;
-            3'd3: GPRs_data_in = div_result;
-            3'd4: GPRs_data_in = sign_ext_imm18;
-            3'd5: GPRs_data_in = isEX_mdx ? mdx_addr : SelectedSPR + sign_ext_imm16; //MDCX/SPRLEA
-            3'd6: GPRs_data_in = EX_IR_2;
-            3'd7: GPRs_data_in = rng_result;
+            3'b000: GPRs_data_in = add_result;
+            3'b001: GPRs_data_in = bitwise_result;
+            3'b010: GPRs_data_in = shift_result;
+            3'b011, 3'b111: GPRs_data_in = early_result;
+            3'b100: GPRs_data_in = sub_result;
+            3'b101: GPRs_data_in = idx_addr; //MDCX
+            3'b110: GPRs_data_in = SelectedSPR + sign_ext_imm16;
         endcase
     end
 
@@ -1605,7 +1672,8 @@ module CORE(
         .clk(clk),
         .reset(reset),
         .x(AluMuxX),
-        .y(AluMuxY),
+        .y(FWD_rx1),
+        .y_imm(AluMuxY),
         .opcode(opcode),
         .imm2(alu_imm2),
         .mul_y_in(mul_y_in),
@@ -1616,6 +1684,7 @@ module CORE(
         .shift_amount(shift_amount),
 
         .add_result(add_result),
+        .sub_result(sub_result),
         .bitwise_result(bitwise_result),
         .shift_result(shift_result),
         .div_result(div_result),
@@ -1651,7 +1720,7 @@ module CORE(
         .addrWrite(MEM_memTarget), //Writes happen in MEM
         .data_in(MEM_ram_data_in),
         .byte_enable(MEM_ram_byte_enable),
-        .mem_write(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid && mem_ready),
+        .mem_write(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid), //memWrite dgaf if mem is ready or not
         .mem_read(mem_stall ? MEM_memRead : memRead), //Same thing
         .data_out(ram_data_out),
 
@@ -1674,6 +1743,6 @@ module CORE(
     //it doesn't matte tbh
     assign vram_addr     = MEM_vram_addr;
     assign vram_data_out = MEM_ram_data_in;
-    assign vram_write    = MEM_memWrite && MEM_vram_cs && isMEM_valid && mem_ready;
+    assign vram_write    = MEM_memWrite && MEM_vram_cs && isMEM_valid;
 
 endmodule
