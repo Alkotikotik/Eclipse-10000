@@ -128,7 +128,12 @@ fn main() {
         viz::render_svg(&function_graphs, "color_graph.svg");
         println!("Coloring graph written to: \"color_graph.svg\"");
     }
-    let mut asm_text = generate_assembly(all_instructions).expect("Codegen error: failed to compile");
+    let globals_image = global_layout.data_image();
+    let mut asm_text = generate_assembly(
+        all_instructions,
+        Some(("globals_0x00", &globals_image)),
+    ).expect("Codegen error: failed to compile idk what happened tbh");
+
     if let Some(lines) = leading_inline {
         let mut prefix = String::new();
         for line in lines {

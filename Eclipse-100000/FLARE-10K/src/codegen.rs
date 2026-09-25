@@ -509,7 +509,7 @@ impl GlobalLayout {
     //Just as a monolithic byte stream in #[ init_db ]#, I did this to avoid
     //4byte alignment of each individual global, tho overall, all of them combined
     //Will be 4byte aligned, by zero padding
-    fn data_image(&self) -> Vec<u8> {
+    pub fn data_image(&self) -> Vec<u8> {
         //Zero init monolithic globals.
         //I did this so uninitialized globals just work in that global block
         //Because their place is just 0, basically a build-in .bss
@@ -518,11 +518,11 @@ impl GlobalLayout {
             let Some(&off) = self.offsets.get(name) else { continue }; //If it doesn't have offset -
             //its pinned
             match self.init_values.get(name) { //Just iterate through all globals and init them
-                Some(GlobalInit::Scalar(val)) => Self::write_le(&mut image, off, *val, self.indiv_sizes[name]),
+                Some(GlobalInit::Scalar(val)) => Self::write_bee(&mut image, off, *val, self.indiv_sizes[name]),
                 Some(GlobalInit::Array(vals)) => {
                     let elem = self.array_elem_sizes[name];
                     for (i, val) in vals.iter().enumerate() {
-                        Self::write_le(&mut image, off + i * elem, *val, elem);
+                        Self::write_bee(&mut image, off + i * elem, *val, elem);
                     }
                 }
                 _ => {}//If it isn't initialized just ignore
@@ -530,11 +530,11 @@ impl GlobalLayout {
         }
         return image; //I just can't help myself
     }
-    //le - little endian
-    fn write_le(image: &mut [u8], off: usize, val: i32, width: usize) {
+    //be - big endian e
+    fn write_bee(image: &mut [u8], off: usize, val: i32, width: usize) {
         let bits = val as u32;
         for b in 0..width {
-            image[off + b] = (bits >> (8 * b)) as u8;
+            image[off + b] = (bits >> (8 * (width - 1 - b))) as u8;
         }
     }
 }
@@ -2173,19 +2173,15 @@ impl<'a> Codegen<'a> {
         let mut out = Vec::new();
 
         if layout.total_size > 0 {
-            out.push(AsmInst::SprSub(
-                rx31(),
-                Spr::SP,
-                AsmOperand::Imm16(layout.total_size as i16),
-            ));
-            out.push(AsmInst::SprLea(
+            out.push(AsmInst::Lma(
                 reg_op(rx30_reg()),
-                Spr::SP,
-                AsmOperand::Imm16(0),
-            ));
-            out.push(AsmInst::SprSet(reg_op(rx30_reg()), Spr::GP));
+                AsmOperand::Label(format!("*{}", "globals_0x00")
+            )));
+            out.push(AsmInst::SprSet(
+                reg_op(rx30_reg()),
+                Spr::GP)
+            );
         }
-
         out
     }
 

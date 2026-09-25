@@ -2,8 +2,23 @@
 use crate::codegen::AsmInst;
 use std::fmt::Write;
 
-pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error> {
+pub fn generate_assembly(asm_in: Vec<AsmInst>, globals: Option<(&str, &[u8])>) -> Result<String, std::fmt::Error> {
     let mut assembly = String::new();
+
+     if let Some((label, image)) = globals {
+        if !image.is_empty() {
+            writeln!(assembly, "JMP ~init_0x00")?; //So it wouldn't literally execute globals
+            writeln!(assembly, "#[ init_db {} =>>= {} ]#", image.len(), label)?;
+            for chunk in image.chunks(16) {
+                write!(assembly, "\t")?;
+                for byte in chunk {
+                    write!(assembly, "0x{:02X}, ", byte)?;
+                }
+                writeln!(assembly)?;
+            }
+            writeln!(assembly, "#[ end ]#\n")?;
+        }
+    }
 
     writeln!(assembly, "~init_0x00:")?;
     writeln!(assembly, "\tXOR [rx31, rx31]")?;
@@ -87,7 +102,7 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>) -> Result<String, std::fmt::Error
             AsmInst::Pop(rx0)         => writeln!(assembly, "\tPOP -> {}", rx0)?,
 
             //Idk that looks very nice imo
-            AsmInst::Branch(m, rx0, op2, lbl) => writeln!(assembly, "\n\t{} <-< [{} <-> {}] >-> {}\n", m, rx0, op2, lbl)?,
+            AsmInst::Branch(m, rx0, op2, lbl) => writeln!(assembly, "\n\t{} [{} <-> {}] >-> {}\n", m, rx0, op2, lbl)?,
 
             AsmInst::Jmp(lbl)    => writeln!(assembly, "\tJMP -> {}\n", lbl)?,
             AsmInst::Jr(rx0)     => writeln!(assembly, "\tJR  -> {}", rx0)?,
