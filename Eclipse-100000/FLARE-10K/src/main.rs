@@ -99,9 +99,6 @@ fn main() {
     all_instructions.extend(Codegen::emit_global_preamble(&global_layout));
     for item in top_level_iter {
         match item {
-            IR3AC::TopLevelIR::Global(name) => {
-                all_instructions.extend(Codegen::emit_single_global_init(name, &global_layout));
-            }
             IR3AC::TopLevelIR::Function(name) => {
                 let ir_func = ir_program
                     .functions
@@ -122,6 +119,7 @@ fn main() {
                     all_instructions.push(codegen::AsmInst::Inline(line.clone()));
                 }
             }
+            IR3AC::TopLevelIR::Global(_) => {}
         }
     }
     if args.graph {

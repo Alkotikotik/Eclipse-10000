@@ -46,6 +46,14 @@ impl Semantic {
     }
 }
 
+fn peel_dim(elem_ty: &Type, dims: &[usize]) -> Type {
+    if dims.len() <= 1 {
+        elem_ty.clone()
+    } else {
+        Type::Array(Box::new(elem_ty.clone()), dims[1..].to_vec())
+    }
+}
+
 impl Semantic {
     fn is_integer(&self, ty: &Type) -> bool {
         match ty {
@@ -164,7 +172,7 @@ impl Semantic {
                     self.sem_panic("Array index must be an integer", line, character);
                 }
                 match array_ty {
-                    Type::Array(elem_ty, _) => *elem_ty,
+                    Type::Array(elem_ty, dims_vec) => peel_dim(&elem_ty, &dims_vec),
                     Type::Ptr(elem_ty) => *elem_ty,
                     other => self.sem_panic(
                         &format!("Cannot index into type {:?}", other),
@@ -187,7 +195,7 @@ impl Semantic {
                     let elem_ty = self.check_expr(elem, line, character);
                     self.check_compatibility(&first_ty, &elem_ty, line, character);
                 }
-                Type::Array(Box::new(first_ty), elems.len())
+                Type::Array(Box::new(first_ty), vec![elems.len()])
             }
 
             Expr::Binary { left, op: _, right } => {
@@ -287,12 +295,13 @@ impl Semantic {
                 pin,
             } => {
                 match ty {
-                    Type::Array(elem_ty, size) => {
+                    Type::Array(elem_ty, dims_vec) => {
+                        let total: usize = dims_vec.iter().product();
                         if let Some(init_expr) = initial {
                             if let Expr::ArrayLiteral(elems) = &**init_expr {
-                                if elems.len() != *size {
+                                if elems.len() != total {
                                     self.sem_panic(
-                                        &format!("Array {} declared with size {} but initialized with {} elements", name, size, elems.len()),
+                                        &format!("Array {} declared with size {} but initialized with {} elements", name, total, elems.len()),
                                         line, character
                                     );
                                 }

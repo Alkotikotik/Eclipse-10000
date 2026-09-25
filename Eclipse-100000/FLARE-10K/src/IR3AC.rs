@@ -918,7 +918,8 @@ impl IR {
                                 }
                             }
                         } else {
-                            for i in 0..*count {
+                            let total: usize = vec_dims.iter().product();
+                            for i in 0..total {
                                 self.emit(IRInst::StorePtr {
                                     ptr_addr: IROperand::FrameSlot(offset + i * elem_size),
                                     src: IROperand::SignedConstant(0),
