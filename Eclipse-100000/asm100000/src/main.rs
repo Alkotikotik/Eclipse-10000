@@ -26,10 +26,10 @@ fn branch_info(mnemonic: &str) -> Option<(u32, bool)> {
         "BSES" => (0b01010, false),
         "IBEQ" => (0b10001, true),
         "IBNE" => (0b10010, true),
-        "IBG"  => (0b10011, true),
-        "IBS"  => (0b10100, true),
-        "IBGE" => (0b10101, true),
-        "IBSE" => (0b10110, true),
+        "IBGS" => (0b10011, true),
+        "IBSS" => (0b10100, true),
+        "IBGES" => (0b10101, true),
+        "IBSES" => (0b10110, true),
         "IBGU" => (0b10111, true),
         "IBSU" => (0b11000, true),
         "IBGEU" => (0b11001, true),
@@ -185,7 +185,7 @@ fn main() -> io::Result<()> {
 
             let mut data_bytes: Vec<u8> = Vec::new();
             for val in &init_data {
-                for i in 0..elem_size {
+                for i in (0..elem_size).rev() {
                     data_bytes.push((val >> (8 * i)) as u8);
                 }
             }
@@ -250,7 +250,7 @@ fn main() -> io::Result<()> {
 
     //Escape for branches
     for name in ["BEQ", "BNE", "BGU", "BSU", "BGEU", "BSEU", "BGS", "BSS", "BGES", "BSES",
-                 "IBEQ", "IBNE", "IBG", "IBS", "IBGE", "IBSE",
+                 "IBEQ", "IBNE", "IBGS", "IBSS", "IBGES", "IBSES",
                  "IBGU", "IBSU", "IBGEU", "IBSEU"] {
         opcodes.insert(name, 0b110000);
     }
@@ -652,10 +652,10 @@ fn main() -> io::Result<()> {
             }
         };
 
-        //Little endian btw
-        place_in_mem(&mut image, &mut used, current_pc, &machine_code.to_le_bytes());
+        //Big endian btw
+        place_in_mem(&mut image, &mut used, current_pc, &machine_code.to_be_bytes());
         if let Some(w1) = word1 {
-            place_in_mem(&mut image, &mut used, current_pc + 4, &w1.to_le_bytes());
+            place_in_mem(&mut image, &mut used, current_pc + 4, &w1.to_be_bytes());
         }
     }
     for (addr, bytes) in &data_blocks {

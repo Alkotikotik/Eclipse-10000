@@ -1525,7 +1525,7 @@ module CORE(
     //If I ever want to make more 4reads instructions
     logic [2:0] store_frag;
     logic [31:0] store_val;
-    assign store_frag = isEX_mdsx ? EX_IR_2[21:19] : rx0[2:0];
+    assign store_frag = isEX_mdx ? EX_IR_2[21:19] : rx0[2:0];
     assign store_val  = isEX_mdsx ? mdsx_data      : FWD_rx0;
 
     always_comb begin

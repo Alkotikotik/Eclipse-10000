@@ -15,16 +15,32 @@ module VRAM(
     assign unused_bits = {addrRead[31:20], addrWrite[31:20]}; //So compiler wouldn't compain
 
     always_ff @(posedge clk) begin
-        if (mem_read) data_out <= {vramm[addrRead[19:0] + 3],
-                                   vramm[addrRead[19:0] + 2],
-                                   vramm[addrRead[19:0] + 1],
-                                   vramm[addrRead[19:0]]};
+        if (mem_read) begin
+            if (byte_enable == 4'b1111)
+                data_out <= {vramm[addrRead[19:0]    ],
+                             vramm[addrRead[19:0] + 1],
+                             vramm[addrRead[19:0] + 2],
+                             vramm[addrRead[19:0] + 3]};
+            else if (byte_enable == 4'b0011)
+                data_out <= {16'h0,
+                             vramm[addrRead[19:0]    ],
+                             vramm[addrRead[19:0] + 1]};
+            else
+                data_out <= {24'h0, vramm[addrRead[19:0]]};
+        end
 
         if (mem_write) begin
-            if (byte_enable[0]) vramm[addrWrite[19:0]]     <= data_in[7:0];
-            if (byte_enable[1]) vramm[addrWrite[19:0] + 1] <= data_in[15:8];
-            if (byte_enable[2]) vramm[addrWrite[19:0] + 2] <= data_in[23:16];
-            if (byte_enable[3]) vramm[addrWrite[19:0] + 3] <= data_in[31:24];
+            if (byte_enable == 4'b1111) begin
+                vramm[addrWrite[19:0]    ] <= data_in[31:24];
+                vramm[addrWrite[19:0] + 1] <= data_in[23:16];
+                vramm[addrWrite[19:0] + 2] <= data_in[15:8];
+                vramm[addrWrite[19:0] + 3] <= data_in[7:0];
+            end else if (byte_enable == 4'b0011) begin
+                vramm[addrWrite[19:0]    ] <= data_in[15:8];
+                vramm[addrWrite[19:0] + 1] <= data_in[7:0];
+            end else begin
+                vramm[addrWrite[19:0]    ] <= data_in[7:0];
+            end
         end
     end
 endmodule

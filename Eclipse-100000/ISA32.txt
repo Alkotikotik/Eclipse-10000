@@ -42,6 +42,9 @@ rx21 full rx21 register
 ry211 higher 16bits of rx21
 rz212 mid-high 8 bits of rx21
 
+//Big endian
+Thats it
+
 //VRAM & Screen
 There is dedicated 1MB of VRAM at 04000000 - 0x040FFFFF, the screen resolution is 480p. The pixel format is standard RGBA4444, taking up exactly 2bytes or u16
 

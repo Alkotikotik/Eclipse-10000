@@ -194,7 +194,9 @@ int main(int argc, char **argv) {
                 void *pixels;
                 int pitch;
                 SDL_LockTexture(texture, NULL, &pixels, &pitch);
-                memcpy(pixels, vram_buffer, VRAM_SIZE);
+                const uint16_t *src = reinterpret_cast<const uint16_t *>(vram_buffer);
+                uint16_t *dst = static_cast<uint16_t *>(pixels);
+                for (uint32_t i = 0; i < VRAM_SIZE / 2; i++) dst[i] = __builtin_bswap16(src[i]);
                 SDL_UnlockTexture(texture);
                 vram_dirty = false;
             }
@@ -239,8 +241,8 @@ int main(int argc, char **argv) {
     std::cout << "\n--- VRAM DUMP ---" << std::endl;
     for (uint32_t vram_offset = 0; vram_offset <= 0x200; vram_offset += 4) {
         uint32_t bus_addr = 0x04000000 + vram_offset;
-        uint32_t word = vram_buffer[vram_offset + 0] | (vram_buffer[vram_offset + 1] << 8) |
-                        (vram_buffer[vram_offset + 2] << 16) | (vram_buffer[vram_offset + 3] << 24);
+        uint32_t word = (vram_buffer[vram_offset + 0] << 24) | (vram_buffer[vram_offset + 1] << 16) |
+                        (vram_buffer[vram_offset + 2] << 8) | vram_buffer[vram_offset + 3];
 
         std::cout << "Address [0x" << std::hex << bus_addr << "]: 0x" << std::hex << word << " ("
                   << std::dec << word << ")" << std::endl;
@@ -248,10 +250,10 @@ int main(int argc, char **argv) {
 
     std::cout << "\n--- SYSTEM RAM DUMP HIGHER---" << std::endl;
     for (int addr = 0x03FFFFF0; addr >= 0x03FFFF00; addr -= 4) {
-        uint32_t word = top->rootp->CORE__DOT__system_ram__DOT__ramm[addr] |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 8) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 2] << 16) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 3] << 24);
+        uint32_t word = (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr] << 24) |
+                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 16) |
+                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 2] << 8) |
+                        top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 3];
 
         std::cout << "Address [0x" << std::hex << addr << "]: 0x" << std::hex << word << " ("
                   << std::dec << word << ")" << std::endl;
@@ -259,10 +261,10 @@ int main(int argc, char **argv) {
 
     std::cout << "\n--- SYSTEM RAM DUMP LOWER ---" << std::endl;
     for (int addr = 4096; addr >= 4000; addr -= 4) {
-        uint32_t word = top->rootp->CORE__DOT__system_ram__DOT__ramm[addr] |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 8) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 2] << 16) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 3] << 24);
+        uint32_t word = (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr] << 24) |
+                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 16) |
+                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 2] << 8) |
+                        top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 3];
 
         std::cout << "Address [" << std::dec << addr << "]: 0x" << std::hex << word << " ("
                   << std::dec << word << ")" << std::endl;
@@ -271,8 +273,8 @@ int main(int argc, char **argv) {
     std::cout << "\n--- MMIO DUMP ---" << std::endl;
     for (uint32_t vram_offset = 0; vram_offset <= 0x10; vram_offset += 4) {
         uint32_t bus_addr = 0x04100000 + vram_offset;
-        uint32_t word = vram_buffer[vram_offset + 0] | (vram_buffer[vram_offset + 1] << 8) |
-                        (vram_buffer[vram_offset + 2] << 16) | (vram_buffer[vram_offset + 3] << 24);
+        uint32_t word = (vram_buffer[vram_offset + 0] << 24) | (vram_buffer[vram_offset + 1] << 16) |
+                        (vram_buffer[vram_offset + 2] << 8) | vram_buffer[vram_offset + 3];
 
         std::cout << "Address [0x" << std::hex << bus_addr << "]: 0x" << word << " (" << std::dec
                   << word << ")" << std::endl;

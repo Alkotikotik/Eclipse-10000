@@ -25,26 +25,42 @@ module RAM(
     //Sync read, was async previosely which obviosely is impossible on the
     //actual FPGA, unless LUTRAM ofc but its either BRAM or ddr3
     always_ff @(posedge clk) begin
-        if (mem_read) data_out <= {ramm[addrRead[25:0] + 3],
-                                   ramm[addrRead[25:0] + 2],
-                                   ramm[addrRead[25:0] + 1],
-                                   ramm[addrRead[25:0]    ]};
+        if (mem_read) begin
+            if (byte_enable == 4'b1111)
+                data_out <= {ramm[addrRead[25:0]    ],
+                             ramm[addrRead[25:0] + 1],
+                             ramm[addrRead[25:0] + 2],
+                             ramm[addrRead[25:0] + 3]};
+            else if (byte_enable == 4'b0011)
+                data_out <= {16'h0,
+                             ramm[addrRead[25:0]    ],
+                             ramm[addrRead[25:0] + 1]};
+            else
+                data_out <= {24'h0, ramm[addrRead[25:0]]};
+        end
     end
 
     logic [31:0] ia4;
     assign ia4 = {6'h0, instr_address[25:2], 2'b00};   // 4-byte aligned
     //IF needs instruction every cycle so read enable isn't even needed
-    assign instr_data_out = {ramm[ia4+7], ramm[ia4+6],
-                            ramm[ia4+5], ramm[ia4+4],
-                            ramm[ia4+3], ramm[ia4+2],
-                            ramm[ia4+1], ramm[ia4]};
+    assign instr_data_out = {ramm[ia4+4], ramm[ia4+5],
+                            ramm[ia4+6], ramm[ia4+7],
+                            ramm[ia4],   ramm[ia4+1],
+                            ramm[ia4+2], ramm[ia4+3]};
 
     always_ff @(posedge clk) begin
         if (mem_write) begin
-            if (byte_enable[0]) ramm[addrWrite[25:0]    ] <= data_in[7:0];
-            if (byte_enable[1]) ramm[addrWrite[25:0] + 1] <= data_in[15:8];
-            if (byte_enable[2]) ramm[addrWrite[25:0] + 2] <= data_in[23:16];
-            if (byte_enable[3]) ramm[addrWrite[25:0] + 3] <= data_in[31:24];
+            if (byte_enable == 4'b1111) begin
+                ramm[addrWrite[25:0]    ] <= data_in[31:24];
+                ramm[addrWrite[25:0] + 1] <= data_in[23:16];
+                ramm[addrWrite[25:0] + 2] <= data_in[15:8];
+                ramm[addrWrite[25:0] + 3] <= data_in[7:0];
+            end else if (byte_enable == 4'b0011) begin
+                ramm[addrWrite[25:0]    ] <= data_in[15:8];
+                ramm[addrWrite[25:0] + 1] <= data_in[7:0];
+            end else begin
+                ramm[addrWrite[25:0]    ] <= data_in[7:0];
+            end
         end
     end
 endmodule

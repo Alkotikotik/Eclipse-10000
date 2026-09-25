@@ -33,6 +33,7 @@ pub struct RegisterTracker {
 pub struct GlobalLayout {
     pub offsets: HashMap<String, usize>, // unpinned globals
     pub total_size: usize,               // bytes to reserve on the stack
+    pub indiv_sizes: HashMap<String, usize>,
     pub pins: HashMap<String, Register>, // pinned globals
     pub init_values: HashMap<String, GlobalInit>,
     pub array_elem_sizes: HashMap<String, usize>, // globals that are arrays, and their element size
@@ -416,6 +417,7 @@ impl IRInst {
 impl GlobalLayout {
     pub fn build(globals: &[Expr], structs: &HashMap<String, StructDef>) -> Self {
         let mut offsets = HashMap::new();
+        let mut indiv_sizes = HashMap::new();
         let mut pins = HashMap::new();
         let mut init_values = HashMap::new();
         let mut array_elem_sizes = HashMap::new();
@@ -483,6 +485,8 @@ impl GlobalLayout {
             } else {
                 total_size = align_to(total_size, align);
                 offsets.insert(name.clone(), total_size);
+
+                indiv_sizes.insert(name.clone(), size);
                 total_size += size;
             }
 
@@ -493,10 +497,44 @@ impl GlobalLayout {
         GlobalLayout {
             offsets,
             total_size,
+            indiv_sizes,
             pins,
             init_values,
             array_elem_sizes,
             order,
+        }
+    }
+
+    //So im storing all non-pinned global data(arrays, vars etc)
+    //Just as a monolithic byte stream in #[ init_db ]#, I did this to avoid
+    //4byte alignment of each individual global, tho overall, all of them combined
+    //Will be 4byte aligned, by zero padding
+    fn data_image(&self) -> Vec<u8> {
+        //Zero init monolithic globals.
+        //I did this so uninitialized globals just work in that global block
+        //Because their place is just 0, basically a build-in .bss
+        let mut image = vec![0u8; self.total_size];
+        for name in &self.order {
+            let Some(&off) = self.offsets.get(name) else { continue }; //If it doesn't have offset -
+            //its pinned
+            match self.init_values.get(name) { //Just iterate through all globals and init them
+                Some(GlobalInit::Scalar(val)) => Self::write_le(&mut image, off, *val, self.indiv_sizes[name]),
+                Some(GlobalInit::Array(vals)) => {
+                    let elem = self.array_elem_sizes[name];
+                    for (i, val) in vals.iter().enumerate() {
+                        Self::write_le(&mut image, off + i * elem, *val, elem);
+                    }
+                }
+                _ => {}//If it isn't initialized just ignore
+            }
+        }
+        return image; //I just can't help myself
+    }
+    //le - little endian
+    fn write_le(image: &mut [u8], off: usize, val: i32, width: usize) {
+        let bits = val as u32;
+        for b in 0..width {
+            image[off + b] = (bits >> (8 * b)) as u8;
         }
     }
 }
@@ -595,19 +633,19 @@ fn branch_mnemonic(c: BrCond, signed: bool, imm: bool) -> Option<&'static str> {
         (BrCond::Ne, _, false) => "BNE",
         (BrCond::Ne, _, true) => "IBNE",
         (BrCond::Ls, true, false) => "BSS",
-        (BrCond::Ls, true, true) => "IBS",
+        (BrCond::Ls, true, true) => "IBSS",
         (BrCond::Ls, false, false) => "BSU",
         (BrCond::Ls, false, true) => "IBSU",
         (BrCond::Lse, true, false) => "BSES",
-        (BrCond::Lse, true, true) => "IBSE",
+        (BrCond::Lse, true, true) => "IBSES",
         (BrCond::Lse, false, false) => "BSEU",
         (BrCond::Lse, false, true) => "IBSEU",
         (BrCond::Gt, true, false) => "BGS",
-        (BrCond::Gt, true, true) => "IBG",
+        (BrCond::Gt, true, true) => "IBGS",
         (BrCond::Gt, false, false) => "BGU",
         (BrCond::Gt, false, true) => "IBGU",
         (BrCond::Gte, true, false) => "BGES",
-        (BrCond::Gte, true, true) => "IBGE",
+        (BrCond::Gte, true, true) => "IBGES",
         (BrCond::Gte, false, false) => "BGEU",
         (BrCond::Gte, false, true) => "IBGEU",
         _ => return None,
