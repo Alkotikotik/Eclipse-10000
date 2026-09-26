@@ -386,8 +386,8 @@ module CORE(
     logic [1:0] ID_spr_sel;
     logic       ID_spr_hit;
     assign ID_spr_sel =
-        (ID_IR[31:26] == 6'b101000 || ID_IR[31:26] == 6'b101001 || ID_IR[31:26] == 6'b101010 ||
-        ID_IR[31:26] == 6'b101011 || ID_IR[31:26] == 6'b101100 || ID_IR[31:26] == 6'b101101) ? ID_IR[17:16] : 2'b00;
+            (ID_IR[31:26] == 6'b101000 || ID_IR[31:26] == 6'b101001 || ID_IR[31:26] == 6'b101010 ||
+            ID_IR[31:26] == 6'b101011 || ID_IR[31:26] == 6'b101100 || ID_IR[31:26] == 6'b101101) ? ID_IR[17:16] : 2'b00;
     assign ID_spr_hit = ((ID_spr_sel == 2'b00) && SPRWrite && (spr_target_sel == 2'b00) && (isKernelMode == EX_kernel_mode)) ||
                         ((ID_spr_sel == 2'b01) && ((isCallState && opcode == 6'b111000) || (SPRWrite && spr_target_sel == 2'b01))) ||
                         ((ID_spr_sel == 2'b10) && SPRWrite && (spr_target_sel == 2'b10) && (isKernelMode == EX_kernel_mode));
