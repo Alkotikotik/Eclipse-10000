@@ -3,37 +3,35 @@
 	XOR [rx30, rx30]
 
 ~main:
-	SPRSUB rx31 ->SP<- 2048
+	SPRSUB rx31 ->SP<- 256
 	SPRLEA rx27 <- [SP 0]
-	LOAD rx24 <- 0
+	LOAD rx25 <- 0
 
-	IBGEU [rx24 <-> 8] >-> ~Lab_for_end_1
+	IBGEU [rx25 <-> 8] >-> ~Lab_for_end_1
 
 
 ~Lab_for_start_0:
-	LOAD rx25 <- 0
+	LOAD rx26 <- 0
 
-	IBGEU [rx25 <-> 8] >-> ~Lab_for_end_3
+	IBGEU [rx26 <-> 8] >-> ~Lab_for_end_3
 
 
 ~Lab_for_start_2:
-	ADD  rx26 <- [rx24, rx25 0]
-	MDCX rx29 <=< [rx27, [rx24 * 256] + [rx31 << 0] + 0]
-	MDSX rx26 >=> [rx29, [rx25 * 32] + [rx31 << 0] + 0]
-	MDCX rx29 <=< [rx27, [rx24 * 256] + [rx31 << 0] + 0]
-	MDLX rx28 <=< [rx29, [rx25 * 32] + [rx31 << 0] + 0]
-	STX  rx28 >=> [rx31, rx26 << 2 + 4000]
-	ADD  rx25 <- [rx25, rx31 1]
+	ADD  rx29 <- [rx25, rx26 0]
+	MDSX rx29 >=> [rx27, [rx25 * 32] + [rx26 << 2] + 0]
+	MDLX rx28 <=< [rx27, [rx25 * 32] + [rx26 << 2] + 0]
+	STX  rx28 >=> [rx31, rx29 << 2 + 4000]
+	ADD  rx26 <- [rx26, rx31 1]
 
-	IBSU [rx25 <-> 8] >-> ~Lab_for_start_2
+	IBSU [rx26 <-> 8] >-> ~Lab_for_start_2
 
 
 ~Lab_for_end_3:
-	ADD  rx24 <- [rx24, rx31 1]
+	ADD  rx25 <- [rx25, rx31 1]
 
-	IBSU [rx24 <-> 8] >-> ~Lab_for_start_0
+	IBSU [rx25 <-> 8] >-> ~Lab_for_start_0
 
 
 ~Lab_for_end_1:
-	SPRADD rx31 ->SP<- 2048
+	SPRADD rx31 ->SP<- 256
 	RET

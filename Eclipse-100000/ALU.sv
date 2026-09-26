@@ -33,6 +33,113 @@ module ALU (
     //Based on vivado's report
     logic [31:0] mul_x, mul_y;
 
+
+    //Alright so basically previosely I tried to fit a whole multiply into
+    //1 cycle, and it was fine, but now at 7.6ns, it doesn't fit anymore,
+    //So I did something else, something much cooler.
+    //I calculate 2 products in parallel 2 times from the lower 17 and upper 15 bits: 17×17, 15×17, 17×15, 15×15.
+    //Basically regular long multiplication by hand but with 17 bit "digits".
+    //The DSPs go in pairs - the first one's
+    //low 17 bits are already final so they go to a flop, the rest goes further to the next slice through PCOUT.
+    //The best part is that PCIN has built-in >> 17(yes 17 is an actual magic number of that DSP)
+    //and the second one adds it to its own product.
+    //2 pairs = 2 rows of the long multiplication, and one normal add in, then I just combine them in WB.
+    `ifdef SYNTHESIS
+        /* verilator lint_off UNUSEDSIGNAL */ 
+        //mp - short for mul product, each DSP has its own
+        //mpc - mul product cascade - PCOUT
+        //mp_lo flop at the end of MEM that holding low 17bits
+        logic [47:0] mp0, mp1, mp2, mp3, mpc0, mpc2;
+        /* verilator lint_on UNUSEDSIGNAL */
+        logic [16:0] mp0_lo, mp2_lo;
+
+        // chain A0
+        DSP48E1 #(.AREG(1), .ACASCREG(1), .BREG(1), .BCASCREG(1), .MREG(0), .PREG(0),
+                .CREG(0), .DREG(0), .ADREG(0), .ALUMODEREG(0), .CARRYINREG(0), .CARRYINSELREG(0),
+                .INMODEREG(0), .OPMODEREG(0), .USE_MULT("MULTIPLY"), .USE_DPORT("FALSE")
+        ) mul_a0 (
+            .CLK(clk), .A({13'd0, x[16:0]}), .B({1'b0, mul_y_in[16:0]}), .C(48'd0), .D(25'd0),
+            .OPMODE(7'b000_01_01), //P = xl*yl(x low and y low)
+            .ALUMODE(4'b0000), .INMODE(5'b00000), .CARRYINSEL(3'b000), .CARRYIN(1'b0),
+            .CEA1(!mem_stall), .CEA2(!mem_stall), .CEB1(!mem_stall), .CEB2(!mem_stall),
+            .CEC(1'b0), .CED(1'b0), .CEAD(1'b0), .CEM(1'b0), .CEP(1'b0),
+            .CEALUMODE(1'b0), .CECTRL(1'b0), .CECARRYIN(1'b0), .CEINMODE(1'b0),
+            .RSTA(1'b0), .RSTB(1'b0), .RSTC(1'b0), .RSTD(1'b0), .RSTM(1'b0), .RSTP(1'b0),
+            .RSTALLCARRYIN(1'b0), .RSTALUMODE(1'b0), .RSTCTRL(1'b0), .RSTINMODE(1'b0),
+            .ACIN(30'd0), .BCIN(18'd0), .PCIN(48'd0), .CARRYCASCIN(1'b0), .MULTSIGNIN(1'b0),
+            .P(mp0), .PCOUT(mpc0),
+            .ACOUT(), .BCOUT(), .CARRYOUT(), .CARRYCASCOUT(), .MULTSIGNOUT(),
+            .OVERFLOW(), .UNDERFLOW(), .PATTERNDETECT(), .PATTERNBDETECT()
+        );
+
+        //Chain B0
+        DSP48E1 #(.AREG(1), .ACASCREG(1), .BREG(1), .BCASCREG(1), .MREG(0), .PREG(1),
+                .CREG(0), .DREG(0), .ADREG(0), .ALUMODEREG(0), .CARRYINREG(0), .CARRYINSELREG(0),
+                .INMODEREG(0), .OPMODEREG(0), .USE_MULT("MULTIPLY"), .USE_DPORT("FALSE")
+        ) mul_b0 (
+            .CLK(clk), .A({15'd0, x[31:17]}), .B({1'b0, mul_y_in[16:0]}), .C(48'd0), .D(25'd0),
+            .OPMODE(7'b101_01_01), //P = xh*yl + (PCIN >> 17)
+            .ALUMODE(4'b0000), .INMODE(5'b00000), .CARRYINSEL(3'b000), .CARRYIN(1'b0),
+            .CEA1(!mem_stall), .CEA2(!mem_stall), .CEB1(!mem_stall), .CEB2(!mem_stall),
+            .CEC(1'b0), .CED(1'b0), .CEAD(1'b0), .CEM(1'b0), .CEP(!mem_stall),
+            .CEALUMODE(1'b0), .CECTRL(1'b0), .CECARRYIN(1'b0), .CEINMODE(1'b0),
+            .RSTA(1'b0), .RSTB(1'b0), .RSTC(1'b0), .RSTD(1'b0), .RSTM(1'b0), .RSTP(1'b0),
+            .RSTALLCARRYIN(1'b0), .RSTALUMODE(1'b0), .RSTCTRL(1'b0), .RSTINMODE(1'b0),
+            .ACIN(30'd0), .BCIN(18'd0), .PCIN(mpc0), .CARRYCASCIN(1'b0), .MULTSIGNIN(1'b0),
+            .P(mp1), .PCOUT(),
+            .ACOUT(), .BCOUT(), .CARRYOUT(), .CARRYCASCOUT(), .MULTSIGNOUT(),
+            .OVERFLOW(), .UNDERFLOW(), .PATTERNDETECT(), .PATTERNBDETECT()
+        );
+
+        //Chain A1
+        DSP48E1 #(.AREG(1), .ACASCREG(1), .BREG(1), .BCASCREG(1), .MREG(0), .PREG(0),
+                .CREG(0), .DREG(0), .ADREG(0), .ALUMODEREG(0), .CARRYINREG(0), .CARRYINSELREG(0),
+                .INMODEREG(0), .OPMODEREG(0), .USE_MULT("MULTIPLY"), .USE_DPORT("FALSE")
+        ) mul_a1 (
+            .CLK(clk), .A({13'd0, x[16:0]}), .B({3'd0, mul_y_in[31:17]}), .C(48'd0), .D(25'd0),
+            .OPMODE(7'b000_01_01), //P = xl*yh
+            .ALUMODE(4'b0000), .INMODE(5'b00000), .CARRYINSEL(3'b000), .CARRYIN(1'b0),
+            .CEA1(!mem_stall), .CEA2(!mem_stall), .CEB1(!mem_stall), .CEB2(!mem_stall),
+            .CEC(1'b0), .CED(1'b0), .CEAD(1'b0), .CEM(1'b0), .CEP(1'b0),
+            .CEALUMODE(1'b0), .CECTRL(1'b0), .CECARRYIN(1'b0), .CEINMODE(1'b0),
+            .RSTA(1'b0), .RSTB(1'b0), .RSTC(1'b0), .RSTD(1'b0), .RSTM(1'b0), .RSTP(1'b0),
+            .RSTALLCARRYIN(1'b0), .RSTALUMODE(1'b0), .RSTCTRL(1'b0), .RSTINMODE(1'b0),
+            .ACIN(30'd0), .BCIN(18'd0), .PCIN(48'd0), .CARRYCASCIN(1'b0), .MULTSIGNIN(1'b0),
+            .P(mp2), .PCOUT(mpc2),
+            .ACOUT(), .BCOUT(), .CARRYOUT(), .CARRYCASCOUT(), .MULTSIGNOUT(),
+            .OVERFLOW(), .UNDERFLOW(), .PATTERNDETECT(), .PATTERNBDETECT()
+        );
+
+        //Chain B1
+        DSP48E1 #(.AREG(1), .ACASCREG(1), .BREG(1), .BCASCREG(1), .MREG(0), .PREG(1),
+                .CREG(0), .DREG(0), .ADREG(0), .ALUMODEREG(0), .CARRYINREG(0), .CARRYINSELREG(0),
+                .INMODEREG(0), .OPMODEREG(0), .USE_MULT("MULTIPLY"), .USE_DPORT("FALSE")
+        ) mul_b1 (
+            .CLK(clk), .A({15'd0, x[31:17]}), .B({3'd0, mul_y_in[31:17]}), .C(48'd0), .D(25'd0),
+            .OPMODE(7'b101_01_01), //P = xh*yh + (PCIN >> 17)
+            .ALUMODE(4'b0000), .INMODE(5'b00000), .CARRYINSEL(3'b000), .CARRYIN(1'b0),
+            .CEA1(!mem_stall), .CEA2(!mem_stall), .CEB1(!mem_stall), .CEB2(!mem_stall),
+            .CEC(1'b0), .CED(1'b0), .CEAD(1'b0), .CEM(1'b0), .CEP(!mem_stall),
+            .CEALUMODE(1'b0), .CECTRL(1'b0), .CECARRYIN(1'b0), .CEINMODE(1'b0),
+            .RSTA(1'b0), .RSTB(1'b0), .RSTC(1'b0), .RSTD(1'b0), .RSTM(1'b0), .RSTP(1'b0),
+            .RSTALLCARRYIN(1'b0), .RSTALUMODE(1'b0), .RSTCTRL(1'b0), .RSTINMODE(1'b0),
+            .ACIN(30'd0), .BCIN(18'd0), .PCIN(mpc2), .CARRYCASCIN(1'b0), .MULTSIGNIN(1'b0),
+            .P(mp3), .PCOUT(),
+            .ACOUT(), .BCOUT(), .CARRYOUT(), .CARRYCASCOUT(), .MULTSIGNOUT(),
+            .OVERFLOW(), .UNDERFLOW(), .PATTERNDETECT(), .PATTERNBDETECT()
+        );
+
+        always_ff @(posedge clk) begin
+            if (!mem_stall) begin
+                mp0_lo <= mp0[16:0];
+                mp2_lo <= mp2[16:0];
+            end
+        end
+
+        assign mul_product = 64'({mp1[32:0], mp0_lo}) + (64'({mp3[30:0], mp2_lo}) << 17);
+    `else
+
+    //For verilator its fine
     (* use_dsp = "yes" *)
     always_ff @(posedge clk) begin //No reset :(
         if (!mem_stall) begin //vivado maps it onto DSP register input ports, meaning they freeze on mem_stall
@@ -41,6 +148,7 @@ module ALU (
             mul_product <= mul_x * mul_y;
         end
     end
+    `endif
 
     //Basically I previosely had several reduntant adders and shifters, same
     //results can be achieved with 1 shifter/adder and some really cool bit tricks.

@@ -1,11 +1,11 @@
 func main(){
-    u32 arr[8][8][8];
+    u32 arr[8][8];
 
     for [u32 i; i < 8; i++] {
         for [u32 j; j < 8; j++] {
             u32 temp = i + j;
-            arr[i][j][0] = temp;
-            [4000 + temp * 4] = arr[i][j][0];
+            arr[i][j] = temp;
+            [4000 + temp * 4] = arr[i][j];
         }
     }
 }
