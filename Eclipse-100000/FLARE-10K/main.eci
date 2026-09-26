@@ -52,10 +52,10 @@
 	OR  [rx27, rx28 0]
 	MOV rz280 <- rz293 0
 	MOV rx31 <- rz280 0
-	MOV rx28 <- rx27 0
-	OR  [rx28, rx31 0]
+	MOV ry280 <- rx27 0
+	OR  [ry280, rx31 0]
 	XOR [rx31, rx31 0]
-	STR rx28 -> [rx26 0]
+	STR ry280 -> [rx26 0]
 	ADD rx26 <- [rx26, rx31 2]
 
 	IBNE [rz250 <-> 0] >-> ~Lab_else_2

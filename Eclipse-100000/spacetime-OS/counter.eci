@@ -99,8 +99,8 @@ JMP ~init_0x00
 	SPRSTR rx30 -> [SP 1]
 	LOAD rz283 <- 0
 	LOAD rx27 <- 0
-	LOAD rx30 <- 0
-	SPRSTR rx30 -> [SP 0]
+	LOAD rz300 <- 0
+	SPRSTR rz300 -> [SP 0]
 	XOR [rx30, rx30 0]
 	LOAD rz282 <- 0
 	LOAD ry260 <- 65535

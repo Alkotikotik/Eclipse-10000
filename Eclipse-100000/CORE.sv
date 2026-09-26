@@ -11,7 +11,7 @@ module CORE(
     //====//
     //Pipilined 5 cycle CPU, I chose 5 cycles because its perfect balance
     //between clock speed, which is higher because of shorter critical path, and
-    //penatly for mispredicted branch which is 2 cycles for regular branches
+    //penatly for mispredicted branch which is 3 cycles for regular branches
     //and literally 0 for unconditional ones. The penalty is 0 for correctly
     //predicted ones too.
 

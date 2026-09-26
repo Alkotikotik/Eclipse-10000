@@ -40,7 +40,7 @@ func main() {
 
     while [true] {
         [4092] = 12;
-        u32 color = (colors.r << 12) | (colors.g << 8) | (colors.b << 4) | colors.a;
+        u16 color = (colors.r << 12) | (colors.g << 8) | (colors.b << 4) | colors.a;
         [ptr] = color;
         ptr = ptr + 2;
 

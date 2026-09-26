@@ -100,6 +100,7 @@ pub enum IRInst {
     StorePtr {
         ptr_addr: IROperand,
         src: IROperand,
+        width: usize, //in bytes
     },
 
     LoadIndexed { //LDX
@@ -115,6 +116,7 @@ pub enum IRInst {
         scale: u8,
         offset: i32,
         src: IROperand,
+        width: usize,
     },
     Mdlx {
         dest: IROperand,
@@ -548,6 +550,7 @@ impl IR {
                 match inner_ty {
                     Type::Ptr(target_ty) => *target_ty,
                     Type::U32 | Type::U16 | Type::U8 => Type::U32,
+                    Type::I32 | Type::I16 | Type::I8 => Type::U32,
                     Type::Struct(s) => Type::Struct(s),
                     _ => panic!("Cannot dereference type {:?}", inner_ty),
                 }
@@ -816,6 +819,9 @@ impl IR {
 
             Expr::Assign { lhs, rhs } => {
                 let r_op = self.reduce_expr(rhs);
+                let lhs_ty = self.infer_type(lhs);
+                let width = self.get_type_size(&lhs_ty);
+
                 match lhs.as_ref() {
                     Expr::Identifier(name) => {
                         //Just assign
@@ -848,9 +854,12 @@ impl IR {
                             }
                         }
                         let ptr_op = self.lower_lvalue(lhs);
+                        //Bc I switched to big endian just putting any const into plan rx30 doesn't
+                        //work now. So I gotta load it into specific rx30 fragment based on const size
                         self.emit(IRInst::StorePtr {
                             ptr_addr: ptr_op,
                             src: r_op.clone(),
+                            width,
                         });
                         r_op
                     }
@@ -859,11 +868,12 @@ impl IR {
                         //instruction in most cases, so it will go from 3-5 instruction to 1,
                         //however if its run-time array we still have to use 2 instruction, which is
                         //fine I mainly did LDX/STX bc I just wanted to, not for pure performance
+
                         match self.index_parts(array, index) {
                             Ok((base, idx, scale)) => self.emit(IRInst::StoreIndexed { //LDX
-                                base, index: idx, scale, offset: 0, src: r_op.clone() }),
+                                base, index: idx, scale, offset: 0, src: r_op.clone(), width }),
                             Err(addr) => self.emit(IRInst::StorePtr { //Regular
-                                ptr_addr: addr, src: r_op.clone() }),
+                                ptr_addr: addr, src: r_op.clone(), width }),
                         }
                         r_op
                     }
@@ -873,6 +883,7 @@ impl IR {
                         self.emit(IRInst::StorePtr {
                             ptr_addr: ptr_op,
                             src: r_op.clone(),
+                            width,
                         });
                         r_op
                     }
@@ -907,6 +918,8 @@ impl IR {
                         self.local_frame_size = offset + slot_size;
                         self.local_slots.insert(name.clone(), offset);
 
+                        let width = self.get_type_size(elem_ty);
+
                         if let Some(init_expr) = initial {
                             if let Expr::ArrayLiteral(elems) = &**init_expr {
                                 for (i, elem_expr) in elems.iter().enumerate() {
@@ -914,6 +927,7 @@ impl IR {
                                     self.emit(IRInst::StorePtr {
                                         ptr_addr: IROperand::FrameSlot(offset + i * elem_size),
                                         src: val_op,
+                                        width,
                                     });
                                 }
                             }
@@ -923,6 +937,7 @@ impl IR {
                                 self.emit(IRInst::StorePtr {
                                     ptr_addr: IROperand::FrameSlot(offset + i * elem_size),
                                     src: IROperand::SignedConstant(0),
+                                    width,
                                 });
                             }
                         }

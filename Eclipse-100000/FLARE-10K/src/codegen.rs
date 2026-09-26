@@ -293,7 +293,7 @@ impl IRInst {
                 }
             }
 
-            IRInst::StorePtr { ptr_addr, src } => {
+            IRInst::StorePtr { ptr_addr, src, .. } => {
                 if ptr_addr.is_var() {
                     ls.push(ptr_addr.clone());
                 }
@@ -667,6 +667,19 @@ fn rx30_reg() -> Register {
         sub_index: 0,
     }
 }
+
+//The big endian thing, now I have to actually load a const into matching scratch reg
+fn scratch_reg(width: usize, id: u8) -> Register {
+    Register {
+        id,
+        reg_type: match width {
+            1 => RegType::B8,
+            2 => RegType::B16,
+            _ => RegType::B32,
+        },
+        sub_index: 0,
+    }
+}
 fn rx31_reg() -> Register {
     Register {
         id: 31,
@@ -760,13 +773,21 @@ fn type_to_regtype(ty: &Type) -> RegType {
     }
 }
 
+fn width_to_regtype(width: usize) -> RegType {
+    match width {
+        1 => RegType::B8,
+        2 => RegType::B16,
+        _ => RegType::B32,
+    }
+}
+
 impl<'a> Codegen<'a> {
     pub fn new(
         ir_func: &'a IRFunction,
         structs: &'a HashMap<String, StructDef>,
         global_layout: &'a GlobalLayout,
     ) -> Self {
-        let legalized_body = Self::legalize_globals(&ir_func.body, global_layout);
+        let (legalized_body, global_temp_sizes) = Self::legalize_globals(&ir_func.body, global_layout);
         let mut pins = Self::collect_pins(&legalized_body);
         pins.extend(global_layout.pins.clone());
 
@@ -807,6 +828,7 @@ impl<'a> Codegen<'a> {
             final_graph: None,
         };
 
+        codegen.operand_sizes.extend(global_temp_sizes);
         codegen.build_cfg(&legalized_body);
         codegen
     }
@@ -959,9 +981,10 @@ fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst 
             dest: sub(dest),
             ptr_addr: sub(ptr_addr),
         },
-        IRInst::StorePtr { ptr_addr, src } => IRInst::StorePtr {
+        IRInst::StorePtr { ptr_addr, src, width } => IRInst::StorePtr {
             ptr_addr: sub(ptr_addr),
             src: sub(src),
+            width,
         },
 
         IRInst::LoadIndexed {dest, base, index, scale, offset} => IRInst::LoadIndexed{
@@ -971,12 +994,13 @@ fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst 
             scale,
             offset,
         },
-        IRInst::StoreIndexed {base, index, scale, offset, src} => IRInst::StoreIndexed{
+        IRInst::StoreIndexed {base, index, scale, offset, src, width} => IRInst::StoreIndexed{
             base: sub(base),
             index: sub(index),
             scale,
             offset,
             src: sub(src),
+            width,
 
         },
         IRInst::AntiEqual {
@@ -1700,6 +1724,7 @@ impl<'a> Codegen<'a> {
                         store_backs.push(IRInst::StorePtr {
                             ptr_addr: IROperand::FrameSlot(off),
                             src: tmp,
+                            width: 4,
                         });
                     }
                 }
@@ -1769,10 +1794,11 @@ impl<'a> Codegen<'a> {
                                         IROperand::GlobalSlot(total as usize)
                                     };
                                     match &body[i + 2] {
-                                        IRInst::StorePtr { ptr_addr, src } if ptr_addr == dest => {
+                                        IRInst::StorePtr { ptr_addr, src, width } if ptr_addr == dest => {
                                             out.push(IRInst::StorePtr {
                                                 ptr_addr: slot,
                                                 src: src.clone(),
+                                                width: *width,
                                             });
                                             i += 3;
                                             continue;
@@ -1873,12 +1899,13 @@ impl<'a> Codegen<'a> {
         }
 
         match c {
-            IRInst::StorePtr { ptr_addr, src } if ptr_addr == t2 => Some(IRInst::StoreIndexed {
+            IRInst::StorePtr { ptr_addr, src, width } if ptr_addr == t2 => Some(IRInst::StoreIndexed {
                 base: IROperand::SignedConstant(base),
                 index: idx.clone(),
                 scale,
                 offset: 0,
                 src: src.clone(),
+                width: *width,
             }),
             IRInst::LoadPtr { dest, ptr_addr } if ptr_addr == t2 => Some(IRInst::LoadIndexed {
                 dest: dest.clone(),
@@ -2062,7 +2089,10 @@ impl<'a> Codegen<'a> {
 
     //Place the globals before the stack
     //Global | SP <-free space-> <-Heap(Later)->
-    fn legalize_globals(body: &[IRInst], layout: &GlobalLayout) -> Vec<IRInst> {
+    fn legalize_globals(
+        body: &[IRInst],
+        layout: &GlobalLayout,
+    ) -> (Vec<IRInst>, HashMap<IROperand, RegType>) {
         let mut next_temp = body
             .iter()
             .flat_map(|i| i.uses().into_iter().chain(i.kills()))
@@ -2074,6 +2104,7 @@ impl<'a> Codegen<'a> {
             .unwrap_or(0);
 
         let mut new_body = Vec::new();
+        let mut temp_sizes: HashMap<IROperand, RegType> = HashMap::new();
 
         for inst in body {
             let mut inst = inst.clone();
@@ -2104,8 +2135,18 @@ impl<'a> Codegen<'a> {
                     .iter()
                     .any(|op| matches!(op, IROperand::Var(n) if n == name));
 
+                let is_array = layout.array_elem_sizes.contains_key(name);
+                let global_width = if is_array {
+                    4
+                } else {
+                    layout.indiv_sizes.get(name).copied().unwrap_or(4)
+                };
+                if !is_array {
+                    temp_sizes.insert(tmp.clone(), width_to_regtype(global_width));
+                }
+
                 if is_used {
-                    if layout.array_elem_sizes.contains_key(name) {
+                    if is_array {
                         pre.push(IRInst::GlobalAddr {
                             dest: tmp.clone(),
                             offset: off,
@@ -2124,6 +2165,7 @@ impl<'a> Codegen<'a> {
                     post.push(IRInst::StorePtr {
                         ptr_addr: IROperand::GlobalSlot(off),
                         src: tmp,
+                        width: global_width,
                     });
                 }
             }
@@ -2133,7 +2175,7 @@ impl<'a> Codegen<'a> {
             new_body.extend(post);
         }
 
-        new_body
+        (new_body, temp_sizes)
     }
 
     fn operand_to_asm(&self, op: &IROperand) -> AsmOperand {
@@ -2192,13 +2234,13 @@ impl<'a> Codegen<'a> {
         out
     }
 
-
     //Lowers further, low load and store ptr
     fn lower_mem(
         &self,
         dest_or_src: &IROperand,
         ptr_addr: &IROperand,
         is_load: bool,
+        width: usize,
         out: &mut Vec<AsmInst>,
     ) {
         let (base, off, mut used_rx30) = self.resolve_addr(ptr_addr, out);
@@ -2207,7 +2249,7 @@ impl<'a> Codegen<'a> {
         let value_operand = if is_load {
             self.operand_to_asm(dest_or_src)
         } else if is_const(dest_or_src) {
-            let target = if used_rx30 { rx31_reg() } else { rx30_reg() };
+            let target = scratch_reg(width, if used_rx30 { 31 } else { 30 });
             load_const(target, const_val(dest_or_src), out);
             if target.id == 31 {
                 used_rx31 = true;
@@ -2239,6 +2281,14 @@ impl<'a> Codegen<'a> {
             out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
         }
     }
+    //For loading consts of neccessy sizes
+    fn scratch_reg(width: usize, id: u8) -> Register {
+        Register {
+            id,
+            reg_type: match width { 1 => RegType::B8, 2 => RegType::B16, _ => RegType::B32 },
+            sub_index: 0,
+        }
+    }
 
     //STX/LDX
     fn lower_indexed(
@@ -2249,6 +2299,7 @@ impl<'a> Codegen<'a> {
         scale: u8,
         offset: i32,
         is_load: bool,
+        width: usize,
         out: &mut Vec<AsmInst>,
     ) {
         let index_asm = self.operand_to_asm(index);
@@ -2266,9 +2317,10 @@ impl<'a> Codegen<'a> {
         //If we are loading contsant like arr[i] = 67; 67 is const and we first have to load it into
         //rx30 then use it, then XOR it with itself. This is only for store, so for STX, btw
         let value_asm = if !is_load && is_const(value) {
-            load_const(rx30_reg(), const_val(value), out);
+            let target = scratch_reg(width, 30);
+            load_const(target, const_val(value), out);
             used_rx30 = true;
-            reg_op(rx30_reg())
+            reg_op(target)
         } else {
             self.operand_to_asm(value)
         };
@@ -2575,8 +2627,8 @@ impl<'a> Codegen<'a> {
             IRInst::Label(lab) => out.push(AsmInst::Label(format!("{}", lab))),
             IRInst::JMP(target) => out.push(AsmInst::Jmp(target.clone())),
 
-            IRInst::LoadPtr { dest, ptr_addr } => self.lower_mem(dest, ptr_addr, true, out),
-            IRInst::StorePtr { ptr_addr, src } => self.lower_mem(src, ptr_addr, false, out),
+            IRInst::LoadPtr { dest, ptr_addr } => self.lower_mem(dest, ptr_addr, true, self.size_of(dest).get_size(), out),
+            IRInst::StorePtr { ptr_addr, src, width } => self.lower_mem(src, ptr_addr, false, *width, out),
 
             IRInst::Add { dest, left, right } => {
                 self.lower_btype_alu(dest, left, right, AsmInst::Add, out)
@@ -2926,9 +2978,9 @@ impl<'a> Codegen<'a> {
                 out.push(AsmInst::Ret);
             }
             IRInst::LoadIndexed { dest, base, index, scale, offset } =>
-                self.lower_indexed(dest, base, index, *scale, *offset, true, out),
-            IRInst::StoreIndexed { base, index, scale, offset, src } =>
-                self.lower_indexed(src, base, index, *scale, *offset, false, out),
+                self.lower_indexed(dest, base, index, *scale, *offset, true, self.size_of(dest).get_size(), out),
+            IRInst::StoreIndexed { base, index, scale, offset, src, width } =>
+                self.lower_indexed(src, base, index, *scale, *offset, false, *width, out),
             IRInst::Mdlx {dest, base, mul_index, sh_index, stride, val, offset} => {}
             IRInst::Mdsx {src, base, mul_index, sh_index, stride, val, offset}  => {}
             IRInst::Mdcx {dest, base, mul_index, sh_index, stride, val, offset} => {}
