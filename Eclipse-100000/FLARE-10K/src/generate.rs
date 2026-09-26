@@ -27,61 +27,71 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>, globals: Option<(&str, &[u8])>) -
     for inst in asm_in {
         match inst {
             AsmInst::Mov(dest, src, imm) => {
-                writeln!(assembly, "\tMOV {} <- {} {}", dest, src, imm)?
+                writeln!(assembly, "\tMOV  {} <- {} {}", dest, src, imm)?
             }
             AsmInst::Add(dest, src1, src2, imm2) => {
-                writeln!(assembly, "\tADD {} <- [{}, {} {}]", dest, src1, src2, imm2)?
+                writeln!(assembly, "\tADD  {} <- [{}, {} {}]", dest, src1, src2, imm2)?
             }
             AsmInst::Sub(dest, src1, src2, imm2) => {
-                writeln!(assembly, "\tSUB {} <- [{}, {} {}]", dest, src1, src2, imm2)?
+                writeln!(assembly, "\tSUB  {} <- [{}, {} {}]", dest, src1, src2, imm2)?
             }
             AsmInst::Mul(dest, src1, src2, imm2) => {
-                writeln!(assembly, "\tMUL {} <- [{}, {} {}]", dest, src1, src2, imm2)?
+                writeln!(assembly, "\tMUL  {} <- [{}, {} {}]", dest, src1, src2, imm2)?
             }
             AsmInst::Div(dest, src1, src2, imm2) => {
-                writeln!(assembly, "\tDIV {} <- [{}, {} {}]", dest, src1, src2, imm2)?
+                writeln!(assembly, "\tDIV  {} <- [{}, {} {}]", dest, src1, src2, imm2)?
             }
             AsmInst::Sdiv(dest, src1, src2, imm2) => {
                 writeln!(assembly, "\tSDIV {} <- [{}, {} {}]", dest, src1, src2, imm2)?
             }
             AsmInst::Mod(dest, src1, src2, imm2) => {
-                writeln!(assembly, "\tMOD {} <- [{}, {} {}]", dest, src1, src2, imm2)?
+                writeln!(assembly, "\tMOD  {} <- [{}, {} {}]", dest, src1, src2, imm2)?
             }
             AsmInst::Xor(dest, src, imm) => {
-                writeln!(assembly, "\tXOR [{}, {} {}]", dest, src, imm)?
+                writeln!(assembly, "\tXOR  [{}, {} {}]", dest, src, imm)?
             }
             AsmInst::Or(dest, src, imm) => writeln!(assembly, "\tOR  [{}, {} {}]", dest, src, imm)?,
             AsmInst::And(dest, src, imm) => {
-                writeln!(assembly, "\tAND [{}, {} {}]", dest, src, imm)?
+                writeln!(assembly, "\tAND  [{}, {} {}]", dest, src, imm)?
             }
             AsmInst::Shl(dest, src, imm) => {
-                writeln!(assembly, "\tSHL [{}, {} {}]", dest, src, imm)?
+                writeln!(assembly, "\tSHL  [{}, {} {}]", dest, src, imm)?
             }
             AsmInst::Shr(dest, src, imm) => {
-                writeln!(assembly, "\tSHR [{}, {} {}]", dest, src, imm)?
+                writeln!(assembly, "\tSHR  [{}, {} {}]", dest, src, imm)?
             }
             AsmInst::Sra(dest, src, imm) => {
-                writeln!(assembly, "\tSRA [{}, {} {}]", dest, src, imm)?
+                writeln!(assembly, "\tSRA  [{}, {} {}]", dest, src, imm)?
             }
 
-            AsmInst::Not(op) => writeln!(assembly, "\tNOT {}", op)?,
+            AsmInst::Not(op) => writeln!(assembly, "\tNOT  {}", op)?,
             AsmInst::Load(dest, imm18) => writeln!(assembly, "\tLOAD {} <- {}", dest, imm18)?,
-            AsmInst::Lma(rx0, imm32) => writeln!(assembly, "\tLMA {} <- {}", rx0, imm32)?,
+            AsmInst::Lma(rx0, imm32) => writeln!(assembly, "\tLMA  {} <- {}", rx0, imm32)?,
 
             AsmInst::Ldr(dest, base, offset) => {
-                writeln!(assembly, "\tLDR {} <- [{} {}]", dest, base, offset)?
+                writeln!(assembly, "\tLDR  {} <- [{} {}]", dest, base, offset)?
             }
             AsmInst::Str(dest, base, offset) => {
-                writeln!(assembly, "\tSTR {} -> [{} {}]", dest, base, offset)?
+                writeln!(assembly, "\tSTR  {} -> [{} {}]", dest, base, offset)?
             }
 
             AsmInst::Ldx(dest, base, idx, shift, offset) => {
-                writeln!(assembly, "\tLDX {} <=< [{}, {} << {} + {}]", dest, base, idx, shift, offset)?
+                writeln!(assembly, "\tLDX  {} <=< [{}, {} << {} + {}]", dest, base, idx, shift, offset)?
             }
             AsmInst::Stx(dest, base, idx, shift, offset) => {
-                writeln!(assembly, "\tSTX {} >=> [{}, {} << {} + {}]", dest, base, idx, shift, offset)?
+                writeln!(assembly, "\tSTX  {} >=> [{}, {} << {} + {}]", dest, base, idx, shift, offset)?
             }
 
+            AsmInst::Mdlx(dest, base, idx, stride, sh, val, off) => {
+                writeln!(assembly, "\tMDLX {} <=< [{}, [{} * {}] + [{} << {}] + {}]",  dest, base, idx, stride, sh, val, off)?
+            }
+            AsmInst::Mdsx(src, base, idx, stride, sh, val, off) => {
+                writeln!(assembly, "\tMDSX {} >=> [{}, [{} * {}] + [{} << {}] + {}]", src, base, idx, stride, sh, val, off)?
+            }
+            AsmInst::Mdcx(dest, base, idx, stride, sh, val, off) => {
+                writeln!(assembly, "\tMDCX {} <=< [{}, [{} * {}] + [{} << {}] + {}]", dest, base, idx, stride, sh, val, off)?
+            }
+            
             AsmInst::SprLdr(rx0, spr, imm16) => {
                 writeln!(assembly, "\tSPRLDR {} <- [{:?} {}]", rx0, spr, imm16)?
             }
@@ -99,13 +109,13 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>, globals: Option<(&str, &[u8])>) -
             }
             AsmInst::SprSet(rx0, spr) => writeln!(assembly, "\tSPRSET {} -> {:?}", rx0, spr)?,
             AsmInst::Push(rx0)        => writeln!(assembly, "\tPUSH <- {}", rx0)?,
-            AsmInst::Pop(rx0)         => writeln!(assembly, "\tPOP -> {}", rx0)?,
+            AsmInst::Pop(rx0)         => writeln!(assembly, "\tPOP  -> {}", rx0)?,
 
             //Idk that looks very nice imo
             AsmInst::Branch(m, rx0, op2, lbl) => writeln!(assembly, "\n\t{} [{} <-> {}] >-> {}\n", m, rx0, op2, lbl)?,
 
-            AsmInst::Jmp(lbl)    => writeln!(assembly, "\tJMP -> {}\n", lbl)?,
-            AsmInst::Jr(rx0)     => writeln!(assembly, "\tJR  -> {}", rx0)?,
+            AsmInst::Jmp(lbl)    => writeln!(assembly, "\tJMP  -> {}\n", lbl)?,
+            AsmInst::Jr(rx0)     => writeln!(assembly, "\tJR   -> {}", rx0)?,
             AsmInst::Call(lbl)   => writeln!(assembly, "\tCALL {}\n", lbl)?,
             AsmInst::Inline(asm) => writeln!(assembly, "\t{}", asm)?,
             AsmInst::Label(lbl)  => writeln!(assembly, "\n{}:", lbl)?,

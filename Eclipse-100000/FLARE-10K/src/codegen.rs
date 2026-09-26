@@ -124,6 +124,10 @@ pub enum AsmInst {
 
     Ldx(AsmOperand, AsmOperand, AsmOperand, u8, i32),
     Stx(AsmOperand, AsmOperand, AsmOperand, u8, i32),
+    //value/dest, base rb1, mul index rx0, stride, shift index rb0, val, imm13
+    Mdlx(AsmOperand, AsmOperand, AsmOperand, i16, AsmOperand, u8, i16),
+    Mdcx(AsmOperand, AsmOperand, AsmOperand, i16, AsmOperand, u8, i16),
+    Mdsx(AsmOperand, AsmOperand, AsmOperand, i16, AsmOperand, u8, i16),
 
     SprLdr(AsmOperand, Spr, AsmOperand),
     SprStr(AsmOperand, Spr, AsmOperand),
@@ -360,6 +364,22 @@ impl IRInst {
                 }
             }
 
+            IRInst::Mdlx { base, mul_index, sh_index, .. } | IRInst::Mdcx { base, mul_index, sh_index, .. } => {
+                for op in [base, mul_index, sh_index] {
+                    if op.is_var() {
+                        ls.push(op.clone());
+                    }
+                }
+            }
+
+            IRInst::Mdsx { base, mul_index, sh_index, src, .. } => {
+                for op in [base, mul_index, sh_index, src] {
+                    if op.is_var() {
+                        ls.push(op.clone());
+                    }
+                }
+            }
+
             _ => {}
         }
         ls
@@ -401,6 +421,12 @@ impl IRInst {
             IRInst::Call {
                 dest: Some(dest), ..
             } => {
+                if dest.is_var() {
+                    ls.push(dest.clone());
+                }
+            }
+
+            IRInst::Mdlx { dest, .. } | IRInst::Mdcx { dest, .. } => {
                 if dest.is_var() {
                     ls.push(dest.clone());
                 }
@@ -680,6 +706,7 @@ fn scratch_reg(width: usize, id: u8) -> Register {
         sub_index: 0,
     }
 }
+
 fn rx31_reg() -> Register {
     Register {
         id: 31,
@@ -1066,6 +1093,34 @@ fn substitute_operand(inst: IRInst, old: &IROperand, new: &IROperand) -> IRInst 
         IRInst::GlobalAddr { dest, offset } => IRInst::GlobalAddr {
             dest: sub(dest),
             offset,
+        },
+        IRInst::Mdlx { dest, base, mul_index, sh_index, stride, val, offset } => IRInst::Mdlx {
+            dest: sub(dest),
+            base: sub(base),
+            mul_index: sub(mul_index),
+            sh_index: sub(sh_index),
+            stride,
+            val,
+            offset,
+        },
+        IRInst::Mdcx { dest, base, mul_index, sh_index, stride, val, offset } => IRInst::Mdcx {
+            dest: sub(dest),
+            base: sub(base),
+            mul_index: sub(mul_index),
+            sh_index: sub(sh_index),
+            stride,
+            val,
+            offset,
+        },
+        IRInst::Mdsx { src, base, mul_index, sh_index, stride, val, offset, width } => IRInst::Mdsx {
+            src: sub(src),
+            base: sub(base),
+            mul_index: sub(mul_index),
+            sh_index: sub(sh_index),
+            stride,
+            val,
+            offset,
+            width,
         },
         other => other,
     }
@@ -2178,6 +2233,39 @@ impl<'a> Codegen<'a> {
         (new_body, temp_sizes)
     }
 
+    fn narrow_value(&self, op: &IROperand, width: usize) -> AsmOperand {
+        match self.operand_to_asm(op) {
+            AsmOperand::Reg(Reg::TheRealOne(r)) if r.reg_type.get_size() > width => {
+                let base_lane = match r.reg_type {
+                    RegType::B32 => 0,
+                    RegType::B16 => r.sub_index * 2,
+                    RegType::B8 => r.sub_index,
+                };
+                AsmOperand::Reg(Reg::TheRealOne(Register {
+                    id: r.id,
+                    reg_type: width_to_regtype(width),
+                    sub_index: match width {
+                        1 => base_lane,
+                        2 => base_lane / 2,
+                        _ => 0,
+                    },
+                }))
+            }
+            other => other,
+        }
+    }
+
+    //Little MD helper
+    fn md_reg(&self, op: &IROperand) -> AsmOperand {
+        if is_const(op) {
+            if const_val(op) == 0 {
+                return rx31();
+            }
+            panic!("Codegen Error: MDXs register field got a constant {:?}", op);
+        }
+        self.operand_to_asm(op)
+    }
+
     fn operand_to_asm(&self, op: &IROperand) -> AsmOperand {
         match op {
             IROperand::SignedConstant(var) => AsmOperand::Imm18(*var),
@@ -2258,7 +2346,7 @@ impl<'a> Codegen<'a> {
             }
             reg_op(target)
         } else {
-            self.operand_to_asm(dest_or_src)
+            self.narrow_value(dest_or_src, width)
         };
 
         match base {
@@ -2321,8 +2409,10 @@ impl<'a> Codegen<'a> {
             load_const(target, const_val(value), out);
             used_rx30 = true;
             reg_op(target)
-        } else {
+        } else if is_load {
             self.operand_to_asm(value)
+        } else {
+            self.narrow_value(value, width)
         };
 
         out.push(if is_load {
@@ -2981,9 +3071,39 @@ impl<'a> Codegen<'a> {
                 self.lower_indexed(dest, base, index, *scale, *offset, true, self.size_of(dest).get_size(), out),
             IRInst::StoreIndexed { base, index, scale, offset, src, width } =>
                 self.lower_indexed(src, base, index, *scale, *offset, false, *width, out),
-            IRInst::Mdlx {dest, base, mul_index, sh_index, stride, val, offset} => {}
-            IRInst::Mdsx {src, base, mul_index, sh_index, stride, val, offset}  => {}
-            IRInst::Mdcx {dest, base, mul_index, sh_index, stride, val, offset} => {}
+            IRInst::Mdlx { dest, base, mul_index, sh_index, stride, val, offset } => {
+                out.push(AsmInst::Mdlx(
+                    self.operand_to_asm(dest),
+                    self.md_reg(base),
+                    self.md_reg(mul_index),
+                    *stride,
+                    self.md_reg(sh_index),
+                    *val,
+                    *offset,
+                ))
+            }
+            IRInst::Mdsx { src, base, mul_index, sh_index, stride, val, offset, width } => {
+                out.push(AsmInst::Mdsx(
+                    self.narrow_value(src, *width),
+                    self.md_reg(base),
+                    self.md_reg(mul_index),
+                    *stride,
+                    self.md_reg(sh_index),
+                    *val,
+                    *offset,
+                ))
+            }
+            IRInst::Mdcx { dest, base, mul_index, sh_index, stride, val, offset } => {
+                out.push(AsmInst::Mdcx(
+                    self.operand_to_asm(dest),
+                    self.md_reg(base),
+                    self.md_reg(mul_index),
+                    *stride,
+                    self.md_reg(sh_index),
+                    *val,
+                    *offset,
+                ))
+            }
         }
     }
 }

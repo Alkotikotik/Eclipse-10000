@@ -135,6 +135,7 @@ pub enum IRInst {
         stride: i16,
         val: u8,
         offset: i16,
+        width: usize,
     },
     Mdcx { //Its multi-dimensional computex indexed btw
         dest: IROperand,
@@ -247,6 +248,7 @@ pub struct IR {
     loop_exit_stack: Vec<String>,
     current_return_var: Option<String>,
     local_slots: HashMap<String, usize>,
+    array_bases: HashMap<String, IROperand>,
     local_frame_size: usize,
 }
 
@@ -315,6 +317,19 @@ pub fn get_type_size(ty: &Type, structs: &HashMap<String, StructDef>) -> usize {
             }
         }
     }
+}
+
+pub enum AddrPlan {
+    Direct { base: IROperand, offset: i64 },
+    Indexed { base: IROperand, index: IROperand, scale: u8, offset: i32 },
+    Md {
+        base: IROperand,
+        mul_index: IROperand,
+        stride: i16,
+        sh_index: IROperand,
+        val: u8,
+        offset: i16,
+    },
 }
 
 pub enum ArgPlacement {
@@ -388,6 +403,7 @@ fn find_arg_reg_slot(slots: &mut [[bool; 4]; 4], size: usize) -> Option<String> 
     }
     None
 }
+
 
 fn expr_calls_function(expr: &Expr) -> bool {
     match expr {
@@ -469,9 +485,26 @@ impl IR {
             loop_exit_stack: Vec::new(),
             current_return_var: None,
             local_slots: HashMap::new(),
+            array_bases: HashMap::new(),
             local_frame_size: 0,
         }
     }
+    //MDXs helper bc they only accept full register we gotta put fragmented(if fragmented)
+    //Into a full register
+    fn widen_index(&mut self, op: IROperand, ty: Type) -> IROperand {
+        if self.get_type_size(&ty) == 4 {
+            return op;
+        }
+        let wide = self.new_temp_typed(Type::U32);
+        self.emit(IRInst::Cast {
+            dest: wide.clone(),
+            src: op,
+            target_type: Type::U32,
+            src_type: ty,
+        });
+        wide
+    }
+
     pub fn new_temp(&mut self) -> IROperand {
         let buff = IROperand::Temp(self.temp_counter);
         self.temp_counter += 1;
@@ -671,11 +704,25 @@ impl IR {
             Expr::Index { array, index } => {
                 let result_ty = self.infer_type(expr);
                 let dest = self.new_temp_typed(result_ty);
-                match self.index_parts(array, index) {
-                    Ok((base, idx, scale)) => self.emit(IRInst::LoadIndexed { //LDX/STX
-                        dest: dest.clone(), base, index: idx, scale, offset: 0 }),
-                    Err(addr) => self.emit(IRInst::LoadPtr { //Regular
-                        dest: dest.clone(), ptr_addr: addr }),
+                match self.plan_index(array, index) {
+                    Some(AddrPlan::Direct { base, offset }) => {
+                        let addr = self.add_const(base, offset);
+                        self.emit(IRInst::LoadPtr { dest: dest.clone(), ptr_addr: addr });
+                    }
+                    Some(AddrPlan::Indexed { base, index: idx, scale, offset }) => {
+                        self.emit(IRInst::LoadIndexed {
+                            dest: dest.clone(), base, index: idx, scale, offset });
+                    }
+                    Some(AddrPlan::Md { base, mul_index, stride, sh_index, val, offset }) => {
+                        self.emit(IRInst::Mdlx {
+                            dest: dest.clone(), base, mul_index, sh_index, stride, val, offset });
+                    }
+                    None => match self.index_parts(array, index) {
+                        Ok((base, idx, scale)) => self.emit(IRInst::LoadIndexed { //LDX/STX
+                            dest: dest.clone(), base, index: idx, scale, offset: 0 }),
+                        Err(addr) => self.emit(IRInst::LoadPtr { //Regular
+                            dest: dest.clone(), ptr_addr: addr }),
+                    },
                 }
                 dest
             }
@@ -869,11 +916,26 @@ impl IR {
                         //however if its run-time array we still have to use 2 instruction, which is
                         //fine I mainly did LDX/STX bc I just wanted to, not for pure performance
 
-                        match self.index_parts(array, index) {
-                            Ok((base, idx, scale)) => self.emit(IRInst::StoreIndexed { //LDX
-                                base, index: idx, scale, offset: 0, src: r_op.clone(), width }),
-                            Err(addr) => self.emit(IRInst::StorePtr { //Regular
-                                ptr_addr: addr, src: r_op.clone(), width }),
+                        match self.plan_index(array, index) {
+                            Some(AddrPlan::Direct { base, offset }) => {
+                                let addr = self.add_const(base, offset);
+                                self.emit(IRInst::StorePtr {
+                                    ptr_addr: addr, src: r_op.clone(), width });
+                            }
+                            Some(AddrPlan::Indexed { base, index: idx, scale, offset }) => {
+                                self.emit(IRInst::StoreIndexed {
+                                    base, index: idx, scale, offset, src: r_op.clone(), width });
+                            }
+                            Some(AddrPlan::Md { base, mul_index, stride, sh_index, val, offset }) => {
+                                self.emit(IRInst::Mdsx {
+                                    src: r_op.clone(), base, mul_index, sh_index, stride, val, offset, width });
+                            }
+                            None => match self.index_parts(array, index) {
+                                Ok((base, idx, scale)) => self.emit(IRInst::StoreIndexed { //LDX
+                                    base, index: idx, scale, offset: 0, src: r_op.clone(), width }),
+                                Err(addr) => self.emit(IRInst::StorePtr { //Regular
+                                    ptr_addr: addr, src: r_op.clone(), width }),
+                            },
                         }
                         r_op
                     }
@@ -918,7 +980,14 @@ impl IR {
                         self.local_frame_size = offset + slot_size;
                         self.local_slots.insert(name.clone(), offset);
 
+                        let base = self.new_temp();
+                        self.emit(IRInst::LocalAddr { dest: base.clone(), offset });
+                        self.array_bases.insert(name.clone(), base);
+
                         let width = self.get_type_size(elem_ty);
+                        //Reserving frame size to runtime untilialized array, this is same as C
+                        //basically, and its honestly best way to do it. Because you aren't reading
+                        //Unitialized array lets be honest. Also its kinda funny to sometimes read garbage
 
                         if let Some(init_expr) = initial {
                             if let Expr::ArrayLiteral(elems) = &**init_expr {
@@ -931,17 +1000,9 @@ impl IR {
                                     });
                                 }
                             }
-                        } else {
-                            let total: usize = vec_dims.iter().product();
-                            for i in 0..total {
-                                self.emit(IRInst::StorePtr {
-                                    ptr_addr: IROperand::FrameSlot(offset + i * elem_size),
-                                    src: IROperand::SignedConstant(0),
-                                    width,
-                                });
-                            }
                         }
-                    }
+
+                                        }
                     Type::Struct(_) if is_local_struct => {
                         let size = self.get_type_size(ty);
                         let align = self.get_type_align(ty);
@@ -1179,6 +1240,7 @@ impl IR {
         self.reset_temp();
         self.temp_types.clear();
         self.local_slots.clear();
+        self.array_bases.clear();
         self.local_frame_size = 0;
         self.current_return_var = func.return_name.clone();
 
@@ -1361,7 +1423,29 @@ impl IR {
 
             Expr::Deref(ptr_expr) => self.reduce_expr(ptr_expr),
 
-            Expr::Index { array, index } => self.compute_index_addr(array, index),
+            Expr::Index { array, index } => match self.plan_index(array, index) {
+                Some(AddrPlan::Direct { base, offset }) => self.add_const(base, offset),
+                Some(AddrPlan::Md { base, mul_index, stride, sh_index, val, offset }) => {
+                    let dest = self.new_temp();
+                    self.emit(IRInst::Mdcx {
+                        dest: dest.clone(), base, mul_index, sh_index, stride, val, offset });
+                    dest
+                }
+                Some(AddrPlan::Indexed { base, index: idx, scale, offset }) => {
+                    let dest = self.new_temp();
+                    self.emit(IRInst::Mdcx {
+                        dest: dest.clone(),
+                        base,
+                        mul_index: IROperand::SignedConstant(0),
+                        sh_index: idx,
+                        stride: 0,
+                        val: scale,
+                        offset: offset as i16,
+                    });
+                    dest
+                }
+                None => self.compute_index_addr(array, index),
+            },
 
             Expr::FieldAccess { expr, field } => {
                 let parent_type = self.infer_type(expr);
@@ -1403,15 +1487,179 @@ impl IR {
     }
 
     //Expansion for ldx/stx
+    //It supports ay dimnsions array access in 1 instruction are long as there are only 2 rnutime
+    //known varable and other are compile time, otherwise its just 1 more MDCX per comile time unknown
+    fn plan_index(&mut self, array: &Expr, index: &Expr) -> Option<AddrPlan> {
+        let mut subs: Vec<&Expr> = vec![index];
+        let mut root = array;
+        while let Expr::Index { array: inner_arr, index: inner_idx } = root {
+            subs.push(inner_idx);
+            root = inner_arr;
+        }
+        subs.reverse();
+
+        let (elem_ty, dims) = match self.infer_type(root) {
+            Type::Array(elem_ty, dims) => (*elem_ty, dims),
+            _ => return None,
+        };
+        if subs.len() != dims.len() {
+            return None;
+        }
+
+        let leaf = self.get_type_size(&elem_ty);
+        let strides: Vec<usize> = (0..dims.len())
+            .map(|k| leaf * dims[k + 1..].iter().product::<usize>())
+            .collect();
+
+        let mut offset: i64 = 0;
+        let mut runtime: Vec<(&Expr, usize)> = Vec::new();
+        for (k, sub) in subs.iter().enumerate() {
+            match sub {
+                Expr::IntLiteral(v) => offset += (*v as i64) * strides[k] as i64,
+                Expr::HexLiteral(v) => offset += (*v as i64) * strides[k] as i64,
+                _ => runtime.push((sub, strides[k])),
+            }
+        }
+
+        let scale_of = |stride: usize| match stride {
+            1 => Some(0u8),
+            2 => Some(1),
+            4 => Some(2),
+            8 => Some(3),
+            _ => None,
+        };
+        let fits_imm13 = (-4096..=4095).contains(&offset);
+        let fits_imm29 = (-268435456..=268435455).contains(&offset);
+
+        enum Shape {
+            Direct,
+            Indexed(u8),
+            Md { mul: usize, sh: Option<usize> },
+            Chain { mul: usize, sh: Option<usize>, links: Vec<usize> },
+        }
+
+        let shape = match runtime.len() {
+            0 => Shape::Direct,
+            1 => {
+                let stride = runtime[0].1;
+                match scale_of(stride) {
+                    Some(scale) if fits_imm29 => Shape::Indexed(scale),
+                    _ if stride as i64 <= 8191 && fits_imm13 => Shape::Md { mul: 0, sh: None },
+                    _ => return None,
+                }
+            }
+            _ => {
+                if runtime.iter().any(|(_, st)| *st as i64 > 8191) {
+                    return None;
+                }
+                let sh = runtime.iter().position(|(_, st)| scale_of(*st).is_some());
+                let mut rest: Vec<usize> = (0..runtime.len()).filter(|k| Some(*k) != sh).collect();
+                let mul = rest.pop()?;
+                Shape::Chain { mul, sh, links: rest }
+            }
+        };
+
+        let base_fits_imm13 = fits_imm13;
+        let base = match (&shape, root) {
+            (Shape::Direct, _) => self.lower_lvalue(root),
+            (_, Expr::Identifier(name)) => match self.array_bases.get(name) {
+                Some(cached) => cached.clone(),
+                None => self.lower_lvalue(root),
+            },
+            _ => self.lower_lvalue(root),
+        };
+        let mut reduced: Vec<IROperand> = Vec::new();
+        for (sub, _) in &runtime {
+            let sub_ty = self.infer_type(sub);
+            let op = self.reduce_expr(sub);
+            reduced.push(self.widen_index(op, sub_ty));
+        }
+
+        Some(match shape {
+            Shape::Chain { mul, sh, links } => {
+                let mut acc = if base_fits_imm13 {
+                    base
+                } else {
+                    let folded = self.add_const(base, offset);
+                    offset = 0;
+                    folded
+                };
+                for k in links {
+                    let next = self.new_temp();
+                    self.emit(IRInst::Mdcx {
+                        dest: next.clone(),
+                        base: acc,
+                        mul_index: reduced[k].clone(),
+                        sh_index: IROperand::SignedConstant(0),
+                        stride: runtime[k].1 as i16,
+                        val: 0,
+                        offset: 0,
+                    });
+                    acc = next;
+                }
+                AddrPlan::Md {
+                    base: acc,
+                    mul_index: reduced[mul].clone(),
+                    stride: runtime[mul].1 as i16,
+                    sh_index: match sh {
+                        Some(i) => reduced[i].clone(),
+                        None => IROperand::SignedConstant(0),
+                    },
+                    val: match sh {
+                        Some(i) => scale_of(runtime[i].1)?,
+                        None => 0,
+                    },
+                    offset: offset as i16,
+                }
+            }
+            Shape::Direct => AddrPlan::Direct { base, offset },
+            Shape::Indexed(scale) => AddrPlan::Indexed {
+                base,
+                index: reduced.remove(0),
+                scale,
+                offset: offset as i32,
+            },
+            Shape::Md { mul, sh } => AddrPlan::Md {
+                base,
+                mul_index: reduced[mul].clone(),
+                stride: runtime[mul].1 as i16,
+                sh_index: match sh {
+                    Some(i) => reduced[i].clone(),
+                    None => IROperand::SignedConstant(0),
+                },
+                val: match sh {
+                    Some(i) => scale_of(runtime[i].1)?,
+                    None => 0,
+                },
+                offset: offset as i16,
+            },
+        })
+    }
+
+    fn add_const(&mut self, base: IROperand, offset: i64) -> IROperand {
+        if offset == 0 {
+            return base;
+        }
+        let dest = self.new_temp();
+        self.emit(IRInst::Add {
+            dest: dest.clone(),
+            left: base,
+            right: IROperand::UnsignedConstant(offset as u32),
+        });
+        dest
+    }
+
     fn index_parts(&mut self, array: &Expr, index: &Expr) -> Result<(IROperand, IROperand, u8), IROperand>
     {
         let array_ty = self.infer_type(array);
-        let (elem_ty, base_addr) = match array_ty {
-            Type::Array(elem_ty, _) => (*elem_ty, self.lower_lvalue(array)),
-            Type::Ptr(elem_ty)      => (*elem_ty, self.reduce_expr(array)),
+        let (elem_size, base_addr) = match array_ty {
+            Type::Array(elem_ty, dims) => {
+                let leaf = self.get_type_size(&elem_ty);
+                (leaf * dims[1..].iter().product::<usize>(), self.lower_lvalue(array))
+            }
+            Type::Ptr(elem_ty)      => (self.get_type_size(&elem_ty), self.reduce_expr(array)),
             other => panic!("Cannot index into type {:?}", other),
         };
-        let elem_size = self.get_type_size(&elem_ty);
         let index_op = self.reduce_expr(index);
 
         let const_index = match &index_op {

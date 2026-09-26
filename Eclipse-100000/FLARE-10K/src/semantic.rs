@@ -284,6 +284,14 @@ impl Semantic {
                 let lhs_ty = self.check_expr(lhs, line, character);
                 let rhs_ty = self.check_expr(rhs, line, character);
 
+                if matches!(lhs_ty, Type::Array(_, _)) {
+                    self.sem_panic(
+                        "Cannot assign to a whole array, assign its elements instead",
+                        line,
+                        character,
+                    );
+                }
+
                 self.check_compatibility(&lhs_ty, &rhs_ty, line, character);
                 lhs_ty
             }

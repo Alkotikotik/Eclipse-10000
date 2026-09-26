@@ -231,6 +231,7 @@ func main(){
     >_ Full branch prediction(20MHz): 5.83, 5.83, 5.85. avg: 5.84 holy moly almost 2 seconds cut down,
     >_considering lower simulation speed, bad benchmark ik
     >_ Update couple of weeks later: 4.5s on 16MHz - remarkable
+
     u8 counter0;
     u32 counter1;
     u8 char[1];
@@ -289,3 +290,4 @@ func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len){
         cell_x = cell_x + 10;
     }
 }
+
