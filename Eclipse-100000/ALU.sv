@@ -162,7 +162,6 @@ module ALU (
     //yeah so separate adders for each - improves critical path at the cost of
     //CARRY4s
     assign sub_result = x + ~y + (32'd1 - imm2);
-
     //adder looks very pathetic now lmao
 
     //==Barrel==//
