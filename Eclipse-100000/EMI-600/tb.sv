@@ -8,7 +8,7 @@ module tb;
     logic rst_n, ck_p, ck_n, cke, odt;
     logic cs_n, ras_n, cas_n, we_n;
     logic [2:0]  ba;
-    logic [13:0] addr;
+    logic [13:0] a; //don't ask me, its their names
 
     initial #1000 rst_n = 1;
 
@@ -24,6 +24,13 @@ module tb;
         .ck_p(ck_p),
         .ck_n(ck_n),
         .odt(odt)
+
+        .cs_n(cs_n),
+        .ras_n(ras_n),
+        .cas_n(cas_n),
+        .we_n(we_n)
+        .ba(ba)
+        .a(a)
     );
 
     ddr3_model mem (

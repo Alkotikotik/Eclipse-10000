@@ -6,3 +6,10 @@ Eclipse-100000/waveform.fst
 Eclipse-100000/FLARE-10K/target/
 Eclipse-100000/program.hex
 Eclipse-100000/color_graph.svg
+
+Eclipse-100000/EMI-600/xsim.dir/
+Eclipse-100000/EMI-600/.Xil/
+Eclipse-100000/EMI-600/*.log
+Eclipse-100000/EMI-600/*.jou
+Eclipse-100000/EMI-600/*.pb
+Eclipse-100000/EMI-600/*.wdb
