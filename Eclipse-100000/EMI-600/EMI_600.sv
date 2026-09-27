@@ -197,7 +197,10 @@ module EMI_600 (
                         we_n <= 0;
 
                         a <= 14'b0;
-                        //Long ZQCL
+                        //Long ZQCL because its required on init
+                        //Regular one can be used anytime for a
+                        //small calibration. Long one is 512cycles whilst
+                        //short one is 64cycles.
                         a[10] <= 1;
 
                         EMI_init_state <= ALMOST_FINISH;
