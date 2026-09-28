@@ -251,6 +251,12 @@ module EMI_600 (
                 IDLE: begin
                     if (tREFI_pending && !(|tREFI_cnt)) begin
                         //REF(resh)
+                        //As I mentioned, I have to manually refresh
+                        //Either of rows every 7.8us. The thing is tho
+                        //I just need to initiate a REF command every 7.8us
+                        //Because the ddr3's internal counter increases
+                        //On every REF and point to the next row within the
+                        //bank. Hence in 64ms it would refresh every row.
                         cs_n <= 0;
                         ras_n <= 0;
                         cas_n <= 0;
