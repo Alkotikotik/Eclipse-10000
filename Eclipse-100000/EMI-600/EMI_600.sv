@@ -3,6 +3,16 @@ module EMI_600 (
     input logic clk,
     input logic rst_n,
 
+    input logic req, //CPU requests data
+    input logic req_we, //1 - write, 0 - read
+    input logic [23:0] req_addr, //address 16byte addressible
+    input logic [127:0] req_wd, //16byte write data
+    input logic [3:0] req_msk, //which of 16bytes to mask
+
+
+    output logic [127:0] rdata, //read data
+    output logic mem_done,
+
     output logic EMI_rst_n,
 
     output logic cke,
@@ -73,11 +83,17 @@ module EMI_600 (
         ALMOST_FINISH,
         FINISH
     } init_states;
-
     init_states EMI_init_state;
 
+    typedef enum logic [3:0] {
+        IDLE,
+        REF
+    } run_states;
+    run_states EMI_run_state;
+
     logic [31:0] cke_cnt;
-    logic [12:0] tMRD_cnt;
+    logic [11:0] tMRD_cnt, tREFI_cnt;
+    logic tREFI_pending;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             cke_cnt <= 32'b0;
@@ -89,6 +105,7 @@ module EMI_600 (
             odt  <= 0;
 
             EMI_init_state <= INIT_INIT;
+            EMI_run_state <= IDLE;
         end else if (EMI_init_state != FINISH) begin
             cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1; //defualt NOP
             case (EMI_init_state)
@@ -211,14 +228,55 @@ module EMI_600 (
                 end
                 ALMOST_FINISH: begin
                     if (tMRD_cnt > 512)
-                            EMI_init_state <= FINISH;
+                        tMRD_cnt <= 13'b0;
+                        EMI_init_state <= FINISH;
                     else
-                        tMRD_cnt <= tMRD_cnt + 12'd1;
+                        tMRD_cnt <= tMRD_cnt + 12'h1;
                 end
             endcase
         end else begin
-            if (tREFI_cnt > 2650) //7.8us
+            cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
+            if (tREFI_cnt > 2660) begin //7.8us
+                tREFI_cnt <= 12'b0;
+                tREFI_pending <= 1;
+            end else if (!tREFI_pending) begin
+                tREFI_cnt <= tREFI_cnt + 12'b1;
+            end
+            case (EMI_run_state)
+                IDLE: begin
+                    if (tREFI_pending && !(|tREFI_cnt)) begin
+                        //REF(resh)
+                        cs_n <= 0;
+                        ras_n <= 0;
+                        cas_n <= 0;
+                        we_n <= 1;
+                    end else if (tREFI_cnt < 55) begin //160ns tRFC
+                        cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
+                    end else begin
+                        if (req) begin
+                            unique case (req_we) begin
+                                1'b0: EMI_run_state <= READ;
+                                1'b1: EMI_run_state <= WRITE;
+                            endcase
+                        end else begin
+                            cs_n <= 0;
+                            ras_n <= 1;
+                            cas_n <= 1;
+                            we_n <= 1;
+                        end
+                    end
+                end
+                READ: begin
 
+
+
+                end
+                WRITE: begin
+
+
+
+                end
+            endcase
         end
    end
 
