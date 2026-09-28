@@ -7,7 +7,7 @@ module EMI_600 (
     input logic req_we, //1 - write, 0 - read
     input logic [23:0] req_addr, //address 16byte addressible
     input logic [127:0] req_wd, //16byte write data
-    input logic [3:0] req_msk, //which of 16bytes to mask
+    input logic [15:0] req_msk, //which of 16bytes to mask
 
 
     output logic [127:0] rdata, //read data
@@ -87,7 +87,9 @@ module EMI_600 (
 
     typedef enum logic [3:0] {
         IDLE,
-        REF
+        REF,
+        READ,
+        WRITE
     } run_states;
     run_states EMI_run_state;
 
@@ -132,6 +134,9 @@ module EMI_600 (
                         //but just later when I get to actual PHY
                         a <= 14'b0;
                         EMI_init_state <= MR3;
+
+                        tREFI_pending <= 0;
+                        tREFI_cnt <= 0;
                     end else begin
                         tMRD_cnt <= tMRD_cnt + 6'h1;
                     end
@@ -227,16 +232,16 @@ module EMI_600 (
                     end
                 end
                 ALMOST_FINISH: begin
-                    if (tMRD_cnt > 512)
+                    if (tMRD_cnt > 512) begin
                         tMRD_cnt <= 13'b0;
                         EMI_init_state <= FINISH;
-                    else
+                    end else
                         tMRD_cnt <= tMRD_cnt + 12'h1;
                 end
             endcase
         end else begin
             cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
-            if (tREFI_cnt > 2660) begin //7.8us
+            if (tREFI_cnt > 2500) begin //7.8us
                 tREFI_cnt <= 12'b0;
                 tREFI_pending <= 1;
             end else if (!tREFI_pending) begin
@@ -250,11 +255,12 @@ module EMI_600 (
                         ras_n <= 0;
                         cas_n <= 0;
                         we_n <= 1;
+                        tREFI_pending <= 0;
                     end else if (tREFI_cnt < 55) begin //160ns tRFC
                         cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
                     end else begin
                         if (req) begin
-                            unique case (req_we) begin
+                            unique case (req_we)
                                 1'b0: EMI_run_state <= READ;
                                 1'b1: EMI_run_state <= WRITE;
                             endcase
