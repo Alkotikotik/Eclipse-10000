@@ -216,6 +216,9 @@ module EMI_600 (
                         tMRD_cnt <= tMRD_cnt + 12'd1;
                 end
             endcase
+        end else begin
+            if (tREFI_cnt > 2650) //7.8us
+
         end
    end
 

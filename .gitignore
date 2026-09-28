@@ -13,3 +13,5 @@ Eclipse-100000/EMI-600/*.log
 Eclipse-100000/EMI-600/*.jou
 Eclipse-100000/EMI-600/*.pb
 Eclipse-100000/EMI-600/*.wdb
+Eclipse-100000/EMI-600/ddr3_model.sv
+Eclipse-100000/EMI-600/ddr3_model_parameters.vh
