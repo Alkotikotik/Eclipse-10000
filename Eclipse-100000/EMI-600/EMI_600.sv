@@ -411,7 +411,7 @@ module EMI_600 (
             dq_out <= wd_lat [16*beat +: 16]; //dq is actual data bus btw
             dm_out <= msk_lat[2 *beat +: 2];
         end else if (rd_run && !(tACC_cnt == 15 && !clk90)) begin //gating last bad write
-            beat = {2'(tACC_cnt - 8'd11), ~clk90} - 1'h1; //blocking assignment actually, in always block
+            beat = {2'(tACC_cnt - 8'd11), ~clk90} - 1'h1; //-1 bc it starts 1 edge later fsr
             //The read is opposite of write, the chip itsels sets dq and dqs.
             //And I just read the dq
             rdata[16*beat +: 16] <= dq; //Just write to rdata 16bits on every edge for 8edges(4cycles)
