@@ -10,6 +10,9 @@ module tb;
     logic cs_n, ras_n, cas_n, we_n;
     logic [2:0]  ba;
     logic [13:0] a; //don't ask me, its their names
+    logic req, req_wr;
+    logic [23:0] req_addr;
+    logic [127:0] req_wd;
 
     initial rst_n = 0;
     initial #1000 rst_n = 1;
@@ -19,6 +22,11 @@ module tb;
     wire  [15:0] dq;
     wire  [1:0]  dqs_p, dqs_n;
 
+    initial req = 0;
+    initial #100_000_000_00 req = 1;
+    initial req_addr = 24'hFF_AA_BA;
+    initial req_wd = 128'hDEAD_BEEF_BEEF_DEAD_DEED_BEEF_FEED_BEED;
+
     EMI_600 emi (
         .clk(clk),
         .rst_n(rst_n),
@@ -27,6 +35,15 @@ module tb;
         .ck_p(ck_p),
         .ck_n(ck_n),
         .odt(odt),
+
+        .req(req),
+        .req_wr(req_wr),
+        .req_addr(req_addr),
+        .req_wd(req_wd),
+        .req_msk(req_msk),
+
+        .rdata(rdata),
+        .mem_done(mem_done),
 
         .cs_n(cs_n),
         .ras_n(ras_n),

@@ -4,7 +4,7 @@ module EMI_600 (
     input logic rst_n,
 
     input logic req, //CPU requests data
-    input logic req_we, //1 - write, 0 - read
+    input logic req_wr, //1 - write, 0 - read
     input logic [23:0] req_addr, //address 16byte addressible
     input logic [127:0] req_wd, //16byte write data
     input logic [15:0] req_msk, //which of 16bytes to mask
@@ -88,6 +88,8 @@ module EMI_600 (
     typedef enum logic [3:0] {
         IDLE,
         REF,
+        INIT_ACCESS,
+        FINISH_ACCESS,
         READ,
         WRITE
     } run_states;
@@ -95,11 +97,13 @@ module EMI_600 (
 
     logic [31:0] cke_cnt;
     logic [11:0] tMRD_cnt, tREFI_cnt;
+    logic [7:0]  tACC_cnt;
     logic tREFI_pending;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             cke_cnt <= 32'b0;
             tMRD_cnt <= 6'b0;
+            tACC_cnt <= 8'b0;
             EMI_rst_n <= 0;
             ba <= 3'b0;
             a <= 14'b0;
@@ -266,16 +270,41 @@ module EMI_600 (
                         cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
                     end else begin
                         if (req) begin
-                            unique case (req_we)
-                                1'b0: EMI_run_state <= READ;
-                                1'b1: EMI_run_state <= WRITE;
-                            endcase
+                            EMI_run_state <= INIT_ACCESS;
                         end else begin
                             cs_n <= 0;
                             ras_n <= 1;
                             cas_n <= 1;
                             we_n <= 1;
                         end
+                    end
+                end
+                INIT_ACCESS: begin
+                    //Both READ and WRITE start the same, activate, wait for
+                    //5cycles init READ/WRITE and then the branch
+                    tACC_cnt <= tACC_cnt + 1;
+                    if (!(|tACC_cnt)) begin
+                        //ACTIVATE
+                        cs_n <= 0;
+                        ras_n <= 0;
+                        cas_n <= 1;
+                        we_n <= 1;
+
+                        a[13:0] <= req_addr[23:10]; //row
+                        ba <= req_addr[9:7]; //bank
+
+                    end else if (tACC_cnt == 8'h5) begin
+                        //READ/WRITE
+                        cs_n <= 0;
+                        ras_n <= 1;
+                        cas_n <= 0;
+                        we_n <= req_wr ? 1'b0 : 1'b1; //WE# = 0 on write
+
+                        a[10] <= 1; //auto-precharge(auto-close row)
+                        //ba is already bank
+                        a[9:0] <= {req_addr[6:0], 3'b000}; //col
+
+                        EMI_run_state <= req_wr ? WRITE : READ;
                     end
                 end
                 READ: begin
@@ -303,26 +332,29 @@ module EMI_600 (
                     //16bytes. So the CPU is gonna send a 26bit address to cache
                     //And cache is gonna drop last 2 bitsto get 24bit address.
                     //So im gonna encode this 24bit address like
-                    //that: {row[13:0], bank[2:0], col[9:3]}. Why is this
+                    //that: {row[23:10], bank[9:7], col[6:0]}. Why is this
                     //cool? bc col[9:3] is 2KB which is exactly size of one
                     //row within the bank. meaning increasing the address
                     //past, would actually just put me in another bank, and
                     //its nice.
 
-                    //WRITE
-                    cs_n <= 0;
-                    ras_n <= 1;
-                    cas_n <= 0;
-                    we_n <= 0;
-
-                    a[10] <= 1; //auto-precharge(auto-close row)
-                    a[9:0] <= {req_addr[6:0], 3'b000};
-                    ba <= req_addr[9:7]; //bank
-
-
-
                 end
-            endcase
+                FINISH_ACCESS: begin
+                    tACC_cnt <= tACC_cnt + 1;
+
+                    if (tACC_cnt == (req_wr ? 8'h24 : 8'h17)) // 17 for read, 24 for write
+                        tACC_cnt <= 8'b0;
+                        mem_done <= 1;
+                        EMI_run_state <= IDLE;
+                    else begin
+                        cs_n <= 0;
+                        ras_n <= 1;
+                        cas_n <= 1;
+                        we_n <= 1;
+                    end
+                end
+                endcase
+            end
         end
    end
 
