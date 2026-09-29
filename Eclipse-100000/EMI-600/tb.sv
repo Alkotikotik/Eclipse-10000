@@ -1,15 +1,13 @@
 `timescale 1ps/1ps
 module tb;
     //Formally test-bench, but rather init of the EMI
-    //both clks come from one MMCM slot, they are just devided.
-    //Later imma have even more devided MMCM outputs for EMI.
+    //Clocks are 2 different outputs of one MMCM, so atm im using 3/7 slots
     logic clk = 0;
     always #1500 clk = ~clk; // 3000 ps period = 333 MHz clock
 
     logic clk90 = 0; //clk shifted 90 degrees, literally 90, its kinda funny ngl
     //But it actually makes a lot of sense.
-    initial #1125 clk90 = 1;
-    always #1500 clk90 = ~clk90;
+    initial begin #750; forever #1500 clk90 = ~clk90; end //1500 is half period btw
 
     logic EMI_rst_n;
 
@@ -20,6 +18,9 @@ module tb;
     logic req, req_we;
     logic [23:0] req_addr;
     logic [127:0] req_wd;
+    logic [15:0]  req_msk;
+    logic [127:0] rdata;
+    logic mem_done;
 
     initial rst_n = 0;
     initial #1000 rst_n = 1;
@@ -30,7 +31,10 @@ module tb;
     wire  [1:0]  dqs_p, dqs_n;
 
     initial req = 0;
-    initial #100_000_000_00 req = 1;
+    initial #800_000_000 req = 1;
+    always @(posedge clk) if (mem_done) req <= 0;
+    initial req_we = 1;
+    initial req_msk = 16'h0000;
     initial req_addr = 24'hFF_AA_BA;
     initial req_wd = 128'hDEAD_BEEF_BEEF_DEAD_DEED_BEEF_FEED_BEED;
 
@@ -50,8 +54,8 @@ module tb;
         .req_wd(req_wd),
         .req_msk(req_msk),
 
-        .dm(dm)
-        .dq(dq)
+        .dm(dm),
+        .dq(dq),
         .dqs_p(dqs_p),
         .dqs_n(dqs_n),
 

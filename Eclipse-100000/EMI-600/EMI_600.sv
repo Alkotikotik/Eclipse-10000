@@ -22,9 +22,9 @@ module EMI_600 (
     output logic odt,
 
     output logic [1:0]  dm,
-    output logic [15:0] dq,
-    output logic [1:0]  dqs_p,
-    output logic [1:0]  dqs_n,
+    inout wire [15:0] dq, //literally in or out, can go both ways
+    inout wire [1:0]  dqs_p,
+    inout wire [1:0]  dqs_n,
 
     output logic cs_n,
     output logic ras_n,
@@ -102,7 +102,15 @@ module EMI_600 (
     logic [11:0] tMRD_cnt, tREFI_cnt;
     logic [7:0]  tACC_cnt;
     logic tREFI_pending;
-    logic wr_go, rd_go;
+    logic rd_go;
+    logic we_lat;
+    logic [15:0]  msk_lat;
+    logic [127:0] wd_lat;
+    logic dqs_me, dqs_run, dq_me;
+    logic [1:0]  dqs_val;
+    logic [2:0]  beat;
+    logic [15:0] dq_out;
+    logic [1:0]  dm_out;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             cke_cnt <= 32'b0;
@@ -113,6 +121,11 @@ module EMI_600 (
             a <= 14'b0;
             cke  <= 0;
             odt  <= 0;
+            mem_done <= 0;
+            rd_go <= 0;
+            we_lat <= 0;
+            dqs_me <= 0;
+            dqs_run <= 0;
 
             EMI_init_state <= INIT_INIT;
             EMI_run_state <= IDLE;
@@ -249,6 +262,8 @@ module EMI_600 (
             endcase
         end else begin
             cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
+            mem_done <= 0;
+            rd_go <= 0;
             if (tREFI_cnt > 2500) begin //7.8us
                 tREFI_cnt <= 12'b0;
                 tREFI_pending <= 1;
@@ -273,7 +288,7 @@ module EMI_600 (
                     end else if (tREFI_cnt < 55) begin //160ns tRFC
                         cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
                     end else begin
-                        if (req) begin
+                        if (req && !mem_done) begin
                             EMI_run_state <= ACCESS;
                         end else begin
                             cs_n <= 0;
@@ -311,68 +326,87 @@ module EMI_600 (
                         a[13:0] <= req_addr[23:10]; //row
                         ba <= req_addr[9:7]; //bank
 
+                        we_lat <= req_we; //latching jic, 25cycles afterall
+                        msk_lat <= req_msk;
+                        wd_lat <= req_wd;
+
                     end else if (tACC_cnt == 8'h5) begin
                         //READ/WRITE
                         cs_n <= 0;
                         ras_n <= 1;
                         cas_n <= 0;
-                        we_n <= req_we ? 1'b0 : 1'b1; //WE# = 0 on write
+                        we_n <= !we_lat; //WE# = 0 on write
 
-                        a[10] <= 1; //auto-precharge(auto-close row)
                         //ba is already bank
-                        a[9:0] <= {req_addr[6:0], 3'b000}; //col
+                        a <= {3'b000, 1'b1, req_addr[6:0], 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
 
-                        wr_go <= req_we;
-                        rd_go <= !req_we;
+                        rd_go <= !we_lat;
 
-                    end else if (tACC_cnt == (req_we ? 8'd24 : 8'd17)) // 17 for read, 24 for write
+                    end else if (tACC_cnt == (we_lat ? 8'd24 : 8'd17)) begin // 17 for read, 24 for write
                         tACC_cnt <= 8'b0;
                         mem_done <= 1;
                         EMI_run_state <= IDLE;
-                    else begin
+                    end else begin
                         cs_n <= 0;
                         ras_n <= 1;
                         cas_n <= 1;
                         we_n <= 1;
-                        wr_go <= 0;
                         rd_go <= 0;
 
+                        if (we_lat) begin //writing on read would short circuit btw
+                            case (tACC_cnt)
+                                8'd9:  dqs_me <= 1; //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
+                                8'd10: dqs_run <= 1; //DQS now switching every 1.5ns(every edge of clk90)
+                                8'd14: dqs_run <= 0; //Done
+                                8'd15: dqs_me <= 0; //Now whatever can drive dqs
+                            endcase
+                        end
                     end
                 end
                 endcase
             end
         end
-    end
 
-    logic [5:0] tWR_cnt;
+    assign dqs_val = {2{dqs_run & ck_p}}; //dqs_val = ck_p if dqs_run basically
+    assign dqs_p = dqs_me ? dqs_val  : 2'bzz; //bzz bzz, who's calling?
+    assign dqs_n = dqs_me ? ~dqs_val : 2'bzz; //zz is any bits that I don't have a control over
+    //And allat differential fluff _n and _p is basically for stability, bc if voltage of any
+    //Would change, the voltage of other would too.
+
+    assign dq =  dq_me ? dq_out : 16'bzzzz_zzzz_zzzz_zzzz;
+    assign dm = dq_me ? dm_out : 2'bzz;
+
+
     //I am driving it on rising, and falling edge of the clock and
-    always_ff @(posedge clk90 or negedge clk90 or posedge rst_n) begin //that's kinda sick ngl
+    always @(posedge clk90 or negedge clk90 or negedge rst_n) begin //that's kinda sick ngl
+        //Always bc both edges, otherwise it complains
         if (!rst_n) begin
-            tWR_cnt <= 6'h0;
+            dq_me <= 0;
+        end else if (we_lat && dqs_run) begin
+            //write, write, write, so as usual, all the data is in
+            //micron datasheet, all those diagrams, instructions,
+            //timings and all are there. Basically write happens in
+            //bursts of 16bytes, you can either write all bytes or
+            //mask some of them, you first need to activate the row
+            //And after write you may or may not close it - that defines
+            //Either closed-page or open-page design, each one has its
+            //own benefits and drawback, for now ill write closed-page
+            //Later planning to switch to look-ahead. Write takes about 10cycles
+            //for actual write + 19cycles for varios waits, hence
+            //about 25 cycles total, hence 75ns.
+            //like about 30ns.
+
+            dq_me <= 1;
+            beat = {2'(tACC_cnt - 8'd11), ~clk90};
+            //The burst(thats a big name for this) happens in 8 cycles, of 16bit writes
+            //8 cycles bc on it happens on every clk90 edge
+            dq_out <= wd_lat [16*beat +: 16]; //finally data write
+            dm_out <= msk_lat[2*beat +: 2];
+        end else if (rd_go) begin
+
 
         end else begin
-            if (wr_go) begin
-                //write, write, write, so as usual, all the data is in
-                //micron datasheet, all those diagrams, instructions,
-                //timings and all are there. Basically write happens in
-                //bursts of 16bytes, you can either write all bytes or
-                //mask some of them, you first need to activate the row
-                //And after write you may or may not close it - that defines
-                //Either closed-page or open-page design, each one has its
-                //own benefits and drawback, for now ill write closed-page
-                //Later planning to switch to look-ahead. Write takes about 10cycles
-                //for actual write + 19cycles for varios waits, hence
-                //about 25 cycles total, hence 75ns.
-                //like about 30ns.
-
-                if (tWR_cnt == 4)
-                    dqs_p <= 2'b0;
-                else if ()
-
-
-            end else if (rd_go) begin
-
-            end
+            dq_me <= 0;
         end
     end
 
