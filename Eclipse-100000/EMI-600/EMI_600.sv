@@ -284,6 +284,40 @@ module EMI_600 (
 
                 end
                 WRITE: begin
+                    //write, write, write, so as usual, all the data is in
+                    //micron datasheet, all those diagrams, instructions,
+                    //timings and all are there. Basically write happens in
+                    //bursts of 16bytes, you can either write all bytes or
+                    //mask some of them, you first need to activate the row
+                    //And after write you may or may not close it - that defines
+                    //Either closed-page or open-page design, each one has its
+                    //own benefits and drawback, for now ill write closed-page
+                    //Later planning to switch to look-ahead. Write takes about 10cycles
+                    //for actual write + 19cycles for varios waits, hence
+                    //about 25 cycles total, hence 75ns.
+                    //like about 30ns.
+                    //What is really cool about it, is how
+                    //that 24bit address is structured. In reality it is
+                    //actually 27bit address(2byte aligned), however last
+                    //3bits are always zero since the write happens in
+                    //16bytes. So the CPU is gonna send a 26bit address to cache
+                    //And cache is gonna drop last 2 bitsto get 24bit address.
+                    //So im gonna encode this 24bit address like
+                    //that: {row[13:0], bank[2:0], col[9:3]}. Why is this
+                    //cool? bc col[9:3] is 2KB which is exactly size of one
+                    //row within the bank. meaning increasing the address
+                    //past, would actually just put me in another bank, and
+                    //its nice.
+
+                    //WRITE
+                    cs_n <= 0;
+                    ras_n <= 1;
+                    cas_n <= 0;
+                    we_n <= 0;
+
+                    a[10] <= 1; //auto-precharge(auto-close row)
+                    a[9:0] <= {req_addr[6:0], 3'b000};
+                    ba <= req_addr[9:7]; //bank
 
 
 
