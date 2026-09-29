@@ -1,10 +1,11 @@
 module EMI_600 (
     //Eclipse Memory Interface(EMI)
     input logic clk,
+    input logic clk90,
     input logic rst_n,
 
     input logic req, //CPU requests data
-    input logic req_wr, //1 - write, 0 - read
+    input logic req_we, //1 - write, 0 - read
     input logic [23:0] req_addr, //address 16byte addressible
     input logic [127:0] req_wd, //16byte write data
     input logic [15:0] req_msk, //which of 16bytes to mask
@@ -19,6 +20,11 @@ module EMI_600 (
     output logic ck_p,
     output logic ck_n,
     output logic odt,
+
+    output logic [1:0]  dm,
+    output logic [15:0] dq,
+    output logic [1:0]  dqs_p,
+    output logic [1:0]  dqs_n,
 
     output logic cs_n,
     output logic ras_n,
@@ -88,10 +94,7 @@ module EMI_600 (
     typedef enum logic [3:0] {
         IDLE,
         REF,
-        INIT_ACCESS,
-        FINISH_ACCESS,
-        READ,
-        WRITE
+        ACCESS
     } run_states;
     run_states EMI_run_state;
 
@@ -99,6 +102,7 @@ module EMI_600 (
     logic [11:0] tMRD_cnt, tREFI_cnt;
     logic [7:0]  tACC_cnt;
     logic tREFI_pending;
+    logic wr_go, rd_go;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             cke_cnt <= 32'b0;
@@ -270,7 +274,7 @@ module EMI_600 (
                         cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
                     end else begin
                         if (req) begin
-                            EMI_run_state <= INIT_ACCESS;
+                            EMI_run_state <= ACCESS;
                         end else begin
                             cs_n <= 0;
                             ras_n <= 1;
@@ -279,9 +283,23 @@ module EMI_600 (
                         end
                     end
                 end
-                INIT_ACCESS: begin
+                ACCESS: begin
                     //Both READ and WRITE start the same, activate, wait for
-                    //5cycles init READ/WRITE and then the branch
+                    //5cycles init READ/WRITE and then the branch. After, they
+                    //come back and finish
+
+                    //What is really cool about it, is how
+                    //that 24bit address is structured. In reality it is
+                    //actually 27bit address(2byte aligned), however last
+                    //3bits are always zero since the write happens in
+                    //16bytes. So the CPU is gonna send a 26bit address to cache
+                    //And cache is gonna drop last 2 bitsto get 24bit address.
+                    //So im gonna encode this 24bit address like
+                    //that: {row[23:10], bank[9:7], col[6:0]}. Why is this
+                    //cool? bc col[9:3] is 2KB which is exactly size of one
+                    //row within the bank. meaning increasing the address
+                    //past, would actually just put me in another bank, which
+                    //ofc reduces access speed.
                     tACC_cnt <= tACC_cnt + 1;
                     if (!(|tACC_cnt)) begin
                         //ACTIVATE
@@ -298,51 +316,16 @@ module EMI_600 (
                         cs_n <= 0;
                         ras_n <= 1;
                         cas_n <= 0;
-                        we_n <= req_wr ? 1'b0 : 1'b1; //WE# = 0 on write
+                        we_n <= req_we ? 1'b0 : 1'b1; //WE# = 0 on write
 
                         a[10] <= 1; //auto-precharge(auto-close row)
                         //ba is already bank
                         a[9:0] <= {req_addr[6:0], 3'b000}; //col
 
-                        EMI_run_state <= req_wr ? WRITE : READ;
-                    end
-                end
-                READ: begin
+                        wr_go <= req_we;
+                        rd_go <= !req_we;
 
-
-
-                end
-                WRITE: begin
-                    //write, write, write, so as usual, all the data is in
-                    //micron datasheet, all those diagrams, instructions,
-                    //timings and all are there. Basically write happens in
-                    //bursts of 16bytes, you can either write all bytes or
-                    //mask some of them, you first need to activate the row
-                    //And after write you may or may not close it - that defines
-                    //Either closed-page or open-page design, each one has its
-                    //own benefits and drawback, for now ill write closed-page
-                    //Later planning to switch to look-ahead. Write takes about 10cycles
-                    //for actual write + 19cycles for varios waits, hence
-                    //about 25 cycles total, hence 75ns.
-                    //like about 30ns.
-                    //What is really cool about it, is how
-                    //that 24bit address is structured. In reality it is
-                    //actually 27bit address(2byte aligned), however last
-                    //3bits are always zero since the write happens in
-                    //16bytes. So the CPU is gonna send a 26bit address to cache
-                    //And cache is gonna drop last 2 bitsto get 24bit address.
-                    //So im gonna encode this 24bit address like
-                    //that: {row[23:10], bank[9:7], col[6:0]}. Why is this
-                    //cool? bc col[9:3] is 2KB which is exactly size of one
-                    //row within the bank. meaning increasing the address
-                    //past, would actually just put me in another bank, and
-                    //its nice.
-
-                end
-                FINISH_ACCESS: begin
-                    tACC_cnt <= tACC_cnt + 1;
-
-                    if (tACC_cnt == (req_wr ? 8'h24 : 8'h17)) // 17 for read, 24 for write
+                    end else if (tACC_cnt == (req_we ? 8'd24 : 8'd17)) // 17 for read, 24 for write
                         tACC_cnt <= 8'b0;
                         mem_done <= 1;
                         EMI_run_state <= IDLE;
@@ -351,11 +334,46 @@ module EMI_600 (
                         ras_n <= 1;
                         cas_n <= 1;
                         we_n <= 1;
+                        wr_go <= 0;
+                        rd_go <= 0;
+
                     end
                 end
                 endcase
             end
         end
-   end
+    end
+
+    logic [5:0] tWR_cnt;
+    //I am driving it on rising, and falling edge of the clock and
+    always_ff @(posedge clk90 or negedge clk90 or posedge rst_n) begin //that's kinda sick ngl
+        if (!rst_n) begin
+            tWR_cnt <= 6'h0;
+
+        end else begin
+            if (wr_go) begin
+                //write, write, write, so as usual, all the data is in
+                //micron datasheet, all those diagrams, instructions,
+                //timings and all are there. Basically write happens in
+                //bursts of 16bytes, you can either write all bytes or
+                //mask some of them, you first need to activate the row
+                //And after write you may or may not close it - that defines
+                //Either closed-page or open-page design, each one has its
+                //own benefits and drawback, for now ill write closed-page
+                //Later planning to switch to look-ahead. Write takes about 10cycles
+                //for actual write + 19cycles for varios waits, hence
+                //about 25 cycles total, hence 75ns.
+                //like about 30ns.
+
+                if (tWR_cnt == 4)
+                    dqs_p <= 2'b0;
+                else if ()
+
+
+            end else if (rd_go) begin
+
+            end
+        end
+    end
 
 endmodule

@@ -1,8 +1,15 @@
 `timescale 1ps/1ps
 module tb;
     //Formally test-bench, but rather init of the EMI
+    //both clks come from one MMCM slot, they are just devided.
+    //Later imma have even more devided MMCM outputs for EMI.
     logic clk = 0;
     always #1500 clk = ~clk; // 3000 ps period = 333 MHz clock
+
+    logic clk90 = 0; //clk shifted 90 degrees, literally 90, its kinda funny ngl
+    //But it actually makes a lot of sense.
+    initial #1125 clk90 = 1;
+    always #1500 clk90 = ~clk90;
 
     logic EMI_rst_n;
 
@@ -10,7 +17,7 @@ module tb;
     logic cs_n, ras_n, cas_n, we_n;
     logic [2:0]  ba;
     logic [13:0] a; //don't ask me, its their names
-    logic req, req_wr;
+    logic req, req_we;
     logic [23:0] req_addr;
     logic [127:0] req_wd;
 
@@ -29,6 +36,7 @@ module tb;
 
     EMI_600 emi (
         .clk(clk),
+        .clk90(clk90),
         .rst_n(rst_n),
         .EMI_rst_n(EMI_rst_n),
         .cke(cke),
@@ -37,10 +45,15 @@ module tb;
         .odt(odt),
 
         .req(req),
-        .req_wr(req_wr),
+        .req_we(req_we),
         .req_addr(req_addr),
         .req_wd(req_wd),
         .req_msk(req_msk),
+
+        .dm(dm)
+        .dq(dq)
+        .dqs_p(dqs_p),
+        .dqs_n(dqs_n),
 
         .rdata(rdata),
         .mem_done(mem_done),
