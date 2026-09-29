@@ -30,13 +30,28 @@ module tb;
     wire  [15:0] dq;
     wire  [1:0]  dqs_p, dqs_n;
 
-    initial req = 0;
-    initial #800_000_000 req = 1;
-    always @(posedge clk) if (mem_done) req <= 0;
-    initial req_we = 1;
-    initial req_msk = 16'h0000;
-    initial req_addr = 24'hFF_AA_BA;
-    initial req_wd = 128'hDEAD_BEEF_BEEF_DEAD_DEED_BEEF_FEED_BEED;
+    //Thats a pretty cool syntax ngl
+    initial begin
+        req = 0; req_we = 0; req_msk = 16'h0000;
+        req_addr = 24'hFF_AA_BA;
+        req_wd   = 128'hDEAD_BEEF_CAFE_BABE_FEED_FACE_C0FFEE_01;
+
+        #800_000_000;
+
+        //write
+        req_we = 1; req = 1;
+        @(posedge mem_done); req = 0;
+        repeat (5) @(posedge clk);
+
+        //read it back
+        req_we = 0; req = 1;
+        @(posedge mem_done); req = 0;
+
+        $display("rdata = %h", rdata);
+        if (rdata == req_wd) $display("PASS");
+        else                 $display("FAIL, expected %h", req_wd);
+        $finish;
+    end
 
     EMI_600 emi (
         .clk(clk),

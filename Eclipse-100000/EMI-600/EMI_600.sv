@@ -102,7 +102,7 @@ module EMI_600 (
     logic [11:0] tMRD_cnt, tREFI_cnt;
     logic [7:0]  tACC_cnt;
     logic tREFI_pending;
-    logic rd_go;
+    logic rd_run;
     logic we_lat;
     logic [15:0]  msk_lat;
     logic [127:0] wd_lat;
@@ -122,10 +122,11 @@ module EMI_600 (
             cke  <= 0;
             odt  <= 0;
             mem_done <= 0;
-            rd_go <= 0;
+            rd_run <= 0;
             we_lat <= 0;
             dqs_me <= 0;
             dqs_run <= 0;
+            rdata <= 128'h0;
 
             EMI_init_state <= INIT_INIT;
             EMI_run_state <= IDLE;
@@ -263,7 +264,6 @@ module EMI_600 (
         end else begin
             cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
             mem_done <= 0;
-            rd_go <= 0;
             if (tREFI_cnt > 2500) begin //7.8us
                 tREFI_cnt <= 12'b0;
                 tREFI_pending <= 1;
@@ -340,7 +340,7 @@ module EMI_600 (
                         //ba is already bank
                         a <= {3'b000, 1'b1, req_addr[6:0], 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
 
-                        rd_go <= !we_lat;
+                        rd_run <= !we_lat;
 
                     end else if (tACC_cnt == (we_lat ? 8'd24 : 8'd17)) begin // 17 for read, 24 for write
                         tACC_cnt <= 8'b0;
@@ -351,16 +351,17 @@ module EMI_600 (
                         ras_n <= 1;
                         cas_n <= 1;
                         we_n <= 1;
-                        rd_go <= 0;
 
                         if (we_lat) begin //writing on read would short circuit btw
                             case (tACC_cnt)
-                                8'd9:  dqs_me <= 1; //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
+                                8'd9:  dqs_me  <= 1; //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
                                 8'd10: dqs_run <= 1; //DQS now switching every 1.5ns(every edge of clk90)
                                 8'd14: dqs_run <= 0; //Done
-                                8'd15: dqs_me <= 0; //Now whatever can drive dqs
+                                8'd15: dqs_me  <= 0; //Now whatever can drive dqs
                             endcase
                         end
+                        if (tACC_cnt == 15)
+                            rd_run <= 0;
                     end
                 end
                 endcase
@@ -373,7 +374,7 @@ module EMI_600 (
     //And allat differential fluff _n and _p is basically for stability, bc if voltage of any
     //Would change, the voltage of other would too.
 
-    assign dq =  dq_me ? dq_out : 16'bzzzz_zzzz_zzzz_zzzz;
+    assign dq = dq_me ? dq_out : 16'bzzzz_zzzz_zzzz_zzzz;
     assign dm = dq_me ? dm_out : 2'bzz;
 
 
@@ -383,6 +384,7 @@ module EMI_600 (
         if (!rst_n) begin
             dq_me <= 0;
         end else if (we_lat && dqs_run) begin
+            beat = {2'(tACC_cnt - 8'd11), ~clk90}; //blocking assignment actually, in always block
             //write, write, write, so as usual, all the data is in
             //micron datasheet, all those diagrams, instructions,
             //timings and all are there. Basically write happens in
@@ -395,19 +397,26 @@ module EMI_600 (
             //for actual write + 19cycles for varios waits, hence
             //about 25 cycles total, hence 75ns.
             //like about 30ns.
+            //
+            //Alright DQS, so DQS is a physical wire that is running from the
+            //same place as data bus does, and its of the same length. Its
+            //primary functino is to align data because it takes the exact
+            //same time as memory does. And dqs_n and dqs_p further refines
+            //that effect. I set the DQS accordingly to micron datasheet, as
+            //I do for everything else tbh.
 
             dq_me <= 1;
-            beat = {2'(tACC_cnt - 8'd11), ~clk90};
-            //The burst(thats a big name for this) happens in 8 cycles, of 16bit writes
-            //8 cycles bc on it happens on every clk90 edge
-            dq_out <= wd_lat [16*beat +: 16]; //finally data write
-            dm_out <= msk_lat[2*beat +: 2];
-        end else if (rd_go) begin
-
-
+            //The burst(thats a big name for this) happens in 4 cycles, of 16bit writes
+            //4 cycles bc on it happens on every clk90 edge
+            dq_out <= wd_lat [16*beat +: 16]; //dq is actual data bus btw
+            dm_out <= msk_lat[2 *beat +: 2];
+        end else if (rd_run && !(tACC_cnt == 15 && !clk90)) begin //gating last bad write
+            beat = {2'(tACC_cnt - 8'd11), ~clk90} - 1'h1; //blocking assignment actually, in always block
+            //The read is opposite of write, the chip itsels sets dq and dqs.
+            //And I just read the dq
+            rdata[16*beat +: 16] <= dq; //Just write to rdata 16bits on every edge for 8edges(4cycles)
         end else begin
             dq_me <= 0;
         end
     end
-
 endmodule
