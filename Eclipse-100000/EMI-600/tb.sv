@@ -2,12 +2,8 @@
 module tb;
     //Formally test-bench, but rather init of the EMI
     //Clocks are 2 different outputs of one MMCM, so atm im using 3/7 slots
-    logic clk = 0;
-    always #1500 clk = ~clk; // 3000 ps period = 333 MHz clock
-
-    logic clk90 = 0; //clk shifted 90 degrees, literally 90, its kinda funny ngl
-    //But it actually makes a lot of sense.
-    initial begin #750; forever #1500 clk90 = ~clk90; end //1500 is half period btw
+    logic clk_crystal = 0;
+    always #10000 clk_crystal = ~clk_crystal; // 50Mhz quartz clk
 
     logic EMI_rst_n;
 
@@ -41,7 +37,7 @@ module tb;
         //write
         req_we = 1; req = 1;
         @(posedge mem_done); req = 0;
-        repeat (5) @(posedge clk);
+        repeat (5) @(posedge emi.clk);
 
         //read it back
         req_we = 0; req = 1;
@@ -54,8 +50,7 @@ module tb;
     end
 
     EMI_600 emi (
-        .clk(clk),
-        .clk90(clk90),
+        .clk_crystal(clk_crystal),
         .rst_n(rst_n),
         .EMI_rst_n(EMI_rst_n),
         .cke(cke),

@@ -1,7 +1,6 @@
 module EMI_600 (
     //Eclipse Memory Interface(EMI)
-    input logic clk,
-    input logic clk90,
+    input logic clk_crystal,
     input logic rst_n,
 
     input logic req, //CPU requests data
@@ -69,6 +68,8 @@ module EMI_600 (
 
     //It might look that im a little crazy but if you think about it
     //It actually makes sense
+    logic clk, clk90, clkEMI;
+    logic clk_pll, clk90_pll, clkEMI_pll;
     assign ck_p = ~clk;
     assign ck_n = clk;
 
@@ -111,8 +112,12 @@ module EMI_600 (
     logic [2:0]  beat;
     logic [15:0] dq_out;
     logic [1:0]  dm_out;
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
+
+    logic LOCKED;
+    logic logic_rst_n;
+    assign logic_rst_n = rst_n && LOCKED;
+    always_ff @(posedge clk or negedge logic_rst_n) begin : main_FSM
+        if (!logic_rst_n) begin
             cke_cnt <= 32'b0;
             tMRD_cnt <= 6'b0;
             tACC_cnt <= 8'b0;
@@ -366,7 +371,7 @@ module EMI_600 (
                 end
                 endcase
             end
-        end
+        end : main_FSM
 
     assign dqs_val = {2{dqs_run & ck_p}}; //dqs_val = ck_p if dqs_run basically
     assign dqs_p = dqs_me ? dqs_val  : 2'bzz; //bzz bzz, who's calling?
@@ -378,10 +383,10 @@ module EMI_600 (
     assign dm = dq_me ? dm_out : 2'bzz;
 
 
-    //I am driving it on rising, and falling edge of the clock and
-    always @(posedge clk90 or negedge clk90 or negedge rst_n) begin //that's kinda sick ngl
+    //I am driving it on rising, and falling edge of the clock and thats sick
+    always @(posedge clk90 or negedge clk90 or negedge logic_rst_n) begin : clk90_always
         //Always bc both edges, otherwise it complains
-        if (!rst_n) begin
+        if (!logic_rst_n) begin
             dq_me <= 0;
         end else if (we_lat && dqs_run) begin
             beat = {2'(tACC_cnt - 8'd11), ~clk90}; //blocking assignment actually, in always block
@@ -418,5 +423,83 @@ module EMI_600 (
         end else begin
             dq_me <= 0;
         end
-    end
+    end : clk90_always
+
+    logic CLKFB;
+    //3 clock freqs(not domains) for EMI 333.3Mhz, 333.3Mhz 90degrees shifted and 83.3Mhz.
+    //333.3Mhz because it is maximum possible frequency that my artix-7 FPGA allows
+    //And 83.3 Just because 333.3/4 = 83.3Mhz. Not domains bc 333.3Mhz doesn't
+    //run any logic.
+    //Anyways clocks are pretty cool there are 2 types of primiteves
+    //generating clock: PLL and MMCM, they are very similar actually.
+    //So each one of them has VCO which is a series of inverters(2 transistors)
+    //And they well invert the incoming signal. In my FPGA there are 8inverters
+    //4 for _p and 4 for _n, and there is a crossover between them(swaps them).
+    //They are wired in a loop, and becaues there is odd number of swaps, when 
+    //Electrisity go to a loop again it swaps inverters, and then again and
+    //again, essentially chasing its own tail and never reaching it. Now the
+    //current can change how fast those inverters discharge, or something, and based
+    //on that electrisity would flow faster there hence increasing the speed.
+    //There is also a 1main quartz oscilator, it acts more as a reference,
+    //each VCO compares itself to it, and ensures it acts where it should, and
+    //re-callibrates if it acts at the wrong time. Eg 200Mhz clock every
+    //4cycles checks whether it lines up with 50Mhz main clk.
+    PLLE2_BASE #( //base is fine, i don't need adv for emi
+        .BANDWIDTH("OPTIMIZED"), //just standard optimized is fine
+        .CLKFBOUT_MULT(20), //Base clock 50MHz * 20 = 1000
+        .CLKFBOUT_PHASE(0.0),
+        .CLKIN1_PERIOD(20.0), //50Mhz main quartz
+        //The clock division works by activating a pariticular clk output
+        //Only between pariticular amount of clock edges. E.g., 333.3Mhz toggles
+        //Every 3rd edge of the clk.
+        .CLKOUT0_DIVIDE(3), //333.3Mhz
+        .CLKOUT1_DIVIDE(3), //333.3Mhz 90degrees
+        .CLKOUT2_DIVIDE(12), //83.3Mhz
+        .CLKOUT3_DIVIDE(1),
+        .CLKOUT4_DIVIDE(1),
+        .CLKOUT5_DIVIDE(1),
+        //Doesn't matter
+        .CLKOUT0_DUTY_CYCLE(0.5),
+        .CLKOUT1_DUTY_CYCLE(0.5),
+        .CLKOUT2_DUTY_CYCLE(0.5),
+        .CLKOUT3_DUTY_CYCLE(0.5),
+        .CLKOUT4_DUTY_CYCLE(0.5),
+        .CLKOUT5_DUTY_CYCLE(0.5),
+        .CLKOUT0_PHASE(0.0),
+        .CLKOUT1_PHASE(90.0), //90degreees
+        .CLKOUT2_PHASE(0.0),
+        .CLKOUT3_PHASE(0.0),
+        .CLKOUT4_PHASE(0.0),
+        .CLKOUT5_PHASE(0.0),
+        .DIVCLK_DIVIDE(1),
+        .REF_JITTER1(0.010), //That purely for simulation 0.010 is just a plausible number
+        .STARTUP_WAIT("FALSE")
+    )
+    PLLE2_EMI (
+        .CLKOUT0(clk_pll),
+        .CLKOUT1(clk90_pll),
+        .CLKOUT2(clkEMI_pll),
+        .CLKOUT3(),
+        .CLKOUT4(),
+        .CLKOUT5(),
+        .CLKFBOUT(CLKFB),
+        .LOCKED(LOCKED),
+        .CLKIN1(clk_crystal),
+        .PWRDWN(1'b0), //constantly on
+        .RST(!rst_n),
+        .CLKFBIN(CLKFB) //wiriting it to each other, internal loop
+    );
+
+    //BUFGs are buffers for clock, they are a clock tree driven by clock
+    //backbone. They are placed kinda like that.
+    //  BUFG-|-BUFG
+    //  BUFG-|-BUFG
+    //      clk
+    //The ensure clock arrives everywhere at the same time. Here the well, do
+    //that exact thing
+    BUFG bufg_clk    (.I(clk_pll),    .O(clk)); //I think you know what those ports are
+    BUFG bufg_clk90  (.I(clk90_pll),  .O(clk90));
+    BUFG bufg_clkEMI (.I(clkEMI_pll), .O(clkEMI));
+
 endmodule
+
