@@ -50,13 +50,13 @@ module CORE(
     logic [31:0] IF_PC_next;
     assign IF_PC_next = (instr_fetch_data[31:26]==6'b111111 || instr_fetch_data[31:26]==6'b111000 || instr_fetch_data[31:26]==6'b010000 || instr_fetch_data[31:26]==6'b111101 || IF_predicted_taken) ? IF_redirect_target : IF_PC_plus4_or8;
 
-    always_ff @(posedge clk or posedge reset) begin
+    always_ff @(posedge clk or posedge reset) begin : IF_main
         if (reset) IF_PC <= 32'h0;
         else if(MEM_fault) IF_PC <= memFault ? 32'h00000070 : 32'h00000074;
         else if(MEM_redirect) IF_PC <= MEM_redirect_target;
         else if(!stall && !bubble) IF_PC <= IF_PC_next;
         else IF_PC <= IF_PC; //I just can't omit it
-    end
+    end : IF_main
 
     logic [63:0] instr_fetch_duo;
     logic [31:0] instr_fetch_data; //from RAM's dedicated instruction port
@@ -161,11 +161,11 @@ module CORE(
 
     //This all coming together
     //Only read EX_pht_idx rather than combinationally like previousely
-    always_ff @(posedge clk) begin
+    always_ff @(posedge clk) begin : predict_branch
         pht_out <= PHT[pht_read_idx];
         if (isMEM_valid && MEM_branch && !MEM_irq && !mem_stall)
             PHT[MEM_pht_idx] <= updated_pht(MEM_pht_val, branch_cond_met);
-    end
+    end : predict_branch
 
     //GHR is still in flops though
     always_ff @(posedge clk or posedge reset) begin
@@ -187,7 +187,7 @@ module CORE(
     logic [31:0] ID_IR_2;
     logic ID_64;
 
-    always_ff @(posedge clk or posedge reset) begin
+    always_ff @(posedge clk or posedge reset) begin : ID_rst
         if (reset) begin
             isID_valid <= 0;
             //Vivado started to complain when I added memFault, but whatever
@@ -197,9 +197,9 @@ module CORE(
         end else if (!stall && !bubble) begin
             isID_valid <= 1'b1;
         end
-    end
+    end : ID_rst
 
-    always_ff @(posedge clk) begin
+    always_ff @(posedge clk) begin : ID_main
         if (!stall && !bubble) begin
             ID_PC <= IF_PC;
             ID_64 <= IF_64;
@@ -212,7 +212,7 @@ module CORE(
             ID_predicted_taken <= IF_predicted_taken;
         end
         //else: stall holds PC and IR as they are
-    end
+    end : ID_main
 
     //==Multi-dimensional operations - sounds cool asf
     logic isID_mdx;
@@ -487,7 +487,7 @@ module CORE(
     //Alright so there was a big always_ff block here previousely, which
     //apparantely led to high fanout, so just splitting it into 2 always_ff
     //Should do the trick
-    always_ff @(posedge clk or posedge reset) begin
+    always_ff @(posedge clk or posedge reset) begin : EX_rst
         if (reset) begin
             isEX_valid <= 0;
         end else if (MEM_redirect || bubble || MEM_fault) begin
@@ -495,8 +495,9 @@ module CORE(
         end else if (!stall) begin
             isEX_valid <= isID_valid;
         end
-    end
-    always_ff @(posedge clk) begin
+    end : EX_rst
+
+    always_ff @(posedge clk) begin : EX_main
         if (!stall) begin
             EX_PC <= ID_PC; //Handing instruction to the EX
             EX_IR <= ID_IR;
@@ -533,7 +534,7 @@ module CORE(
             isEX_mdx <= isID_mdx;
             isEX_mdsx <= isID_mdsx;
         end
-    end
+    end : EX_main
 
     //====//
     logic [5:0] opcode;
@@ -669,7 +670,7 @@ module CORE(
         s[3] = 32'h2357329;
     end
 
-    always_comb begin
+    always_comb begin : xoshiro128
         t1 = (s[1] << 2) + s[1];  //Thats just multiplication by 5
         t2 = (t1 << 7) | (t1 >> 25); //32-7
 
@@ -684,7 +685,7 @@ module CORE(
         s_comb[2] = s_comb[2] ^ t;
         s_comb[3] = (s_comb[3] << 11) | (s_comb[3] >> 21); //32 - 9
 
-    end
+    end : xoshiro128
 
     always_ff @(posedge clk) begin //Again - no reset
         rng_result <= rng_result_comb;
@@ -736,7 +737,7 @@ module CORE(
 
 
 
-    always_ff @(posedge clk or posedge reset) begin
+    always_ff @(posedge clk or posedge reset) begin : XADC_FSM
         if (reset) begin
             rng_state <= IDLE;
             xadc_addr <= 7'b01; //Would actually read 7'h02 on first time
@@ -782,7 +783,7 @@ module CORE(
                     inject_counter <= inject_counter + 1;
             end
         end
-    end
+    end : XADC_FSM
 
     //This is the call to XADC there isn't actually anything phenomenal here
     //Similar to regular files includes
@@ -856,15 +857,15 @@ module CORE(
     logic MEM_irq_timer;
     logic MEM_irq_key;
 
-    always_ff @(posedge clk or posedge reset) begin
+    always_ff @(posedge clk or posedge reset) begin : MEM_rst
         if (reset) begin
             isMEM_valid <= 0;
         end else if (!mem_stall) begin
             isMEM_valid     <= isEX_valid & !stall & !MEM_fault & !MEM_redirect;
         end
-    end
+    end : MEM_rst
 
-    always_ff @(posedge clk) begin
+    always_ff @(posedge clk) begin : MEM_main
         if (!mem_stall) begin
             //That many variables are actually harmless, because they live in
             //FFs which are free, there are a lot of unused FFs in logic slices.
@@ -918,7 +919,7 @@ module CORE(
             MEM_lanes     <= EX_lanes;
             MEM_base      <= EX_base;
         end
-    end
+    end : MEM_main
 
     logic [31:0] MEM_vram_addr;
     assign MEM_vram_addr = {12'b0, MEM_memTarget[19:0]};
@@ -1088,7 +1089,7 @@ module CORE(
 
     logic branch_cond_met;
 
-    always_comb begin
+    always_comb begin : Comparator
         case (MEM_branch_op)
             5'b00001, 5'b10001: branch_cond_met = branch_eq;  //BEQ/IBEQ
             5'b00010, 5'b10010: branch_cond_met = !branch_eq; //BNE/IBNE
@@ -1105,7 +1106,7 @@ module CORE(
 
             default: branch_cond_met = 0;
         endcase
-    end
+    end : Comparator
 
     logic  [31:0] MEM_redirect_target;
     //Veril***r compains fsr idk
@@ -1288,7 +1289,7 @@ module CORE(
 
 
     logic [1:0] pick0, pick1, pick2;
-    always_comb begin
+    always_comb begin : FWD
         for (int b = 0; b < 4; b++) begin
             pick0 = EX_pick0[2*b +: 2];
             pick1 = EX_pick1[2*b +: 2];
@@ -1310,7 +1311,7 @@ module CORE(
             else if (EX_keep2[b])  FWD_rxi[8*b +: 8] = EX_gpr2[8*pick2 +: 8];
             else                   FWD_rxi[8*b +: 8] = 8'h0;
         end
-    end
+    end : FWD
 
     //Declarations
     logic [31:0] EPC;
@@ -1460,7 +1461,7 @@ module CORE(
         endcase
     end
 
-    always_comb begin
+    always_comb begin : PC_MUX
         unique case (PCSrc)
             4'b0000: PCNext = EX_early_target;
             4'b0001: PCNext = EX_early_target;
@@ -1472,7 +1473,7 @@ module CORE(
             4'b0111: PCNext = FWD_rx0; // JR
             default: PCNext = EX_early_target;
         endcase
-    end
+    end : PC_MUX
 
     assign MEM_activeSP = MEM_kernelMode ? KSP : SP;
 
@@ -1484,7 +1485,7 @@ module CORE(
     assign MEM_LR_write  = isMEM_valid && (MEM_is_call || (MEM_SPRWrite && (MEM_spr_target_sel == 2'b01)));
     assign MEM_LR_val    = MEM_is_call ? MEM_PCNext : SPRNext;
 
-    always_ff @(posedge clk or posedge reset) begin
+    always_ff @(posedge clk or posedge reset) begin : SPR_ffs
         if (reset) begin
             SP <= 32'h03FFFFF0;
             KSP <= 32'h000000FC;
@@ -1543,7 +1544,7 @@ module CORE(
                 end
             end
         end
-    end
+    end : SPR_ffs
 
     //memEnd was at always_ff block above and it was written to twice.
     //So I thought why not just compute it every cycle.
@@ -1629,7 +1630,7 @@ module CORE(
     end
 
     //No 3'b001 arm anymore, MEM fixes the load in one cycle later
-    always_comb begin
+    always_comb begin : GPRsMUX //thats a good ass feature
         unique case (result_sel)
             3'b000: GPRs_data_in = add_result;
             3'b001: GPRs_data_in = bitwise_result;
@@ -1639,7 +1640,7 @@ module CORE(
             3'b101: GPRs_data_in = idx_addr; //MDCX
             3'b110: GPRs_data_in = SelectedSPR + sign_ext_imm16;
         endcase
-    end
+    end : GPRsMUX
 
     CU control_unit (
         .clk(clk),
