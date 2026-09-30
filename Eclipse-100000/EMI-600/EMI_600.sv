@@ -68,10 +68,8 @@ module EMI_600 (
 
     //It might look that im a little crazy but if you think about it
     //It actually makes sense
-    logic clk, clk90, clkEMI;
+    logic clk333, clk90, clkEMI;
     logic clk_pll, clk90_pll, clkEMI_pll;
-    assign ck_p = ~clk;
-    assign ck_n = clk;
 
     //So init is actually pretty cool, and as silly as it sounds writing it
     //was like playing ktane. That micron datasheet is so similar to ktane
@@ -116,7 +114,7 @@ module EMI_600 (
     logic LOCKED;
     logic logic_rst_n;
     assign logic_rst_n = rst_n && LOCKED;
-    always_ff @(posedge clk or negedge logic_rst_n) begin : main_FSM
+    always_ff @(posedge clk333 or negedge logic_rst_n) begin : main_FSM
         if (!logic_rst_n) begin
             cke_cnt <= 32'b0;
             tMRD_cnt <= 6'b0;
@@ -443,15 +441,15 @@ module EMI_600 (
     //There is also a 1main quartz oscilator, it acts more as a reference,
     //each VCO compares itself to it, and ensures it acts where it should, and
     //re-callibrates if it acts at the wrong time. Eg 200Mhz clock every
-    //4cycles checks whether it lines up with 50Mhz main clk.
+    //4cycles checks whether it lines up with 50Mhz main clk333.
     PLLE2_BASE #( //base is fine, i don't need adv for emi
         .BANDWIDTH("OPTIMIZED"), //just standard optimized is fine
         .CLKFBOUT_MULT(20), //Base clock 50MHz * 20 = 1000
         .CLKFBOUT_PHASE(0.0),
         .CLKIN1_PERIOD(20.0), //50Mhz main quartz
-        //The clock division works by activating a pariticular clk output
+        //The clock division works by activating a pariticular clk333 output
         //Only between pariticular amount of clock edges. E.g., 333.3Mhz toggles
-        //Every 3rd edge of the clk.
+        //Every 3rd edge of the clk333.
         .CLKOUT0_DIVIDE(3), //333.3Mhz
         .CLKOUT1_DIVIDE(3), //333.3Mhz 90degrees
         .CLKOUT2_DIVIDE(12), //83.3Mhz
@@ -494,12 +492,67 @@ module EMI_600 (
     //backbone. They are placed kinda like that.
     //  BUFG-|-BUFG
     //  BUFG-|-BUFG
-    //      clk
+    //      clk333
     //The ensure clock arrives everywhere at the same time. Here the well, do
     //that exact thing
-    BUFG bufg_clk    (.I(clk_pll),    .O(clk)); //I think you know what those ports are
+    BUFG bufg_clk    (.I(clk_pll),    .O(clk333)); //I think you know what those ports are
     BUFG bufg_clk90  (.I(clk90_pll),  .O(clk90));
     BUFG bufg_clkEMI (.I(clkEMI_pll), .O(clkEMI));
 
+    logic ck_temp;
+    OSERDESE2 #(
+        .DATA_RATE_OQ("DDR"),
+        .DATA_RATE_TQ("SDR"),
+        .DATA_WIDTH(8),
+        .INIT_OQ(1'b0),
+        .INIT_TQ(1'b0),
+        .SERDES_MODE("MASTER"),
+        .SRVAL_OQ(1'b0),
+        .SRVAL_TQ(1'b0),
+        .TBYTE_CTL("FALSE"),
+        .TBYTE_SRC("FALSE"),
+        .TRISTATE_WIDTH(1)
+    )
+    OSERDESE2_EMI (
+        .OFB(),
+        .OQ(ck_temp), //Atm using it just to drive ck to be ~clk333
+        .SHIFTOUT1(),
+        .SHIFTOUT2(),
+        .TBYTEOUT(),
+        .TFB(),
+        .TQ(),
+        .CLK(clk333),
+        .CLKDIV(clkEMI),
+        .D1(1'b0), //Just a clk pattern
+        .D2(1'b1),
+        .D3(1'b0),
+        .D4(1'b1),
+        .D5(1'b0),
+        .D6(1'b1),
+        .D7(1'b0),
+        .D8(1'b1),
+        .OCE(1'b1),
+        .RST(!logic_rst_n),
+        .SHIFTIN1(1'b0),
+        .SHIFTIN2(1'b0),
+        .T1(1'b0),
+        .T2(1'b0),
+        .T3(1'b0),
+        .T4(1'b0),
+        .TBYTEIN(1'b0),
+        .TCE(1'b0)
+    );
+
+    OBUFDS #( //makes input differential, rn for ck_p and thus ck_n
+        .IOSTANDARD("DEFAULT"),
+        .SLEW("FAST")
+    ) OBUFDS_ck (
+        .O(ck_p),
+        .OB(ck_n),
+        .I(ck_temp)
+    );
+
 endmodule
+
+
 

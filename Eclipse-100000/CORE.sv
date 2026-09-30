@@ -792,7 +792,7 @@ module CORE(
         .INIT_40(16'h0000), //default mode is fine
         .INIT_41(16'h0000), //defalt one too
         .INIT_42(16'h0800)
-    ) xadc_i (
+    ) xadc_rng (
         .DCLK      (clk),
         .RESET     (reset),
         .DADDR     (xadc_addr), //Read specified register

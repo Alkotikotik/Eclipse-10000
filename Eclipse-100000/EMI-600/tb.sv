@@ -37,7 +37,7 @@ module tb;
         //write
         req_we = 1; req = 1;
         @(posedge mem_done); req = 0;
-        repeat (5) @(posedge emi.clk);
+        repeat (5) @(posedge emi.clk333);
 
         //read it back
         req_we = 0; req = 1;
