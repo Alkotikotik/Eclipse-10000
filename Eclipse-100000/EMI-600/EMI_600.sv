@@ -97,6 +97,20 @@ module EMI_600 (
     } run_states;
     run_states EMI_run_state;
 
+    //Struct just syntehzises into wires.
+    //Basically in 1EMI clk imma send 4 packed commands to OSERDES
+    //And it will output them 1by one to ddr3 controller that is gonna
+    //Run all of them. In practice tho, its gonna be 1 command and 3nops
+    //Most of the times
+    typedef struct packed {
+        logic cs_n, ras_n, cas_n, we_n;
+        logic [2:0]  ba;
+        logic [13:0] a;
+        logic cke, odt;
+    } cmd_t;
+
+    cmd_t cmd [4];
+
     logic [31:0] cke_cnt;
     logic [11:0] tMRD_cnt, tREFI_cnt;
     logic [7:0]  tACC_cnt;
@@ -110,20 +124,23 @@ module EMI_600 (
     logic [2:0]  beat;
     logic [15:0] dq_out;
     logic [1:0]  dm_out;
+    logic cke_r;
 
     logic LOCKED;
     logic logic_rst_n;
     assign logic_rst_n = rst_n && LOCKED;
-    always_ff @(posedge clk333 or negedge logic_rst_n) begin : main_FSM
+    //Main FSM logic runs on 83.3Mhz because 333.3/83.3 = 4 full cycles, thus
+    //8edges and hence those 128bit burst in 1 83.3clk cycle
+    always_ff @(posedge clkEMI or negedge logic_rst_n) begin : main_FSM
         if (!logic_rst_n) begin
             cke_cnt <= 32'b0;
             tMRD_cnt <= 6'b0;
             tACC_cnt <= 8'b0;
             EMI_rst_n <= 0;
-            ba <= 3'b0;
-            a <= 14'b0;
-            cke  <= 0;
-            odt  <= 0;
+            for (integer i = 0; i <= 3; i++) begin
+                cmd[i] <= '{cs_n: 1, ras_n: 1, cas_n: 1, we_n: 1, ba: 3'b0, a: 14'b0, cke: 0, odt: 0};
+            end
+            cke_r <= 0;
             mem_done <= 0;
             rd_run <= 0;
             we_lat <= 0;
@@ -134,30 +151,37 @@ module EMI_600 (
             EMI_init_state <= INIT_INIT;
             EMI_run_state <= IDLE;
         end else if (EMI_init_state != FINISH) begin
-            cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1; //defualt NOP
+            for (integer i = 0; i <= 3; i++) begin
+                cmd[i].cs_n  <= 0;
+                cmd[i].ras_n <= 1;
+                cmd[i].cas_n <= 1;
+                cmd[i].we_n  <= 1;
+                cmd[i].cke   <= cke_r;
+                cmd[i].odt   <= 0;
+            end
             case (EMI_init_state)
                 INIT_INIT: begin //idk what to say here
-                    if (cke_cnt > 32'd70_000)
+                    if (cke_cnt > 32'd17_500)
                         EMI_rst_n <= 1;
-                    if (cke_cnt > 32'd251_000) begin
-                        cke <= 1; //500us and 50ns(5 7.5ns cycles) it also holds 250us for rst but it doesn't matter 
+                    if (cke_cnt > 32'd62_750) begin
+                        cke_r <= 1; //500us and 50ns(5 7.5ns cycles) it also holds 250us for rst but it doesn't matter 
                         EMI_init_state <= MR2;
                     end else begin
                         cke_cnt <= cke_cnt + 31'b1;
                     end
                 end
                 MR2: begin
-                    if (tMRD_cnt > 13'd57) begin //57 cycles tXPR (170ns)
+                    if (tMRD_cnt > 13'd15) begin //15 cycles tXPR (170ns)
                         tMRD_cnt <= 6'b0;
-                        cs_n <= 0;
-                        ras_n <= 0;
-                        cas_n <= 0;
-                        we_n <= 0;
-                        ba <= 3'b010; //MR2
+                        cmd[0].cs_n <= 0;
+                        cmd[0].ras_n <= 0;
+                        cmd[0].cas_n <= 0;
+                        cmd[0].we_n <= 0;
+                        cmd[0].ba <= 3'b010; //MR2
                         //Thats just a lucky combination for my exact FPGA
                         //Usually its different, it might even be different
                         //but just later when I get to actual PHY
-                        a <= 14'b0;
+                        cmd[0].a <= 14'b0;
                         EMI_init_state <= MR3;
 
                         tREFI_pending <= 0;
@@ -169,14 +193,13 @@ module EMI_600 (
                 MR3: begin
                     if (tMRD_cnt > 6'b00101) begin //5 cycles
                         tMRD_cnt <= 6'b0;
-                        cs_n <= 0;
-                        ras_n <= 0;
-                        cas_n <= 0;
-                        we_n <= 0;
-                        ba <= 3'b011; //MR3
-
+                        cmd[0].cs_n <= 0;
+                        cmd[0].ras_n <= 0;
+                        cmd[0].cas_n <= 0;
+                        cmd[0].we_n <= 0;
+                        cmd[0].ba <= 3'b011; //MR3
                         //Coincedence again
-                        a <= 14'b0;
+                        cmd[0].a <= 14'b0;
                         EMI_init_state <= MR1;
 
                     end else begin
@@ -186,26 +209,23 @@ module EMI_600 (
                 MR1: begin
                     if (tMRD_cnt > 6'b00101) begin
                         tMRD_cnt <= 6'b0;
-                        cs_n <= 0;
-                        ras_n <= 0;
-                        cas_n <= 0;
-                        we_n <= 0;
-                        ba <= 3'b001; //MR1
-
+                        cmd[0].cs_n <= 0;
+                        cmd[0].ras_n <= 0;
+                        cmd[0].cas_n <= 0;
+                        cmd[0].we_n <= 0;
+                        cmd[0].ba <= 3'b001; //MR1
                         //Now we are talking tho
                         //The interesting thing is that it acually enables
                         //DLL which is !m0, and enables output(!m12)
-                        a <= 14'b0;
-
+                        cmd[0].a <= 14'b0;
                         //Output drive strengh = 01(m5, m1), 34Omhs
-                        a[1] <= 1;
-
+                        cmd[0].a[1] <= 1;
                         //RTT_nom = 011(m9, m6, 2), it is value of echo
                         //absorbing resistor, 011 is 40 Omhs, I wasn't sure
                         //What to set, so I just used MIG's value which
                         //Is this one.
-                        a[6] <= 1;
-                        a[2] <= 1;
+                        cmd[0].a[6] <= 1;
+                        cmd[0].a[2] <= 1;
                         EMI_init_state <= MR0;
                     end else begin
                         tMRD_cnt <= tMRD_cnt + 6'h1;
@@ -214,22 +234,22 @@ module EMI_600 (
                 MR0: begin
                     if (tMRD_cnt > 6'b00101) begin
                         tMRD_cnt <= 6'b0;
-                        cs_n <= 0;
-                        ras_n <= 0;
-                        cas_n <= 0;
-                        we_n <= 0;
-                        ba <= 3'b000; //MR0
+                        cmd[0].cs_n <= 0;
+                        cmd[0].ras_n <= 0;
+                        cmd[0].cas_n <= 0;
+                        cmd[0].we_n <= 0;
+                        cmd[0].ba <= 3'b000; //MR0
 
 
-                        a <= 14'b0;
+                        cmd[0].a <= 14'b0;
                         //DLL reset
-                        a[8] <= 1;
+                        cmd[0].a[8] <= 1;
                         //CAS latency 001: 5 cycles(15ns)
-                        a[4] <= 1;
+                        cmd[0].a[4] <= 1;
 
                         //Write recovery = 5(in cycles)
                         //just enough for amplifiers to set electrons
-                        a[9] <= 1;
+                        cmd[0].a[9] <= 1;
                         EMI_init_state <= ZQCL;
                     end else begin
                         tMRD_cnt <= tMRD_cnt + 6'h1;
@@ -238,17 +258,17 @@ module EMI_600 (
                 ZQCL: begin
                     if (tMRD_cnt > 6'b01110) begin //14 cycles(need 12 2more jic)
                         tMRD_cnt <= 6'b0;
-                        cs_n <= 0;
-                        ras_n <= 1;
-                        cas_n <= 1;
-                        we_n <= 0;
+                        cmd[0].cs_n <= 0;
+                        cmd[0].ras_n <= 1;
+                        cmd[0].cas_n <= 1;
+                        cmd[0].we_n <= 0;
 
-                        a <= 14'b0;
+                        cmd[0].a <= 14'b0;
                         //Long ZQCL because its required on init
                         //Regular one can be used anytime for a
                         //small calibration. Long one is 512cycles whilst
                         //short one is 64cycles.
-                        a[10] <= 1;
+                        cmd[0].a[10] <= 1;
 
                         EMI_init_state <= ALMOST_FINISH;
 
@@ -257,7 +277,7 @@ module EMI_600 (
                     end
                 end
                 ALMOST_FINISH: begin
-                    if (tMRD_cnt > 512) begin
+                    if (tMRD_cnt > 128) begin
                         tMRD_cnt <= 13'b0;
                         EMI_init_state <= FINISH;
                     end else
@@ -265,9 +285,16 @@ module EMI_600 (
                 end
             endcase
         end else begin
-            cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
+            for (integer i = 0; i <= 3; i++) begin
+                cmd[i].cs_n  <= 0;
+                cmd[i].ras_n <= 1;
+                cmd[i].cas_n <= 1;
+                cmd[i].we_n  <= 1;
+                cmd[i].cke   <= cke_r;
+                cmd[i].odt   <= 0;
+            end
             mem_done <= 0;
-            if (tREFI_cnt > 2500) begin //7.8us
+            if (tREFI_cnt > 625) begin //7.8us
                 tREFI_cnt <= 12'b0;
                 tREFI_pending <= 1;
             end else if (!tREFI_pending) begin
@@ -283,22 +310,13 @@ module EMI_600 (
                         //Because the ddr3's internal counter increases
                         //On every REF and point to the next row within the
                         //bank. Hence in 64ms it would refresh every row.
-                        cs_n <= 0;
-                        ras_n <= 0;
-                        cas_n <= 0;
-                        we_n <= 1;
+                        cmd[0].cs_n <= 0;
+                        cmd[0].ras_n <= 0;
+                        cmd[0].cas_n <= 0;
+                        cmd[0].we_n <= 1;
                         tREFI_pending <= 0;
-                    end else if (tREFI_cnt < 55) begin //160ns tRFC
-                        cs_n <= 0; ras_n <= 1; cas_n <= 1; we_n <= 1;
-                    end else begin
-                        if (req && !mem_done) begin
-                            EMI_run_state <= ACCESS;
-                        end else begin
-                            cs_n <= 0;
-                            ras_n <= 1;
-                            cas_n <= 1;
-                            we_n <= 1;
-                        end
+                    end else if (tREFI_cnt > 55 && req && !mem_done) begin //160ns tRFC
+                        EMI_run_state <= ACCESS;
                     end
                 end
                 ACCESS: begin
@@ -320,41 +338,39 @@ module EMI_600 (
                     //ofc reduces access speed.
                     tACC_cnt <= tACC_cnt + 1;
                     if (!(|tACC_cnt)) begin
-                        //ACTIVATE
-                        cs_n <= 0;
-                        ras_n <= 0;
-                        cas_n <= 1;
-                        we_n <= 1;
+                        //ACTIVATE(ACT)
+                        //It goes into third slot of cmd, so it would be 5cycles apart
+                        //From RD/WR, bc that's some t i forgot
+                        cmd[2].cs_n <= 0;
+                        cmd[2].ras_n <= 0;
+                        cmd[2].cas_n <= 1;
+                        cmd[2].we_n <= 1;
 
-                        a[13:0] <= req_addr[23:10]; //row
-                        ba <= req_addr[9:7]; //bank
+                        cmd[2].a[13:0] <= req_addr[23:10]; //row
+                        cmd[2].ba <= req_addr[9:7]; //bank
 
                         we_lat <= req_we; //latching jic, 25cycles afterall
                         msk_lat <= req_msk;
                         wd_lat <= req_wd;
 
-                    end else if (tACC_cnt == 8'h5) begin
+                    end else if (tACC_cnt == 8'h1) begin
                         //READ/WRITE
-                        cs_n <= 0;
-                        ras_n <= 1;
-                        cas_n <= 0;
-                        we_n <= !we_lat; //WE# = 0 on write
+                        //On the last one so its aligned and 5cycles apart
+                        cmd[3].cs_n <= 0;
+                        cmd[3].ras_n <= 1;
+                        cmd[3].cas_n <= 0;
+                        cmd[3].we_n <= !we_lat; //WE# = 0 on write
 
-                        //ba is already bank
-                        a <= {3'b000, 1'b1, req_addr[6:0], 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
+                        cmd[3].ba <= req_addr[9:7];
+                        cmd[3].a <= {3'b000, 1'b1, req_addr[6:0], 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
 
                         rd_run <= !we_lat;
 
-                    end else if (tACC_cnt == (we_lat ? 8'd24 : 8'd17)) begin // 17 for read, 24 for write
+                    end else if (tACC_cnt == (we_lat ? 8'd7 : 8'd5)) begin // 17 for read, 24 for write
                         tACC_cnt <= 8'b0;
                         mem_done <= 1;
                         EMI_run_state <= IDLE;
                     end else begin
-                        cs_n <= 0;
-                        ras_n <= 1;
-                        cas_n <= 1;
-                        we_n <= 1;
-
                         if (we_lat) begin //writing on read would short circuit btw
                             case (tACC_cnt)
                                 8'd9:  dqs_me  <= 1; //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
@@ -369,6 +385,7 @@ module EMI_600 (
                 end
                 endcase
             end
+            
         end : main_FSM
 
     assign dqs_val = {2{dqs_run & ck_p}}; //dqs_val = ck_p if dqs_run basically
@@ -500,48 +517,8 @@ module EMI_600 (
     BUFG bufg_clkEMI (.I(clkEMI_pll), .O(clkEMI));
 
     logic ck_temp;
-    OSERDESE2 #(
-        .DATA_RATE_OQ("DDR"),
-        .DATA_RATE_TQ("SDR"),
-        .DATA_WIDTH(8),
-        .INIT_OQ(1'b0),
-        .INIT_TQ(1'b0),
-        .SERDES_MODE("MASTER"),
-        .SRVAL_OQ(1'b0),
-        .SRVAL_TQ(1'b0),
-        .TBYTE_CTL("FALSE"),
-        .TBYTE_SRC("FALSE"),
-        .TRISTATE_WIDTH(1)
-    )
-    OSERDESE2_EMI (
-        .OFB(),
-        .OQ(ck_temp), //Atm using it just to drive ck to be ~clk333
-        .SHIFTOUT1(),
-        .SHIFTOUT2(),
-        .TBYTEOUT(),
-        .TFB(),
-        .TQ(),
-        .CLK(clk333),
-        .CLKDIV(clkEMI),
-        .D1(1'b0), //Just a clk pattern
-        .D2(1'b1),
-        .D3(1'b0),
-        .D4(1'b1),
-        .D5(1'b0),
-        .D6(1'b1),
-        .D7(1'b0),
-        .D8(1'b1),
-        .OCE(1'b1),
-        .RST(!logic_rst_n),
-        .SHIFTIN1(1'b0),
-        .SHIFTIN2(1'b0),
-        .T1(1'b0),
-        .T2(1'b0),
-        .T3(1'b0),
-        .T4(1'b0),
-        .TBYTEIN(1'b0),
-        .TCE(1'b0)
-    );
+    full_oserder ck (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+                    .ds(8'b1010_1010), .trie(1'b0), .oq(ck_temp), .tq());
 
     OBUFDS #( //makes input differential, rn for ck_p and thus ck_n
         .IOSTANDARD("DEFAULT"),
@@ -552,7 +529,69 @@ module EMI_600 (
         .I(ck_temp)
     );
 
+    //So that isn't your refular for loop its a loop that generates those
+    //oser8bits instances on init, it basically is just syntax to insatante several
+    //oser8bits.
+    for (genvar i = 0; i < 14; i++) begin : a_ser //14address bits, one OSERDES for each bit
+        full_oserder u (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+                .ds({
+                    cmd[3].a[i],
+                    cmd[3].a[i],
+                    cmd[2].a[i],
+                    cmd[2].a[i],
+                    cmd[1].a[i],
+                    cmd[1].a[i],
+                    cmd[0].a[i],
+                    cmd[0].a[i]
+                }),
+                .trie(1'b0), .oq(a[i]), .tq());
+    end : a_ser
+
+    //Just running every signal throught OSERDES to ddr3 chip
+    //_ser is serializer btw
+    for (genvar i = 0; i < 3; i++) begin : ba_ser
+        full_oserder u (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+                .ds({
+                    cmd[3].ba[i],
+                    cmd[3].ba[i],
+                    cmd[2].ba[i],
+                    cmd[2].ba[i],
+                    cmd[1].ba[i],
+                    cmd[1].ba[i],
+                    cmd[0].ba[i],
+                    cmd[0].ba[i]
+                }),
+                .trie(1'b0), .oq(ba[i]), .tq());
+    end : ba_ser
+
+    full_oserder cs_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+            .ds({cmd[3].cs_n, cmd[3].cs_n, cmd[2].cs_n, cmd[2].cs_n,
+                 cmd[1].cs_n, cmd[1].cs_n, cmd[0].cs_n, cmd[0].cs_n}),
+            .trie(1'b0), .oq(cs_n), .tq());
+
+    full_oserder ras_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+            .ds({cmd[3].ras_n, cmd[3].ras_n, cmd[2].ras_n, cmd[2].ras_n,
+                 cmd[1].ras_n, cmd[1].ras_n, cmd[0].ras_n, cmd[0].ras_n}),
+            .trie(1'b0), .oq(ras_n), .tq());
+
+    full_oserder cas_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+            .ds({cmd[3].cas_n, cmd[3].cas_n, cmd[2].cas_n, cmd[2].cas_n,
+                 cmd[1].cas_n, cmd[1].cas_n, cmd[0].cas_n, cmd[0].cas_n}),
+            .trie(1'b0), .oq(cas_n), .tq());
+
+    full_oserder we_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+            .ds({cmd[3].we_n, cmd[3].we_n, cmd[2].we_n, cmd[2].we_n,
+                 cmd[1].we_n, cmd[1].we_n, cmd[0].we_n, cmd[0].we_n}),
+            .trie(1'b0), .oq(we_n), .tq());
+
+    full_oserder cke_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+            .ds({cmd[3].cke, cmd[3].cke, cmd[2].cke, cmd[2].cke,
+                 cmd[1].cke, cmd[1].cke, cmd[0].cke, cmd[0].cke}),
+            .trie(1'b0), .oq(cke), .tq());
+
+    full_oserder odt_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+            .ds({cmd[3].odt, cmd[3].odt, cmd[2].odt, cmd[2].odt,
+                 cmd[1].odt, cmd[1].odt, cmd[0].odt, cmd[0].odt}),
+            .trie(1'b0), .oq(odt), .tq());
+
 endmodule
-
-
-
