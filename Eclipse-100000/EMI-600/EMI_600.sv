@@ -123,6 +123,8 @@ module EMI_600 (
     logic we_lat;
     logic [15:0]  msk_lat;
     logic [127:0] wd_lat;
+    logic [127:0] dq_q; //thats a funny word
+    logic [127:0] dq_q_prev; //temp imma change it later
     logic dqs_md, dq_md; //dq Manipulation disable 1 = (z), 0 = EMI drives
     logic [7:0]  dqs_ds;
     logic [2:0]  beat;
@@ -297,6 +299,7 @@ module EMI_600 (
                 cmd[i].odt   <= 0;
             end
             mem_done <= 0;
+            dq_q_prev <= dq_q; //again - temp var
             if (tREFI_cnt > 625) begin //7.8us
                 tREFI_cnt <= 12'b0;
                 tREFI_pending <= 1;
@@ -369,7 +372,8 @@ module EMI_600 (
 
                         rd_run <= !we_lat;
 
-                    end else if (tACC_cnt == (we_lat ? 8'd7 : 8'd5)) begin // 17 for read, 24 for write
+                    end else if (tACC_cnt == (we_lat ? 8'd7 : 8)) begin
+                        if (!we_lat) rdata <= {dq_q[95:0], dq_q_prev[127:96]}; //and temp again
                         dqs_md <= 1;
                         tACC_cnt <= 8'b0;
                         mem_done <= 1;
@@ -387,8 +391,6 @@ module EMI_600 (
                                 8'd6: dq_md <= 1;
                             endcase
                         end
-                        if (tACC_cnt == 15)
-                            rd_run <= 0;
                     end
                 end
                 endcase
@@ -419,17 +421,6 @@ module EMI_600 (
 
     //The burst(thats a big name for this) happens in 4 cycles, of 16bit writes
     //4 cycles bc on it happens on every clk90 edge
-    //I am driving it on rising, and falling edge of the clock and thats sick
-    always @(posedge clk90 or negedge clk90 or negedge logic_rst_n) begin : clk90_always
-        //Always bc both edges, otherwise it complains
-        if (!logic_rst_n) begin
-        end else if (rd_run && !(tACC_cnt == 15 && !clk90)) begin //gating last bad write
-            beat = {2'(tACC_cnt - 8'd11), ~clk90} - 1'h1; //-1 bc it starts 1 edge later fsr
-            //The read is opposite of write, the chip itsels sets dq and dqs.
-            //And I just read the dq
-            rdata[16*beat +: 16] <= dq; //Just write to rdata 16bits on every edge for 8edges(4cycles)
-        end
-    end : clk90_always
 
     logic CLKFB;
     //3 clock freqs(not domains) for EMI 333.3Mhz, 333.3Mhz 90degrees shifted and 83.3Mhz.
@@ -635,6 +626,71 @@ module EMI_600 (
             }), .trie(1'b0), .oq(dm[i]), .tq()
         );
     end : dm_ser
+
+    //ISERDESE is an opposite of OSERDES, it takes serial input at clk and
+    //outputs parralel at clkdiv. As you might have guessed its for reads.
+    //Btw I already have IOBUF for it, bc IOBUF is two-way
+    for (genvar i = 0; i < 16; i++) begin : dq_des
+        ISERDESE2 #(
+            .DATA_RATE("DDR"),
+            .DATA_WIDTH(8),
+            .DYN_CLKDIV_INV_EN("FALSE"),
+            .DYN_CLK_INV_EN("FALSE"),
+
+            .INIT_Q1(1'b0),
+            .INIT_Q2(1'b0),
+            .INIT_Q3(1'b0),
+            .INIT_Q4(1'b0),
+
+            .INTERFACE_TYPE("NETWORKING"),
+            .IOBDELAY("NONE"),
+            .NUM_CE(2),
+            .OFB_USED("FALSE"),
+            .SERDES_MODE("MASTER"),
+
+            .SRVAL_Q1(1'b0),
+            .SRVAL_Q2(1'b0),
+            .SRVAL_Q3(1'b0),
+            .SRVAL_Q4(1'b0)
+        )
+        ISERDESE2_reads (
+            .O(), //outputs to rdata
+            .Q1(dq_q[i + 112]),
+            .Q2(dq_q[i + 96]),
+            .Q3(dq_q[i + 80]),
+            .Q4(dq_q[i + 64]),
+            .Q5(dq_q[i + 48]),
+            .Q6(dq_q[i + 32]),
+            .Q7(dq_q[i + 16]),
+            .Q8(dq_q[i + 00]),
+
+            .SHIFTOUT1(),
+            .SHIFTOUT2(),
+
+            .BITSLIP(1'b0),
+            .CE1(1'b1),
+            .CE2(1'b1),
+
+            .CLKDIVP(1'b0),
+            .CLK(clk333),
+            .CLKB(~clk333),
+            .CLKDIV(clkEMI),
+            .OCLK(1'b0),
+
+            .DYNCLKDIVSEL(1'b0),
+            .DYNCLKSEL(1'b0),
+
+            //Inputs from dq_in from IOBUF
+            .D(dq_in[i]),
+            .DDLY(1'b0),
+            .OFB(1'b0),
+            .OCLKB(1'b0),
+
+            .RST(!logic_rst_n),
+            .SHIFTIN1(1'b0),
+            .SHIFTIN2(1'b0)
+        );
+    end : dq_des
 
 
 endmodule
