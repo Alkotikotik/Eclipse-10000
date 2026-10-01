@@ -370,25 +370,21 @@ module EMI_600 (
                         rd_run <= !we_lat;
 
                     end else if (tACC_cnt == (we_lat ? 8'd7 : 8'd5)) begin // 17 for read, 24 for write
+                        dqs_md <= 1;
                         tACC_cnt <= 8'b0;
                         mem_done <= 1;
                         EMI_run_state <= IDLE;
                     end else begin
                         if (we_lat) begin //writing on read would short circuit btw
                             case (tACC_cnt)
-                                8'd3: begin //Preamble
+                                8'd2: dqs_ds <= 8'b0000_0000; //preamble
+                                8'd3: dqs_ds <= 8'b1010_1010; //burst
+                                8'd4: begin //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
+                                    dqs_ds <= 8'b0000_0000;
                                     dqs_md <= 0;
-                                    dqs_ds <= 8'b0000_0000;
-                                end //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
-                                8'd4: begin //DQS now switching every 1.5ns(every edge of clk90)
-                                    dqs_ds <= 8'b1010_1010;
-                                    dq_md <= 0;
                                 end
-                                8'd5: begin //Done postassemble
-                                    dqs_ds <= 8'b0000_0000;
-                                    dq_md <= 1;
-                                end
-                                8'd6: dqs_md  <= 1; //Now whatever can drive dqs
+                                8'd5: dq_md <= 0; //the tri state was too fast, so solution is just to move all of them 1cycle later
+                                8'd6: dq_md <= 1;
                             endcase
                         end
                         if (tACC_cnt == 15)
