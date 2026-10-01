@@ -111,6 +111,10 @@ module EMI_600 (
 
     cmd_t cmd [4];
 
+    //Btw micron chip works kinda similar to the CPU but not really.
+    //CS#, RAS#, CAS# and WE# act kinda as 4bits of opcode. And a and ba
+    //Act as immediates of some kind
+
     logic [31:0] cke_cnt;
     logic [11:0] tMRD_cnt, tREFI_cnt;
     logic [7:0]  tACC_cnt;
@@ -119,11 +123,9 @@ module EMI_600 (
     logic we_lat;
     logic [15:0]  msk_lat;
     logic [127:0] wd_lat;
-    logic dqs_me, dqs_run, dq_me;
-    logic [1:0]  dqs_val;
+    logic dqs_md, dq_md; //dq Manipulation disable 1 = (z), 0 = EMI drives
+    logic [7:0]  dqs_ds;
     logic [2:0]  beat;
-    logic [15:0] dq_out;
-    logic [1:0]  dm_out;
     logic cke_r;
 
     logic LOCKED;
@@ -144,8 +146,9 @@ module EMI_600 (
             mem_done <= 0;
             rd_run <= 0;
             we_lat <= 0;
-            dqs_me <= 0;
-            dqs_run <= 0;
+            dqs_md <= 1;
+            dq_md <= 1;
+            dqs_ds <= 8'b0000_0000;
             rdata <= 128'h0;
 
             EMI_init_state <= INIT_INIT;
@@ -373,10 +376,19 @@ module EMI_600 (
                     end else begin
                         if (we_lat) begin //writing on read would short circuit btw
                             case (tACC_cnt)
-                                8'd9:  dqs_me  <= 1; //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
-                                8'd10: dqs_run <= 1; //DQS now switching every 1.5ns(every edge of clk90)
-                                8'd14: dqs_run <= 0; //Done
-                                8'd15: dqs_me  <= 0; //Now whatever can drive dqs
+                                8'd3: begin //Preamble
+                                    dqs_md <= 0;
+                                    dqs_ds <= 8'b0000_0000;
+                                end //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
+                                8'd4: begin //DQS now switching every 1.5ns(every edge of clk90)
+                                    dqs_ds <= 8'b1010_1010;
+                                    dq_md <= 0;
+                                end
+                                8'd5: begin //Done postassemble
+                                    dqs_ds <= 8'b0000_0000;
+                                    dq_md <= 1;
+                                end
+                                8'd6: dqs_md  <= 1; //Now whatever can drive dqs
                             endcase
                         end
                         if (tACC_cnt == 15)
@@ -385,58 +397,41 @@ module EMI_600 (
                 end
                 endcase
             end
-            
         end : main_FSM
 
-    assign dqs_val = {2{dqs_run & ck_p}}; //dqs_val = ck_p if dqs_run basically
-    assign dqs_p = dqs_me ? dqs_val  : 2'bzz; //bzz bzz, who's calling?
-    assign dqs_n = dqs_me ? ~dqs_val : 2'bzz; //zz is any bits that I don't have a control over
-    //And allat differential fluff _n and _p is basically for stability, bc if voltage of any
-    //Would change, the voltage of other would too.
+    //This is outdated comment about writes, it was here before now its gone.
+    //The main idea is still prolly there tho.
+    //write, write, write, so as usual, all the data is in
+    //micron datasheet, all those diagrams, instructions,
+    //timings and all are there. Basically write happens in
+    //bursts of 16bytes, you can either write all bytes or
+    //mask some of them, you first need to activate the row
+    //And after write you may or may not close it - that defines
+    //Either closed-page or open-page design, each one has its
+    //own benefits and drawback, for now ill write closed-page
+    //Later planning to switch to look-ahead. Write takes about 10cycles
+    //for actual write + 19cycles for varios waits, hence
+    //about 25 cycles total, hence 75ns.
+    //like about 30ns.
+    //
+    //Alright DQS, so DQS is a physical wire that is running from the
+    //same place as data bus does, and its of the same length. Its
+    //primary functino is to align data because it takes the exact
+    //same time as memory does. And dqs_n and dqs_p further refines
+    //that effect. I set the DQS accordingly to micron datasheet, as
+    //I do for everything else tbh.
 
-    assign dq = dq_me ? dq_out : 16'bzzzz_zzzz_zzzz_zzzz;
-    assign dm = dq_me ? dm_out : 2'bzz;
-
-
+    //The burst(thats a big name for this) happens in 4 cycles, of 16bit writes
+    //4 cycles bc on it happens on every clk90 edge
     //I am driving it on rising, and falling edge of the clock and thats sick
     always @(posedge clk90 or negedge clk90 or negedge logic_rst_n) begin : clk90_always
         //Always bc both edges, otherwise it complains
         if (!logic_rst_n) begin
-            dq_me <= 0;
-        end else if (we_lat && dqs_run) begin
-            beat = {2'(tACC_cnt - 8'd11), ~clk90}; //blocking assignment actually, in always block
-            //write, write, write, so as usual, all the data is in
-            //micron datasheet, all those diagrams, instructions,
-            //timings and all are there. Basically write happens in
-            //bursts of 16bytes, you can either write all bytes or
-            //mask some of them, you first need to activate the row
-            //And after write you may or may not close it - that defines
-            //Either closed-page or open-page design, each one has its
-            //own benefits and drawback, for now ill write closed-page
-            //Later planning to switch to look-ahead. Write takes about 10cycles
-            //for actual write + 19cycles for varios waits, hence
-            //about 25 cycles total, hence 75ns.
-            //like about 30ns.
-            //
-            //Alright DQS, so DQS is a physical wire that is running from the
-            //same place as data bus does, and its of the same length. Its
-            //primary functino is to align data because it takes the exact
-            //same time as memory does. And dqs_n and dqs_p further refines
-            //that effect. I set the DQS accordingly to micron datasheet, as
-            //I do for everything else tbh.
-
-            dq_me <= 1;
-            //The burst(thats a big name for this) happens in 4 cycles, of 16bit writes
-            //4 cycles bc on it happens on every clk90 edge
-            dq_out <= wd_lat [16*beat +: 16]; //dq is actual data bus btw
-            dm_out <= msk_lat[2 *beat +: 2];
         end else if (rd_run && !(tACC_cnt == 15 && !clk90)) begin //gating last bad write
             beat = {2'(tACC_cnt - 8'd11), ~clk90} - 1'h1; //-1 bc it starts 1 edge later fsr
             //The read is opposite of write, the chip itsels sets dq and dqs.
             //And I just read the dq
             rdata[16*beat +: 16] <= dq; //Just write to rdata 16bits on every edge for 8edges(4cycles)
-        end else begin
-            dq_me <= 0;
         end
     end : clk90_always
 
@@ -593,5 +588,57 @@ module EMI_600 (
             .ds({cmd[3].odt, cmd[3].odt, cmd[2].odt, cmd[2].odt,
                  cmd[1].odt, cmd[1].odt, cmd[0].odt, cmd[0].odt}),
             .trie(1'b0), .oq(odt), .tq());
+
+    //More OSERDESes now for actual dqs, dq and mask
+    logic [15:0] dq_oq, dq_tq, dq_in; //tq is tri-state out switcher
+    for (genvar i = 0; i < 16; i++) begin : dq_ser
+        //That literally like beats i had previosely, 8writes of 16bits for 4clk
+        full_oserder dq_ser (.clk333(clk90), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+            .ds({
+                wd_lat[i + 112],
+                wd_lat[i + 96],
+                wd_lat[i + 80],
+                wd_lat[i + 64],
+                wd_lat[i + 48],
+                wd_lat[i + 32],
+                wd_lat[i + 16],
+                wd_lat[i + 00]
+            }), .trie(dq_md), .oq(dq_oq[i]), .tq(dq_tq[i])
+        );
+
+        //IOBUF is a literally pin at the edge of FPGA that connectects to
+        //a physical wires going into ddr3 chip. It is tri-state two way pin
+        IOBUF #(.IOSTANDARD("DEFAULT"), .SLEW("FAST"), .IBUF_LOW_PWR("FALSE")) dq_iobuf (
+            .I(dq_oq[i]), .T(dq_tq[i]), .O(dq_in[i]), .IO(dq[i]));
+    end : dq_ser
+
+    //dq
+    logic [1:0] dqs_oq, dqs_tq, dqs_in;
+    for (genvar i = 0; i < 2; i++) begin : dqs_ser
+        full_oserder dqs_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+            .ds(dqs_ds), .trie(dqs_md), .oq(dqs_oq[i]), .tq(dqs_tq[i])
+        );
+
+        //differential IOBUF
+        IOBUFDS #(.IOSTANDARD("DEFAULT"), .SLEW("FAST"), .IBUF_LOW_PWR("FALSE")) dqs_buf (
+        .I(dqs_oq[i]), .T(dqs_tq[i]), .O(dqs_in[i]), .IO(dqs_p[i]), .IOB(dqs_n[i]));
+    end : dqs_ser
+
+    //dm doesn't need any buffer since its 1way pin
+    for (genvar i = 0; i < 2; i++) begin : dm_ser
+        full_oserder dm_ser (.clk333(clk90), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+            .ds({
+                msk_lat[i + 14],
+                msk_lat[i + 12],
+                msk_lat[i + 10],
+                msk_lat[i + 8],
+                msk_lat[i + 6],
+                msk_lat[i + 4],
+                msk_lat[i + 2],
+                msk_lat[i + 0]
+            }), .trie(1'b0), .oq(dm[i]), .tq()
+        );
+    end : dm_ser
+
 
 endmodule
