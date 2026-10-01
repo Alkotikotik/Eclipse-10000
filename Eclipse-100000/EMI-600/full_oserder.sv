@@ -1,5 +1,5 @@
 module full_oserder (
-    //Wrapper for OSERDES bc imma institate it 24 times.
+    //Wrapper for OSERDES bc imma institate it 40 times.
     input logic clk333,
     input logic clkEMI,
     input logic rst_n,

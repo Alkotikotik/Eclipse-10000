@@ -68,7 +68,7 @@ module EMI_600 (
 
     //It might look that im a little crazy but if you think about it
     //It actually makes sense
-    logic clk333, clk90, clkEMI;
+    logic clk333, clk90, clkEMI, clk200;
     logic clk_pll, clk90_pll, clkEMI_pll;
 
     //So init is actually pretty cool, and as silly as it sounds writing it
@@ -130,6 +130,12 @@ module EMI_600 (
     logic [2:0]  beat;
     logic cke_r;
 
+    logic [15:0] dq_dly; //delayed dq
+    logic [15:0] dly_e; //dly enable for each DQ
+    logic [79:0] dly_tap_cnt; //dly for every IDELAY(5bits each * 16 = 80)
+    logic [79:0] dly_tap_out; //for debugging rn
+    logic        idelay_rdy; //whether idelay is ready
+
     logic LOCKED;
     logic logic_rst_n;
     assign logic_rst_n = rst_n && LOCKED;
@@ -152,6 +158,9 @@ module EMI_600 (
             dq_md <= 1;
             dqs_ds <= 8'b0000_0000;
             rdata <= 128'h0;
+
+            dly_e <= 0;
+            dly_tap_cnt <= 0;
 
             EMI_init_state <= INIT_INIT;
             EMI_run_state <= IDLE;
@@ -452,7 +461,7 @@ module EMI_600 (
         .CLKOUT0_DIVIDE(3), //333.3Mhz
         .CLKOUT1_DIVIDE(3), //333.3Mhz 90degrees
         .CLKOUT2_DIVIDE(12), //83.3Mhz
-        .CLKOUT3_DIVIDE(1),
+        .CLKOUT3_DIVIDE(5),
         .CLKOUT4_DIVIDE(1),
         .CLKOUT5_DIVIDE(1),
         //Doesn't matter
@@ -476,7 +485,7 @@ module EMI_600 (
         .CLKOUT0(clk_pll),
         .CLKOUT1(clk90_pll),
         .CLKOUT2(clkEMI_pll),
-        .CLKOUT3(),
+        .CLKOUT3(clk200_pll), //for IDELAYCTRL
         .CLKOUT4(),
         .CLKOUT5(),
         .CLKFBOUT(CLKFB),
@@ -497,6 +506,7 @@ module EMI_600 (
     BUFG bufg_clk    (.I(clk_pll),    .O(clk333)); //I think you know what those ports are
     BUFG bufg_clk90  (.I(clk90_pll),  .O(clk90));
     BUFG bufg_clkEMI (.I(clkEMI_pll), .O(clkEMI));
+    BUFG bufg_clk200 (.I(clk200_pll), .O(clk200));
 
     logic ck_temp;
     full_oserder ck (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
@@ -630,6 +640,8 @@ module EMI_600 (
     //ISERDESE is an opposite of OSERDES, it takes serial input at clk and
     //outputs parralel at clkdiv. As you might have guessed its for reads.
     //Btw I already have IOBUF for it, bc IOBUF is two-way
+
+
     for (genvar i = 0; i < 16; i++) begin : dq_des
         ISERDESE2 #(
             .DATA_RATE("DDR"),
@@ -643,7 +655,7 @@ module EMI_600 (
             .INIT_Q4(1'b0),
 
             .INTERFACE_TYPE("NETWORKING"),
-            .IOBDELAY("NONE"),
+            .IOBDELAY("IFD"),
             .NUM_CE(2),
             .OFB_USED("FALSE"),
             .SERDES_MODE("MASTER"),
@@ -681,8 +693,8 @@ module EMI_600 (
             .DYNCLKSEL(1'b0),
 
             //Inputs from dq_in from IOBUF
-            .D(dq_in[i]),
-            .DDLY(1'b0),
+            .D(1'b0),
+            .DDLY(dq_dly[i]),
             .OFB(1'b0),
             .OCLKB(1'b0),
 
@@ -690,7 +702,48 @@ module EMI_600 (
             .SHIFTIN1(1'b0),
             .SHIFTIN2(1'b0)
         );
+
+        //The thing is, in real world there isn't really a way
+        //To tell where ddr3 data will arrive due to PCB wire lengths
+        //Temprerature and other factors. IODELAY solves that problem
+        //by delaying the signal so it lands on an eye. On my FPGA it does
+        //That through a set of "taps" each one of them delays signal by exactly
+        //78ps, and there are 32of them. They automatically callibrate based on
+        //REFCLK that has to be 200Mhz.
+
+        (* IODELAY_GROUP = "ddr3_grp" *)
+        IDELAYE2 #(
+            .CINVCTRL_SEL("FALSE"),
+            .DELAY_SRC("IDATAIN"),
+            .HIGH_PERFORMANCE_MODE("TRUE"), //yessir
+            .IDELAY_TYPE("VAR_LOAD"), //just put it straight to the eye
+            .IDELAY_VALUE(0),
+            .PIPE_SEL("FALSE"),
+            .REFCLK_FREQUENCY(200.0),
+            .SIGNAL_PATTERN("DATA")
+        )
+        IDELAYE2_reads (
+            .CNTVALUEOUT(dly_tap_out[i*5 +: 5]),
+            .DATAOUT(dq_dly[i]),
+            .C(clkEMI),
+            .CE(1'b0),
+            .CINVCTRL(1'b0),
+            .CNTVALUEIN(dly_tap_cnt[i*5 +: 5]),
+            .DATAIN(1'b0),
+            .IDATAIN(dq_in[i]),
+            .INC(1'b0),
+            .LD(dly_e[i]),
+            .LDPIPEEN(1'b0),
+            .REGRST(!logic_rst_n)
+        );
     end : dq_des
+
+    (* IODELAY_GROUP = "ddr3_grp" *)
+    IDELAYCTRL IDELAYCTRL_ddr3 (
+        .RDY(idelay_rdy),
+        .REFCLK(clk200),
+        .RST(!LOCKED)
+    );
 
 
 endmodule
