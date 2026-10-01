@@ -26,6 +26,34 @@ module tb;
     wire  [15:0] dq;
     wire  [1:0]  dqs_p, dqs_n;
 
+    //Tb acts as PCB and just sets some delays for reads, that just for a test
+    //tho
+    localparam int D_LANE0 = 400; //ps, dq[7:0]  + dqs[0]
+    localparam int D_LANE1 = 900; //ps, dq[15:8] + dqs[1]
+    wire  [15:0] mem_dq;
+    wire  [1:0]  mem_dqs_p, mem_dqs_n;
+    logic [15:0] mem_dq_d;
+    logic [1:0]  mem_dqs_p_d, mem_dqs_n_d;
+
+    //transport delays: every edge gets through, just later
+    always @(mem_dq[7:0])     mem_dq_d[7:0]    <= #D_LANE0 mem_dq[7:0];
+    always @(mem_dq[15:8])    mem_dq_d[15:8]   <= #D_LANE1 mem_dq[15:8];
+    always @(mem_dqs_p[0])    mem_dqs_p_d[0]   <= #D_LANE0 mem_dqs_p[0];
+    always @(mem_dqs_n[0])    mem_dqs_n_d[0]   <= #D_LANE0 mem_dqs_n[0];
+    always @(mem_dqs_p[1])    mem_dqs_p_d[1]   <= #D_LANE1 mem_dqs_p[1];
+    always @(mem_dqs_n[1])    mem_dqs_n_d[1]   <= #D_LANE1 mem_dqs_n[1];
+
+    for (genvar i = 0; i < 16; i++) begin : pcb_dq
+        assign mem_dq[i] = emi.dq_tq[i] ? 1'bz : dq[i];
+        assign dq[i]     = emi.dq_tq[i] ? mem_dq_d[i] : 1'bz;
+    end
+    for (genvar j = 0; j < 2; j++) begin : pcb_dqs
+        assign mem_dqs_p[j] = emi.dqs_tq[j] ? 1'bz : dqs_p[j];
+        assign mem_dqs_n[j] = emi.dqs_tq[j] ? 1'bz : dqs_n[j];
+        assign dqs_p[j]     = emi.dqs_tq[j] ? mem_dqs_p_d[j] : 1'bz;
+        assign dqs_n[j]     = emi.dqs_tq[j] ? mem_dqs_n_d[j] : 1'bz;
+    end
+
     //Thats a pretty cool syntax ngl
     initial begin
         req = 0; req_we = 0; req_msk = 16'h0000;
@@ -83,7 +111,7 @@ module tb;
     ddr3_model mem (
         .rst_n(EMI_rst_n), .ck(ck_p), .ck_n(ck_n), .cke(cke), .cs_n(cs_n),
         .ras_n(ras_n), .cas_n(cas_n), .we_n(we_n), .dm_tdqs(dm), .ba(ba),
-        .addr(a), .dq(dq), .dqs(dqs_p), .dqs_n(dqs_n), .tdqs_n(), .odt(odt)
+        .addr(a), .dq(mem_dq), .dqs(mem_dqs_p), .dqs_n(mem_dqs_n), .tdqs_n(), .odt(odt)
     );
 
     initial #1_000_000_000 $finish;   //I have exactly 1ms
