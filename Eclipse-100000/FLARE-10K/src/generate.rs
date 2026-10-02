@@ -22,7 +22,6 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>, globals: Option<(&str, &[u8])>) -
 
     writeln!(assembly, "~init_0x00:")?;
     writeln!(assembly, "\tXOR [rx31, rx31]")?;
-    writeln!(assembly, "\tXOR [rx30, rx30]")?;
 
     for inst in asm_in {
         match inst {

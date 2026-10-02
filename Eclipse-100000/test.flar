@@ -1,15 +1,9 @@
-arch arch1 {
-    u16 a;
-    u16 b;
-    arch0 c;
-};
-arch arch0 {
-    u8 a;
-    u8 b;
-    arch1 c;
-};
-
+#def i16 arr[4][4];
 
 func main(){
-    arch0 test;
+    i16 ar[4][4];
+    for [u32 i; i < 4; i++] start
+
+    finish
+
 }

@@ -89,7 +89,6 @@ JMP ~init_0x00
 
 ~init_0x00:
 	XOR [rx31, rx31]
-	XOR [rx30, rx30]
 	LMA  rx30 <- *globals_0x00
 	SPRSET rx30 -> GP
 	LOAD rz293 <- 255
@@ -102,149 +101,101 @@ JMP ~init_0x00
 	SPRLEA rx28 <- [SP 0]
 	LOAD rz300 <- 18
 	SPRSTR rz300 -> [SP 0]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 41
 	SPRSTR rz300 -> [SP 1]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 48
 	SPRSTR rz300 -> [SP 2]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 48
 	SPRSTR rz300 -> [SP 3]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 51
 	SPRSTR rz300 -> [SP 4]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 10
 	SPRSTR rz300 -> [SP 5]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 33
 	SPRSTR rz300 -> [SP 6]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 51
 	SPRSTR rz300 -> [SP 7]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 54
 	SPRSTR rz300 -> [SP 8]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 48
 	SPRSTR rz300 -> [SP 9]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 40
 	SPRSTR rz300 -> [SP 10]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 63
 	SPRSTR rz300 -> [SP 11]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 10
 	SPRSTR rz300 -> [SP 12]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 30
 	SPRSTR rz300 -> [SP 13]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 44
 	SPRSTR rz300 -> [SP 14]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 45
 	SPRSTR rz300 -> [SP 15]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 55
 	SPRSTR rz300 -> [SP 16]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 10
 	SPRSTR rz300 -> [SP 17]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 13
 	SPRSTR rz300 -> [SP 18]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 26
 	SPRSTR rz300 -> [SP 19]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 31
 	SPRSTR rz300 -> [SP 20]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 10
 	SPRSTR rz300 -> [SP 21]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 45
 	SPRSTR rz300 -> [SP 22]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 55
 	SPRSTR rz300 -> [SP 23]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 10
 	SPRSTR rz300 -> [SP 24]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 54
 	SPRSTR rz300 -> [SP 25]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 57
 	SPRSTR rz300 -> [SP 26]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 50
 	SPRSTR rz300 -> [SP 27]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 50
 	SPRSTR rz300 -> [SP 28]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 45
 	SPRSTR rz300 -> [SP 29]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 50
 	SPRSTR rz300 -> [SP 30]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 43
 	SPRSTR rz300 -> [SP 31]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 10
 	SPRSTR rz300 -> [SP 32]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 37
 	SPRSTR rz300 -> [SP 33]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 56
 	SPRSTR rz300 -> [SP 34]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 10
 	SPRSTR rz300 -> [SP 35]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 2
 	SPRSTR rz300 -> [SP 36]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 3
 	SPRSTR rz300 -> [SP 37]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 23
 	SPRSTR rz300 -> [SP 38]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 18
 	SPRSTR rz300 -> [SP 39]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 62
 	SPRSTR rz300 -> [SP 40]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 10
 	SPRSTR rz300 -> [SP 41]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 6
 	SPRSTR rz300 -> [SP 42]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 0
 	SPRSTR rz300 -> [SP 43]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 16
 	SPRSTR rz300 -> [SP 44]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 26
 	SPRSTR rz300 -> [SP 45]
-	XOR  [rx30, rx30 0]
 	LOAD rz300 <- 29
 	SPRSTR rz300 -> [SP 46]
-	XOR  [rx30, rx30 0]
 	SPRLEA rx28 <- [SP 47]
 	LOAD rz300 <- 255
 	SPRSTR rz300 -> [SP 47]
-	XOR  [rx30, rx30 0]
 	SPRLEA rx28 <- [SP 0]
 	LOAD ry00 <- 8
 	LOAD ry01 <- 8

@@ -2335,7 +2335,7 @@ impl<'a> Codegen<'a> {
         width: usize,
         out: &mut Vec<AsmInst>,
     ) {
-        let (base, off, mut used_rx30) = self.resolve_addr(ptr_addr, out);
+        let (base, off, used_rx30) = self.resolve_addr(ptr_addr, out);
         let mut used_rx31 = false;
 
         let value_operand = if is_load {
@@ -2343,11 +2343,7 @@ impl<'a> Codegen<'a> {
         } else if is_const(dest_or_src) {
             let target = scratch_reg(width, if used_rx30 { 31 } else { 30 });
             load_const(target, const_val(dest_or_src), out);
-            if target.id == 31 {
-                used_rx31 = true;
-            } else {
-                used_rx30 = true;
-            }
+            used_rx31 = target.id == 31;
             reg_op(target)
         } else {
             self.narrow_value(dest_or_src, width)
@@ -2371,9 +2367,6 @@ impl<'a> Codegen<'a> {
             }),
         }
 
-        if used_rx30 {
-            out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));
-        }
         if used_rx31 {
             out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
         }
@@ -2408,15 +2401,12 @@ impl<'a> Codegen<'a> {
             (self.operand_to_asm(base), offset)
         };
 
-        let mut used_rx30 = false;
-
         //I might have already said it, nontheless I will repeat:
         //If we are loading contsant like arr[i] = 67; 67 is const and we first have to load it into
         //rx30 then use it, then XOR it with itself. This is only for store, so for STX, btw
         let value_asm = if !is_load && is_const(value) {
             let target = scratch_reg(width, 30);
             load_const(target, const_val(value), out);
-            used_rx30 = true;
             reg_op(target)
         } else if is_load {
             self.operand_to_asm(value)
@@ -2429,10 +2419,6 @@ impl<'a> Codegen<'a> {
         } else {
             AsmInst::Stx(value_asm, base_asm, index_asm, scale, offset)
         });
-
-        if used_rx30 {
-            out.push(AsmInst::Xor(rx30(), rx30(), AsmOperand::Imm10(0)));
-        }
     }
 
     //R-type, so 2 operand like xor, or etc, its rx0 = rx0 OP (rx1 + imm10)
@@ -2729,7 +2715,7 @@ impl<'a> Codegen<'a> {
         matches!(
             inst,
             AsmInst::Xor(AsmOperand::Reg(Reg::TheRealOne(a)), AsmOperand::Reg(Reg::TheRealOne(b)), _)
-                if a == b && (a.id == 30 || a.id == 31) && a.reg_type == RegType::B32
+                if a == b && a.id == 31 && a.reg_type == RegType::B32
         )
     }
 
