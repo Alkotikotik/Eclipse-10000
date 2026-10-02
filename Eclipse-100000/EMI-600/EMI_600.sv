@@ -93,7 +93,9 @@ module EMI_600 (
     typedef enum logic [3:0] {
         IDLE,
         REF,
-        ACCESS
+        ACCESS,
+        INIT_CALIB,
+        RUN_CALIB
     } run_states;
     run_states EMI_run_state;
 
@@ -115,9 +117,10 @@ module EMI_600 (
     //CS#, RAS#, CAS# and WE# act kinda as 4bits of opcode. And a and ba
     //Act as immediates of some kind
 
-    logic [31:0] cke_cnt;
-    logic [11:0] tMRD_cnt, tREFI_cnt;
-    logic [7:0]  tACC_cnt;
+    logic [31:0] cke_cnt; //cke init
+    logic [11:0] tMRD_cnt, tREFI_cnt; //tREFI - refresh, tMRD - I use it alot tbh
+    logic [7:0]  tACC_cnt; //Access counter, for RD/WR
+    logic [23:0] tZQCS_cnt; //small recallibration every 128ms
     logic tREFI_pending;
     logic rd_run;
     logic we_lat;
@@ -135,6 +138,7 @@ module EMI_600 (
     logic [79:0] dly_tap_cnt; //dly for every IDELAY(5bits each * 16 = 80)
     logic [79:0] dly_tap_out; //for debugging rn
     logic        idelay_rdy; //whether idelay is ready
+    logic calibrating;
 
     logic LOCKED;
     logic logic_rst_n;
@@ -161,6 +165,8 @@ module EMI_600 (
 
             dly_e <= 0;
             dly_tap_cnt <= 0;
+
+            calibrating <= 1;
 
             EMI_init_state <= INIT_INIT;
             EMI_run_state <= IDLE;
@@ -294,6 +300,7 @@ module EMI_600 (
                     if (tMRD_cnt > 128) begin
                         tMRD_cnt <= 13'b0;
                         EMI_init_state <= FINISH;
+                        EMI_run_state  <= INIT_CALIB;
                     end else
                         tMRD_cnt <= tMRD_cnt + 12'h1;
                 end
@@ -315,6 +322,12 @@ module EMI_600 (
             end else if (!tREFI_pending) begin
                 tREFI_cnt <= tREFI_cnt + 12'b1;
             end
+            if (tZQCS_cnt > 10,666,600) begin
+                tZQCS_cnt <= 24'b0;
+                tZQCS_pending <= 1;
+            end else if (!tZQCS_pending) begin
+                tZQCS_cnt <= tZQCS_cnt + 24'b1;
+            end
             case (EMI_run_state)
                 IDLE: begin
                     if (tREFI_pending && !(|tREFI_cnt)) begin
@@ -331,6 +344,18 @@ module EMI_600 (
                         cmd[0].we_n <= 1;
                         tREFI_pending <= 0;
                     end else if (tREFI_cnt > 55 && req && !mem_done) begin //160ns tRFC
+                        EMI_run_state <= ACCESS;
+                    end
+                    if (tZQCS_cnt_pending && !(|tZQCS_cnt)) begin
+                        //ZQCS recallibres drivers, mainly based on temp.
+                        //It has to be done about every 128ms.
+                        cmd[0].cs_n <= 0;
+                        cmd[0].ras_n <= 1;
+                        cmd[0].cas_n <= 1;
+                        cmd[0].we_n <= 0;
+                        cmd[0].a[10] <= 0; //JIC
+                        tZQCS_cnt_pending <= 0;
+                    end else if (tZQCS_cnt > 64 && req && !mem_done) begin //64 cycles
                         EMI_run_state <= ACCESS;
                     end
                 end
@@ -356,10 +381,10 @@ module EMI_600 (
                         //ACTIVATE(ACT)
                         //It goes into third slot of cmd, so it would be 5cycles apart
                         //From RD/WR, bc that's some t i forgot
-                        cmd[2].cs_n <= 0;
-                        cmd[2].ras_n <= 0;
-                        cmd[2].cas_n <= 1;
-                        cmd[2].we_n <= 1;
+                        cmd[2].cs_n <= calibrating; //if not calibrating, ACT, if calibrating - deselect which is just a NOP
+                        cmd[2].ras_n <= calibrating;
+                        cmd[2].cas_n <= !calibrating;
+                        cmd[2].we_n <= !calibrating;
 
                         cmd[2].a[13:0] <= req_addr[23:10]; //row
                         cmd[2].ba <= req_addr[9:7]; //bank
@@ -374,7 +399,7 @@ module EMI_600 (
                         cmd[3].cs_n <= 0;
                         cmd[3].ras_n <= 1;
                         cmd[3].cas_n <= 0;
-                        cmd[3].we_n <= !we_lat; //WE# = 0 on write
+                        cmd[3].we_n <= !we_lat | calibrating; //WE# = 0 on write, RD on calibrating
 
                         cmd[3].ba <= req_addr[9:7];
                         cmd[3].a <= {3'b000, 1'b1, req_addr[6:0], 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
@@ -386,7 +411,7 @@ module EMI_600 (
                         dqs_md <= 1;
                         tACC_cnt <= 8'b0;
                         mem_done <= 1;
-                        EMI_run_state <= IDLE;
+                        EMI_run_state <= calibrating ? RUN_CALIB : IDLE;
                     end else begin
                         if (we_lat) begin //writing on read would short circuit btw
                             case (tACC_cnt)
@@ -401,6 +426,35 @@ module EMI_600 (
                             endcase
                         end
                     end
+                end
+                INIT_CALIB: begin
+                    //Calib basically calibrates the EMI for fpga's internal
+                    //characteristics, such as wire lengths to a chip and
+                    //maybe something else idk, but essentially it decides
+                    //The delay of IODELAY for reads would land directly in
+                    //the eye.
+                    if (!(|tMRD_cnt)) begin
+                        cmd[0].ba <= 3'b011; //MR3
+                        a[2]= 1; //MPR
+                    end else if (tMRD_cnt > 4) begin //tMOD + tMRD
+                        EMI_init_state <= RUN_CALIB;
+                    end else begin
+                        tMRD_cnt <= tMRD_cnt + 1;
+                    end
+                end
+                RUN_CALIB: begin
+                    //It does that by enabling MPR, which is a special
+                    //register in the chip holding the bit sequence of
+                    //1010101010101010 something like that. When it is enabled
+                    //Any reads from ddr3 return that pattern. Considering that imma
+                    //Test each cnt of taps and seeing where eye lands the
+                    //best. Thats basically an actual memory training that happened
+                    //On your PC when you first booted, in your CPU its cached tho.
+                    EMI_run_state <= ACCESS;
+                    dly_tap_cnt <= dly_tap_cnt + 1;
+                    //check if its good
+
+
                 end
                 endcase
             end
@@ -640,8 +694,6 @@ module EMI_600 (
     //ISERDESE is an opposite of OSERDES, it takes serial input at clk and
     //outputs parralel at clkdiv. As you might have guessed its for reads.
     //Btw I already have IOBUF for it, bc IOBUF is two-way
-
-
     for (genvar i = 0; i < 16; i++) begin : dq_des
         ISERDESE2 #(
             .DATA_RATE("DDR"),

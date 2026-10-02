@@ -1,6 +1,7 @@
 JMP ~init_0x00
-#[ init_db 16 =>>= globals_0x00 ]#
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+#[ init_db 32 =>>= globals_0x00 ]#
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 #[ end ]#
 
 ~init_0x00:
@@ -9,4 +10,45 @@ JMP ~init_0x00
 	SPRSET rx30 -> GP
 
 ~main:
+	SPRSUB rx31 ->SP<- 32
+	SPRLEA rx27 <- [SP 0]
+	LOAD rx25 <- 0
+
+	IBGEU [rx25 <-> 4] >-> ~Lab_for_end_1
+
+
+~Lab_for_start_0:
+	LOAD rx26 <- 0
+
+	IBGEU [rx26 <-> 4] >-> ~Lab_for_end_3
+
+
+~Lab_for_start_2:
+	MUL  rx29 <- [rx26, rx25 0]
+	MDSX ry290 >=> [rx27, [rx26 * 2] + [rx25 << 3] + 0]
+	SPRLEA rx29 <- [GP 0]
+	MDLX ry280 <=< [rx29, [rx26 * 2] + [rx25 << 3] + 0]
+	SPRLEA rx29 <- [GP 0]
+	MDSX ry280 >=> [rx29, [rx25 * 2] + [rx26 << 3] + 0]
+	SPRLEA rx29 <- [GP 0]
+	MDLX ry280 <=< [rx29, [rx25 * 2] + [rx26 << 3] + 0]
+	LOAD rx30 <- 4
+	MUL  rx29 <- [rx26, rx30 0]
+	LOAD rx30 <- 4000
+	ADD  rx29 <- [rx30, rx29 0]
+	ADD  rx29 <- [rx29, rx25 0]
+	STR  ry280 -> [rx29 0]
+	ADD  rx26 <- [rx26, rx31 1]
+
+	IBSU [rx26 <-> 4] >-> ~Lab_for_start_2
+
+
+~Lab_for_end_3:
+	ADD  rx25 <- [rx25, rx31 1]
+
+	IBSU [rx25 <-> 4] >-> ~Lab_for_start_0
+
+
+~Lab_for_end_1:
+	SPRADD rx31 ->SP<- 32
 	RET

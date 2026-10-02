@@ -1,9 +1,0 @@
-#def i16 arr[4][4];
-
-func main(){
-    i16 ar[4][4];
-    for [u32 i; i < 4; i++] start
-
-    finish
-
-}
