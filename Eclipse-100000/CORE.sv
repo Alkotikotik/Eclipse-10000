@@ -366,20 +366,83 @@ module CORE(
     assign wb_go1  = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx1[7:3]) && (!ID_banked1 || MEM_kernelMode == kernel_mode_go);
     assign wb_go2  = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rxi_base) && (!ID_rxi_banked || MEM_kernelMode == kernel_mode_go);
 
-    logic [3:0] ID_msel0, ID_msel1, ID_msel2, ID_wsel0, ID_wsel1, ID_wsel2;
-    logic [7:0] ID_mrel0, ID_mrel1, ID_mrel2;
+    logic [3:0] ID_from_mem0, ID_from_mem1, ID_from_mem2, ID_wsel0, ID_wsel1, ID_wsel2;
+    logic [7:0] ID_mem_byte0, ID_mem_byte1, ID_mem_byte2;
     always_comb begin //Final select based on allat data, whether they actually collide or not
         for (int b = 0; b < 4; b++) begin
-            ID_msel0[b] = ID_keep0[b] && mem_go0 && EX_lanes[ID_pick0[2*b +: 2]];
-            ID_msel1[b] = ID_keep1[b] && mem_go1 && EX_lanes[ID_pick1[2*b +: 2]];
-            ID_msel2[b] = ID_keep2[b] && mem_go2 && EX_lanes[ID_pick2[2*b +: 2]];
+            ID_from_mem0[b] = ID_keep0[b] && mem_go0 && EX_lanes[ID_pick0[2*b +: 2]];
+            ID_from_mem1[b] = ID_keep1[b] && mem_go1 && EX_lanes[ID_pick1[2*b +: 2]];
+            ID_from_mem2[b] = ID_keep2[b] && mem_go2 && EX_lanes[ID_pick2[2*b +: 2]];
             ID_wsel0[b] = ID_keep0[b] && wb_go0  && MEM_lanes[ID_pick0[2*b +: 2]];
             ID_wsel1[b] = ID_keep1[b] && wb_go1  && MEM_lanes[ID_pick1[2*b +: 2]];
             ID_wsel2[b] = ID_keep2[b] && wb_go2  && MEM_lanes[ID_pick2[2*b +: 2]];
-            ID_mrel0[2*b +: 2] = ID_pick0[2*b +: 2] - EX_base;
-            ID_mrel1[2*b +: 2] = ID_pick1[2*b +: 2] - EX_base;
-            ID_mrel2[2*b +: 2] = ID_pick2[2*b +: 2] - EX_base;
+            ID_mem_byte0[2*b +: 2] = ID_pick0[2*b +: 2] - EX_base;
+            ID_mem_byte1[2*b +: 2] = ID_pick1[2*b +: 2] - EX_base;
+            ID_mem_byte2[2*b +: 2] = ID_pick2[2*b +: 2] - EX_base;
         end
+    end
+
+    //WB arm and the register pick are done here now, the value that would sit in
+    //WB_aligned next cycle is MEM_aligned right now, so EX only keeps the MEM arm
+    logic [31:0] MEM_aligned;
+    assign MEM_aligned = fwd_align(MEM_gpr_dest[2:0], MEM_val);
+
+    logic [31:0] ID_raw0, ID_raw1, ID_raw2, ID_opnd0, ID_opnd1, ID_opnd2;
+    assign ID_raw0 = (ID_banked0 && kernel_mode_go) ? (ID_rx0[3]   ? KGPR1_next : KGPR0_next) : ID_rx0_val;
+    assign ID_raw1 = (ID_banked1 && kernel_mode_go) ? (ID_rx1[3]   ? KGPR1_next : KGPR0_next) : ID_rx1_val;
+    assign ID_raw2 = (ID_rxi_banked && kernel_mode_go) ? (ID_rxi_base[0] ? KGPR1_next : KGPR0_next) : ID_rxi_val;
+
+    always_comb begin
+        for (int b = 0; b < 4; b++) begin
+            if (ID_wsel0[b])       ID_opnd0[8*b +: 8] = MEM_aligned[8*ID_pick0[2*b +: 2] +: 8];
+            else if (ID_keep0[b])  ID_opnd0[8*b +: 8] = ID_raw0[8*ID_pick0[2*b +: 2] +: 8];
+            else                   ID_opnd0[8*b +: 8] = 8'h0;
+
+            if (ID_wsel1[b])       ID_opnd1[8*b +: 8] = MEM_aligned[8*ID_pick1[2*b +: 2] +: 8];
+            else if (ID_keep1[b])  ID_opnd1[8*b +: 8] = ID_raw1[8*ID_pick1[2*b +: 2] +: 8];
+            else                   ID_opnd1[8*b +: 8] = 8'h0;
+
+            if (ID_wsel2[b])       ID_opnd2[8*b +: 8] = MEM_aligned[8*ID_pick2[2*b +: 2] +: 8];
+            else if (ID_keep2[b])  ID_opnd2[8*b +: 8] = ID_raw2[8*ID_pick2[2*b +: 2] +: 8];
+            else                   ID_opnd2[8*b +: 8] = 8'h0;
+        end
+    end
+
+    //Individdual bytes can only come out of MEM_result bytes
+    function automatic [1:0] fwd_code(input [1:0] lane, input [1:0] rel);
+        unique case ({lane, rel})
+            4'b11_11, 4'b10_10, 4'b01_01: fwd_code = 2'd1;
+            4'b11_01, 4'b10_00, 4'b01_11: fwd_code = 2'd2;
+            4'b11_00, 4'b01_00:           fwd_code = 2'd3;
+            default:                      fwd_code = 2'd0;
+        endcase
+    endfunction
+
+    logic [7:2] ID_fwd_src0, ID_fwd_src1, ID_fwd_src2;
+    always_comb begin
+        for (int b = 1; b < 4; b++) begin
+            ID_fwd_src0[2*b +: 2] = ID_from_mem0[b] ? fwd_code(2'(b), ID_mem_byte0[2*b +: 2]) : 2'd0;
+            ID_fwd_src1[2*b +: 2] = ID_from_mem1[b] ? fwd_code(2'(b), ID_mem_byte1[2*b +: 2]) : 2'd0;
+            ID_fwd_src2[2*b +: 2] = ID_from_mem2[b] ? fwd_code(2'(b), ID_mem_byte2[2*b +: 2]) : 2'd0;
+        end
+    end
+
+    logic ID_is3reg;
+    assign ID_is3reg = (ID_IR[31:26] == 6'b000001 || ID_IR[31:26] == 6'b000011 || ID_IR[31:26] == 6'b000111 ||
+                        ID_IR[31:26] == 6'b000101 || ID_IR[31:26] == 6'b001001 || ID_IR[31:26] == 6'b001011);
+
+    logic [31:0] ID_rx1_imm;
+    always_comb begin
+        if (ID_is3reg) begin
+            unique case (ID_IR[1:0])
+                2'b00: ID_rx1_imm = 32'd0;
+                2'b01: ID_rx1_imm = 32'd1;
+                2'b10: ID_rx1_imm = 32'd2;
+                2'b11: ID_rx1_imm = -32'sd1;
+            endcase
+        end
+        else if (ID_IR[31:30] == 2'b10) ID_rx1_imm = {{22{ID_IR[9]}}, ID_IR[9:0]};
+        else                            ID_rx1_imm = {22'h0, ID_IR[9:0]};
     end
 
     //SPR bypassing into ID as well
@@ -471,18 +534,18 @@ module CORE(
     logic [13:0] EX_pht_idx;
     logic [1:0]  EX_pht_val;
     logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
-    logic [3:0] EX_msel0, EX_msel1, EX_msel2, EX_wsel0, EX_wsel1, EX_wsel2;
-    logic [7:0] EX_mrel0, EX_mrel1, EX_mrel2;
+    logic       EX_from_mem0, EX_from_mem1, EX_from_mem2;
+    logic [1:0] EX_mem_byte0, EX_mem_byte1, EX_mem_byte2;
+    logic [7:2] EX_fwd_src0, EX_fwd_src1, EX_fwd_src2;
     logic       EX_spr_hit;
     logic isEX_mdx, isEX_mdsx;
-    logic [7:0] EX_pick0, EX_pick1, EX_pick2;
-    logic [3:0] EX_keep0, EX_keep1, EX_keep2;
     logic EX_predicted_taken;
     logic isEX_valid;
     logic EX_branch;
     logic EX_64;
     logic [3:0] EX_lanes;
     logic [1:0] EX_base, EX_idx_sh;
+    logic [31:0] EX_rx1_imm;
 
     //Alright so there was a big always_ff block here previousely, which
     //apparantely led to high fanout, so just splitting it into 2 always_ff
@@ -503,10 +566,11 @@ module CORE(
             EX_IR <= ID_IR;
             EX_64 <= ID_64;
             EX_IR_2 <= ID_IR_2;
-            EX_rx0_val <= (ID_banked0 && kernel_mode_go) ? (ID_rx0[3]   ? KGPR1_next : KGPR0_next) : ID_rx0_val;
-            EX_rx1_val <= (ID_banked1 && kernel_mode_go) ? (ID_rx1[3]   ? KGPR1_next : KGPR0_next) : ID_rx1_val;
-            EX_rx2_val <= (ID_rxi_banked && kernel_mode_go) ? (ID_rxi_base[0] ? KGPR1_next : KGPR0_next) : ID_rxi_val;
+            EX_rx0_val <= ID_opnd0;
+            EX_rx1_val <= ID_opnd1;
+            EX_rx2_val <= ID_opnd2;
             EX_idx_sh  <= isID_mdx ? ID_IR_2[18:17] : ID_IR_2[23:22];
+            EX_rx1_imm <= ID_rx1_imm;
             EX_branch <= ID_branch;
             EX_early_target <= ID_early_target;
             EX_pht_idx <= ID_pht_idx;
@@ -514,21 +578,15 @@ module CORE(
             EX_predicted_taken <= ID_predicted_taken;
 
             //Forwarding entirely in ID now yayyy
-            EX_pick0 <= ID_pick0;
-            EX_pick1 <= ID_pick1;
-            EX_pick2 <= ID_pick2;
-            EX_keep0 <= ID_keep0;
-            EX_keep1 <= ID_keep1;
-            EX_keep2 <= ID_keep2;
-            EX_msel0 <= ID_msel0;
-            EX_msel1 <= ID_msel1;
-            EX_msel2 <= ID_msel2;
-            EX_wsel0 <= ID_wsel0;
-            EX_wsel1 <= ID_wsel1;
-            EX_wsel2 <= ID_wsel2;
-            EX_mrel0 <= ID_mrel0;
-            EX_mrel1 <= ID_mrel1;
-            EX_mrel2 <= ID_mrel2;
+            EX_from_mem0 <= ID_from_mem0[0];
+            EX_from_mem1 <= ID_from_mem1[0];
+            EX_from_mem2 <= ID_from_mem2[0];
+            EX_mem_byte0 <= ID_mem_byte0[1:0];
+            EX_mem_byte1 <= ID_mem_byte1[1:0];
+            EX_mem_byte2 <= ID_mem_byte2[1:0];
+            EX_fwd_src0   <= ID_fwd_src0;
+            EX_fwd_src1   <= ID_fwd_src1;
+            EX_fwd_src2   <= ID_fwd_src2;
             EX_spr_hit <= ID_spr_hit;
 
             isEX_mdx <= isID_mdx;
@@ -552,10 +610,6 @@ module CORE(
     assign op_64 = EX_IR[9:4];
     assign branch_op = EX_IR[9:5];
 
-    logic [31:0] sign_ext_imm10;
-    assign sign_ext_imm10 = { {22{EX_IR[9]}}, EX_IR[9:0] };
-    logic [31:0] zero_ext_imm10;
-    assign zero_ext_imm10 = {22'h0, EX_IR[9:0]};
 
     logic [31:0] sign_ext_imm18;
     assign sign_ext_imm18 = { {14{EX_IR[17]}}, EX_IR[17:0] };
@@ -609,9 +663,10 @@ module CORE(
         endcase
     end
 
-    logic [31:0] mul_imm, mul_y_in;
-    assign mul_imm  = (opcode == 6'b001101) ? zero_ext_imm10 : alu_imm2; //HIMUL is rx1 + imm10, LOMUL is rx2 +- imm2
-    assign mul_y_in = FWD_rx1 + mul_imm;
+    //One rx1 + imm adder for everyone
+    logic [31:0] mul_y_in, rx1_plus_imm;
+    assign rx1_plus_imm = FWD_rx1 + EX_rx1_imm;
+    assign mul_y_in = rx1_plus_imm;
 
     logic[31:0] LDX_base, LDX_idx, LDX_imm29; //Just enough to cover all 256MB signed
 
@@ -1156,7 +1211,7 @@ module CORE(
             WB_word_plus1 <= MEM_memTarget[31:2] + 30'd1;
             WB_word_minus1<= MEM_memTarget[31:2] - 30'd1;
 
-            WB_aligned  <= fwd_align(MEM_gpr_dest[2:0], MEM_val);
+            WB_aligned  <= MEM_aligned;
             WB_lanes    <= fwd_lanes(MEM_gpr_dest[2:0]);
         end
     end
@@ -1172,7 +1227,7 @@ module CORE(
             WB_val = WB_result;
     end
 
-    logic [31:0] FWD_rx0, FWD_rx1, FWD_rxi;
+    (* keep = "true" *) logic [31:0] FWD_rx0, FWD_rx1, FWD_rxi; //keep so vivado maps the forwarding mux by itself
 
     //So yeah this is just verilator function, they are automatic because it
     //means that each call gets its own unique set of argumenst, like in
@@ -1288,30 +1343,36 @@ module CORE(
     assign EX_gpr2 = EX_rx2_val;
 
 
-    logic [1:0] pick0, pick1, pick2;
-    always_comb begin : FWD
-        for (int b = 0; b < 4; b++) begin
-            pick0 = EX_pick0[2*b +: 2];
-            pick1 = EX_pick1[2*b +: 2];
-            pick2 = EX_pick2[2*b +: 2];
+    function automatic [31:0] fwd_mux(input from_mem, input [1:0] mem_byte, input [7:2] fwd_src, input [31:0] mem_val, input [31:0] ex_val);
+        unique case ({mem_byte[1], from_mem, mem_byte[0]})
+            3'b010:  fwd_mux[7:0] = mem_val[7:0];
+            3'b011:  fwd_mux[7:0] = mem_val[15:8];
+            3'b110:  fwd_mux[7:0] = mem_val[23:16];
+            3'b111:  fwd_mux[7:0] = mem_val[31:24];
+            default: fwd_mux[7:0] = ex_val[7:0];
+        endcase
+        unique case (fwd_src[3:2])
+            2'd1:    fwd_mux[15:8] = mem_val[15:8];
+            2'd2:    fwd_mux[15:8] = mem_val[31:24];
+            2'd3:    fwd_mux[15:8] = mem_val[7:0];
+            default: fwd_mux[15:8] = ex_val[15:8];
+        endcase
+        unique case (fwd_src[5:4])
+            2'd1:    fwd_mux[23:16] = mem_val[23:16];
+            2'd2:    fwd_mux[23:16] = mem_val[7:0];
+            default: fwd_mux[23:16] = ex_val[23:16];
+        endcase
+        unique case (fwd_src[7:6])
+            2'd1:    fwd_mux[31:24] = mem_val[31:24];
+            2'd2:    fwd_mux[31:24] = mem_val[15:8];
+            2'd3:    fwd_mux[31:24] = mem_val[7:0];
+            default: fwd_mux[31:24] = ex_val[31:24];
+        endcase
+    endfunction
 
-            //Write for 8 consequetve bits starting from 8*b
-            if (EX_msel0[b])       FWD_rx0[8*b +: 8] = MEM_result[8*EX_mrel0[2*b +: 2] +: 8];
-            else if (EX_wsel0[b])  FWD_rx0[8*b +: 8] = WB_aligned[8*pick0 +: 8];
-            else if (EX_keep0[b])  FWD_rx0[8*b +: 8] = EX_gpr0[8*pick0 +: 8];
-            else                   FWD_rx0[8*b +: 8] = 8'h0;
-
-            if (EX_msel1[b])       FWD_rx1[8*b +: 8] = MEM_result[8*EX_mrel1[2*b +: 2] +: 8];
-            else if (EX_wsel1[b])  FWD_rx1[8*b +: 8] = WB_aligned[8*pick1 +: 8];
-            else if (EX_keep1[b])  FWD_rx1[8*b +: 8] = EX_gpr1[8*pick1 +: 8];
-            else                   FWD_rx1[8*b +: 8] = 8'h0;
-
-            if (EX_msel2[b])       FWD_rxi[8*b +: 8] = MEM_result[8*EX_mrel2[2*b +: 2] +: 8];
-            else if (EX_wsel2[b])  FWD_rxi[8*b +: 8] = WB_aligned[8*pick2 +: 8];
-            else if (EX_keep2[b])  FWD_rxi[8*b +: 8] = EX_gpr2[8*pick2 +: 8];
-            else                   FWD_rxi[8*b +: 8] = 8'h0;
-        end
-    end : FWD
+    assign FWD_rx0 = fwd_mux(EX_from_mem0, EX_mem_byte0, EX_fwd_src0, MEM_result, EX_gpr0);
+    assign FWD_rx1 = fwd_mux(EX_from_mem1, EX_mem_byte1, EX_fwd_src1, MEM_result, EX_gpr1);
+    assign FWD_rxi = fwd_mux(EX_from_mem2, EX_mem_byte2, EX_fwd_src2, MEM_result, EX_gpr2);
 
     //Declarations
     logic [31:0] EPC;
@@ -1402,12 +1463,7 @@ module CORE(
             6'b101001,
             6'b101101: other_addr = SelectedSPR + sign_ext_imm16;      // SPRLDR/SPRSTR/SPRLEA
 
-            default: begin
-                if (opcode[5:4] == 2'b10)
-                    other_addr = FWD_rx1 + sign_ext_imm10;
-                else
-                    other_addr = FWD_rx1;
-            end
+            default: other_addr = rx1_plus_imm; //LDR/STR, anything else doesn't touch memory
         endcase
     end
     assign memTarget = (opcode == 6'b000000) ? idx_addr : other_addr; //STX/MDXs
@@ -1447,19 +1503,8 @@ module CORE(
     //Muxes
     assign AluMuxX = FWD_rx0;
 
-    always_comb begin
-        unique case (opcode)
-            6'b000001,
-            6'b000011,
-            6'b000111,
-            6'b000101,
-            6'b001001,
-            6'b001011:
-                AluMuxY = FWD_rx1;
-
-            default:   AluMuxY = FWD_rx1 + zero_ext_imm10; // 2-operand logic
-        endcase
-    end
+    //3 register ops never read y_imm (it only feeds bitwise), so it is the shared adder
+    assign AluMuxY = rx1_plus_imm;
 
     always_comb begin : PC_MUX
         unique case (PCSrc)

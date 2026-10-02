@@ -234,7 +234,6 @@ module ALU (
     logic is_neg_quotinent;
 
     logic [31:0] sd; //Shifted Divisor
-    logic [33:0] sd3;
 
     logic [3:0] div_cycles_left; //Maximum 16 cycles
     logic       div_working;
@@ -264,7 +263,6 @@ module ALU (
     assign y_nice = (is_signed_div && y_div[31]) ? (~y_div + 32'd1) : y_div;
 
     logic [31:0] x_abs, y_abs;
-    logic [33:0] y3_abs;
 
     //We split each signal into 8 4bit slices and check whether they are 0
     logic [4:0] clz_x;
@@ -342,7 +340,7 @@ module ALU (
 
     assign sub1 = {3'b000, remainder} - {3'b000, sd}; //subtract sds from remainder
     assign sub2 = {3'b000, remainder} - {2'b00, sd, 1'b0}; //Thats sd2 btw
-    assign sub3 = {3'b000, remainder} - {1'b0, sd3}; //My brother looking at that said that im sub 3...
+    assign sub3 = {3'b000, remainder} - {3'b000, sd} - {2'b00, sd, 1'b0}; //My brother looking at that said that im sub 3...
 
     assign count_fits = ~sub3[34] ? 2'd3 : ~sub2[34] ? 2'd2 : ~sub1[34] ? 2'd1 : 2'd0;
 
@@ -402,10 +400,8 @@ module ALU (
             remainder <= x_abs;
             quotinent <= 32'b0;
             div_shift_r <= div_shift[5:1];
-            y3_abs <= {2'b00, y_abs} + {1'b0, y_abs, 1'b0};
         end else if (div_init3) begin
             sd <= y_abs << {div_shift_r[3:0], 1'b0};
-            sd3 <= y3_abs << {div_shift_r[3:0], 1'b0};
             div_cycles_left <= div_shift_r[3:0];
         end else if (div_working) begin
             remainder <=(count_fits == 2'd3) ? sub3[31:0] :
@@ -415,7 +411,6 @@ module ALU (
 
             quotinent <= {quotinent[29:0], count_fits};
             sd <= {2'b00, sd[31:2]};
-            sd3 <= {2'b00, sd3[33:2]};
             div_cycles_left <= div_cycles_left - 4'h1;
         end
     end
