@@ -43,6 +43,7 @@ pub struct GlobalLayout {
 enum AddrBase {
     Spr(Spr),
     Reg(AsmOperand),
+    Absolute,
 }
 
 pub enum GlobalInit {
@@ -2290,6 +2291,9 @@ impl<'a> Codegen<'a> {
                 (self.frame_size + idx * 4) as i32,
                 false,
             ),
+            _ if is_const(ptr_addr) && fits(const_val(ptr_addr) as i64, 29, true) => {
+                (AddrBase::Absolute, const_val(ptr_addr), false)
+            }
             _ if is_const(ptr_addr) => {
                 //If its true, it means that rx31 got corrupted or sum, and we gotta clean in up
                 load_const(rx30_reg(), const_val(ptr_addr), out);
@@ -2359,6 +2363,11 @@ impl<'a> Codegen<'a> {
                 AsmInst::Ldr(value_operand, base_reg, AsmOperand::Imm10(off as i16))
             } else {
                 AsmInst::Str(value_operand, base_reg, AsmOperand::Imm10(off as i16))
+            }),
+            AddrBase::Absolute => out.push(if is_load {
+                AsmInst::Ldx(value_operand, rx31(), rx31(), 0, off)
+            } else {
+                AsmInst::Stx(value_operand, rx31(), rx31(), 0, off)
             }),
         }
 
@@ -2433,26 +2442,48 @@ impl<'a> Codegen<'a> {
         left: &IROperand,
         right: &IROperand,
         make: fn(AsmOperand, AsmOperand, AsmOperand) -> AsmInst,
+        commutative: bool,
         out: &mut Vec<AsmInst>,
     ) {
         let dest_asm = self.operand_to_asm(dest);
 
         //rx31 is pinned to 0 for the (rx1 + imm10) form, so a const left has to go through rx30
-        let left_asm = if is_const(left) {
-            load_const(rx30_reg(), const_val(left), out);
-            rx30()
-        } else {
-            self.operand_to_asm(left)
-        };
+        if is_const(left) {
+            let right_asm = self.operand_to_asm(right);
+            let c = const_val(left);
+            if commutative && fits(c as i64, 10, false) {
+                if dest_asm != right_asm {
+                    out.push(AsmInst::Mov(dest_asm.clone(), right_asm, AsmOperand::Imm10(0)));
+                }
+                out.push(make(dest_asm, rx31(), AsmOperand::Imm10(c as i16)));
+                return;
+            }
+            let collides = match (&dest_asm, &right_asm) {
+                (AsmOperand::Reg(Reg::TheRealOne(d)), AsmOperand::Reg(Reg::TheRealOne(r))) => {
+                    regs_overlap(*d, *r)
+                }
+                _ => false,
+            };
+            let r = if collides {
+                out.push(AsmInst::Mov(rx30(), right_asm, AsmOperand::Imm10(0)));
+                rx30()
+            } else {
+                right_asm
+            };
+            if let AsmOperand::Reg(Reg::TheRealOne(reg)) = &dest_asm {
+                load_const(*reg, c, out);
+            }
+            out.push(make(dest_asm, r, AsmOperand::Imm10(0)));
+            return;
+        }
 
-        let mut used_rx31 = false;
+        let left_asm = self.operand_to_asm(left);
         let (rx1, imm10) = if is_const(right) && fits(const_val(right) as i64, 10, false) {
             (rx31(), AsmOperand::Imm10(const_val(right) as i16)) //As long as fits into imm10, we
         //are good
         } else if is_const(right) {
-            load_const(rx31_reg(), const_val(right), out); //Load and read the same register
-            used_rx31 = true;
-            (rx31(), AsmOperand::Imm10(0))
+            load_const(rx30_reg(), const_val(right), out); //Load and read the same register
+            (reg_op(rx30_reg()), AsmOperand::Imm10(0))
         } else {
             let right_asm = self.operand_to_asm(right);
             let collides = match (&dest_asm, &right_asm) {
@@ -2462,9 +2493,8 @@ impl<'a> Codegen<'a> {
                 _ => false,
             };
             if dest_asm != left_asm && collides {
-                out.push(AsmInst::Mov(rx31(), right_asm, AsmOperand::Imm10(0)));
-                used_rx31 = true;
-                (rx31(), AsmOperand::Imm10(0))
+                out.push(AsmInst::Mov(rx30(), right_asm, AsmOperand::Imm10(0)));
+                (rx30(), AsmOperand::Imm10(0))
             } else {
                 (right_asm, AsmOperand::Imm10(0))
             }
@@ -2479,10 +2509,6 @@ impl<'a> Codegen<'a> {
         }
 
         out.push(make(dest_asm, rx1, imm10));
-
-        if used_rx31 {
-            out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
-        }
     }
 
     fn fits_imm2(val: i64) -> Option<i8> {
@@ -2554,6 +2580,22 @@ impl<'a> Codegen<'a> {
         target: String,
         out: &mut Vec<AsmInst>,
     ) {
+        if is_const(left) && is_const(right) {
+            let (a, b) = (const_val(left), const_val(right));
+            let taken = match cond {
+                BrCond::Eq => a == b,
+                BrCond::Ne => a != b,
+                BrCond::Ls => if signed { a < b } else { (a as u32) < (b as u32) },
+                BrCond::Lse => if signed { a <= b } else { (a as u32) <= (b as u32) },
+                BrCond::Gt => if signed { a > b } else { (a as u32) > (b as u32) },
+                BrCond::Gte => if signed { a >= b } else { (a as u32) >= (b as u32) },
+            };
+            if taken {
+                out.push(AsmInst::Jmp(target));
+            }
+            return;
+        }
+
         if is_const(right) && fits(const_val(right) as i64, 19, true) {
             if let Some(m) = branch_mnemonic(cond, signed, true) {
                 let l = if is_const(left) {
@@ -2576,26 +2618,19 @@ impl<'a> Codegen<'a> {
         }
 
         let m = branch_mnemonic(cond, signed, false).unwrap();
-        let mut used_rx30 = false;
         let l = if is_const(left) {
             load_const(rx30_reg(), const_val(left), out);
-            used_rx30 = true;
             reg_op(rx30_reg())
         } else {
             self.operand_to_asm(left)
         };
-        let right_const = is_const(right);
-        let r = if right_const {
-            let scratch = if used_rx30 { rx31_reg() } else { rx30_reg() };
-            load_const(scratch, const_val(right), out);
-            reg_op(scratch)
+        let r = if is_const(right) {
+            load_const(rx30_reg(), const_val(right), out);
+            reg_op(rx30_reg())
         } else {
             self.operand_to_asm(right)
         };
         out.push(AsmInst::Branch(m, l, r, target));
-        if used_rx30 && right_const {
-            out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
-        }
     }
 
     fn type_bits(ty: &Type) -> u32 {
@@ -2712,7 +2747,51 @@ impl<'a> Codegen<'a> {
         }
     }
 
+    fn fold_const(inst: &IRInst) -> Option<(IROperand, i32)> {
+        let (dest, left, right) = match inst {
+            IRInst::Add { dest, left, right }
+            | IRInst::Sub { dest, left, right }
+            | IRInst::Mul { dest, left, right }
+            | IRInst::Xor { dest, left, right }
+            | IRInst::Or { dest, left, right }
+            | IRInst::And { dest, left, right }
+            | IRInst::Shl { dest, left, right }
+            | IRInst::Shr { dest, left, right } => (dest, left, right),
+            IRInst::Div { dest, left, right, .. } | IRInst::Mod { dest, left, right, .. } => {
+                (dest, left, right)
+            }
+            _ => return None,
+        };
+        if !is_const(left) || !is_const(right) {
+            return None;
+        }
+        let (a, b) = (const_val(left), const_val(right));
+        let folded = match inst {
+            IRInst::Add { .. } => a.wrapping_add(b),
+            IRInst::Sub { .. } => a.wrapping_sub(b),
+            IRInst::Mul { .. } => a.wrapping_mul(b),
+            IRInst::Xor { .. } => a ^ b,
+            IRInst::Or { .. } => a | b,
+            IRInst::And { .. } => a & b,
+            IRInst::Shl { .. } => ((a as u32) << ((b as u32) & 31)) as i32,
+            IRInst::Shr { .. } => ((a as u32) >> ((b as u32) & 31)) as i32,
+            IRInst::Div { signed, .. } if b != 0 => {
+                if *signed { a.wrapping_div(b) } else { ((a as u32) / (b as u32)) as i32 }
+            }
+            IRInst::Mod { .. } if b != 0 => ((a as u32) % (b as u32)) as i32,
+            _ => return None,
+        };
+        Some((dest.clone(), folded))
+    }
+
     fn lower_inst(&mut self, inst: &IRInst, site: (usize, usize), out: &mut Vec<AsmInst>) {
+        if let Some((dest, folded)) = Self::fold_const(inst) {
+            if let AsmOperand::Reg(Reg::TheRealOne(reg)) = self.operand_to_asm(&dest) {
+                load_const(reg, folded, out);
+            }
+            return;
+        }
+
         match inst {
             IRInst::Label(lab) => out.push(AsmInst::Label(format!("{}", lab))),
             IRInst::JMP(target) => out.push(AsmInst::Jmp(target.clone())),
@@ -2731,19 +2810,19 @@ impl<'a> Codegen<'a> {
             }
 
             IRInst::Xor { dest, left, right } => {
-                self.lower_rtype_alu(dest, left, right, AsmInst::Xor, out)
+                self.lower_rtype_alu(dest, left, right, AsmInst::Xor, true, out)
             }
             IRInst::Or { dest, left, right } => {
-                self.lower_rtype_alu(dest, left, right, AsmInst::Or, out)
+                self.lower_rtype_alu(dest, left, right, AsmInst::Or, true, out)
             }
             IRInst::And { dest, left, right } => {
-                self.lower_rtype_alu(dest, left, right, AsmInst::And, out)
+                self.lower_rtype_alu(dest, left, right, AsmInst::And, true, out)
             }
             IRInst::Shl { dest, left, right } => {
-                self.lower_rtype_alu(dest, left, right, AsmInst::Shl, out)
+                self.lower_rtype_alu(dest, left, right, AsmInst::Shl, false, out)
             }
             IRInst::Shr { dest, left, right } => {
-                self.lower_rtype_alu(dest, left, right, AsmInst::Shr, out)
+                self.lower_rtype_alu(dest, left, right, AsmInst::Shr, false, out)
             }
 
             //Just code those 3 without functions its gonna be easier
@@ -3035,6 +3114,16 @@ impl<'a> Codegen<'a> {
             //return returns to rx30 to matter what, though I do make sure next instruction moved
             //value out of rx30 bc its a scratch afterall
             IRInst::Return(val) => {
+                if !self.is_leaf() {
+                    let lr_off = self.lr_slot.expect("lr_slot reserved for non-leaf functions");
+                    out.push(AsmInst::SprLdr(
+                        reg_op(rx30_reg()),
+                        Spr::SP,
+                        AsmOperand::Imm16(lr_off as i16),
+                    ));
+                    out.push(AsmInst::SprSet(reg_op(rx30_reg()), Spr::LR));
+                }
+
                 if let Some(val) = val {
                     if is_const(val) {
                         load_const(rx30_reg(), const_val(val), out);
@@ -3044,17 +3133,6 @@ impl<'a> Codegen<'a> {
                             out.push(AsmInst::Mov(rx30(), val_asm, AsmOperand::Imm10(0)));
                         }
                     }
-                }
-
-                if !self.is_leaf() {
-                    let lr_off = self.lr_slot.expect("lr_slot reserved for non-leaf functions");
-                    out.push(AsmInst::SprLdr(
-                        reg_op(rx31_reg()),
-                        Spr::SP,
-                        AsmOperand::Imm16(lr_off as i16),
-                    ));
-                    out.push(AsmInst::SprSet(reg_op(rx31_reg()), Spr::LR));
-                    out.push(AsmInst::Xor(rx31(), rx31(), AsmOperand::Imm10(0)));
                 }
 
                 if self.frame_size > 0 {

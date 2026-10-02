@@ -92,3 +92,15 @@
     STX rz10 -> rx31, rx31 << 0, 4016
 
     JMP ~finish
+
+func main(){
+    u32 arr[8][8];
+
+    for [u32 i; i < 8; i++] {
+        for [u32 j; j < 8; j++] {
+            u32 temp = i + j;
+            arr[i][j] = temp;
+            [4000 + temp * 4] = arr[i][j];
+        }
+    }
+}

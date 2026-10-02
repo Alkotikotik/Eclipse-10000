@@ -282,9 +282,8 @@ JMP ~init_0x00
 
 
 ~Lab_while_end_1:
-	SPRLDR rx31 <- [SP 48]
-	SPRSET rx31 -> LR
-	XOR  [rx31, rx31 0]
+	SPRLDR rx30 <- [SP 48]
+	SPRSET rx30 -> LR
 	SPRADD rx31 ->SP<- 52
 	RET
 
@@ -382,9 +381,7 @@ JMP ~init_0x00
 	LMA  rx0 <- 68157444
 	LDR  rx28 <- [rx0 0]
 	MOV  rx1 <- rx28 0
-	LMA  rx30 <- 68157456
-	STR  rx1 -> [rx30 0]
-	XOR  [rx30, rx30 0]
+	STX  rx1 >=> [rx31, rx31 << 0 + 68157456]
 
 	IBNE [rx1 <-> 0] >-> ~Lab_endif_15
 
