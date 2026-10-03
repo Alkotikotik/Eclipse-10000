@@ -9,11 +9,12 @@ module EMI_600 (
     input logic [127:0] req_wd, //16byte write data
     input logic [15:0] req_msk, //which of 16bytes to mask
 
-
     output logic [127:0] rdata, //read data
     output logic mem_done,
+    output logic EMI_rdy,
 
     output logic EMI_rst_n,
+    output logic calib_failed,
 
     output logic cke,
     output logic ck_p,
@@ -30,7 +31,10 @@ module EMI_600 (
     output logic cas_n,
     output logic we_n,
     output logic [2:0] ba,
-    output logic [13:0] a
+    output logic [13:0] a,
+
+    output logic clkEMI,
+    output logic rst_sync_n
 
 );
 
@@ -68,7 +72,7 @@ module EMI_600 (
 
     //It might look that im a little crazy but if you think about it
     //It actually makes sense
-    logic clk333, clk90, clkEMI, clk200;
+    logic clk333, clk90, clk200;
     logic clk_pll, clk90_pll, clkEMI_pll;
 
     //So init is actually pretty cool, and as silly as it sounds writing it
@@ -156,10 +160,24 @@ module EMI_600 (
     logic LOCKED;
     logic logic_rst_n;
     assign logic_rst_n = rst_n && LOCKED;
+    logic rst_s1;
+    //Basically there is no way to know where system goes out of reset, and
+    //this just fixes it, 2ffs and rst_sunc_n is the clean rst_n
+    always_ff @(posedge clkEMI or negedge logic_rst_n) begin
+        if (!logic_rst_n) begin
+            rst_s1 <= 0;
+            rst_sync_n <= 0;
+        end else begin
+            rst_s1 <= 1;
+            rst_sync_n <= rst_s1;
+        end
+    end
     //Main FSM logic runs on 83.3Mhz because 333.3/83.3 = 4 full cycles, thus
     //8edges and hence those 128bit burst in 1 83.3clk cycle
-    always_ff @(posedge clkEMI or negedge logic_rst_n) begin : main_FSM
-        if (!logic_rst_n) begin
+    always_ff @(posedge clkEMI or negedge rst_sync_n) begin : main_FSM
+        if (!rst_sync_n) begin
+            EMI_rdy <= 0;
+            calib_failed <= 0;
             cke_cnt <= 32'b0;
             tMRD_cnt <= 6'b0;
             tACC_cnt <= 8'b0;
@@ -386,7 +404,7 @@ module EMI_600 (
                         cmd[0].we_n <= 0;
                         cmd[0].a[10] <= 0; //JIC
                         tZQCS_pending <= 0;
-                    end else if (tREFI_cnt > 14 && tZQCS_cnt > 64 && req && !mem_done) begin //160ns tRFC
+                    end else if (tREFI_cnt > 14 && tZQCS_cnt > 64 && req && !mem_done && EMI_rdy) begin //160ns tRFC
                         EMI_run_state <= ACCESS;
                     end
                 end
@@ -412,10 +430,10 @@ module EMI_600 (
                         //ACTIVATE(ACT)
                         //It goes into third slot of cmd, so it would be 5cycles apart
                         //From RD/WR, bc that's some t i forgot
-                        cmd[2].cs_n <= calibrating; //if not calibrating, ACT, if calibrating - deselect which is just a NOP
+                        cmd[2].cs_n  <= calibrating; //if not calibrating, ACT, if calibrating - deselect which is just a NOP
                         cmd[2].ras_n <= calibrating;
-                        cmd[2].cas_n <= !calibrating;
-                        cmd[2].we_n <= !calibrating;
+                        cmd[2].cas_n <= calibrating ? 1 : 0;
+                        cmd[2].we_n  <= calibrating ? 1 : 0;
 
                         cmd[2].a[13:0] <= offcalib ? 14'h3FFF : req_addr[23:10]; //row
                         cmd[2].ba <= offcalib ? 3'b111 : req_addr[9:7]; //bank
@@ -599,12 +617,17 @@ module EMI_600 (
                     if ((done0 | ok0_r) && (done1 | ok1_r)) begin //calib doneeee
                         tMRD_cnt <= 0;
                         offcalib <= 0;
+                        EMI_rdy <= 1;
                         EMI_run_state <= IDLE;
                     end else if (tMRD_cnt > 3) begin
                         tMRD_cnt <= 0;
                         EMI_run_state <= READ_OFF;
                     end else begin
                         tMRD_cnt <= tMRD_cnt + 1;
+                    end
+
+                    if ((bitslip0 | bitslip1) > 9) begin
+                        calib_failed <= 1;
                     end
                 end
                 endcase
@@ -741,7 +764,7 @@ module EMI_600 (
     BUFG bufg_clk200 (.I(clk200_pll), .O(clk200));
 
     logic ck_temp;
-    full_oserder ck (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+    full_oserder ck (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
                     .ds(8'b1010_1010), .trie(1'b0), .oq(ck_temp), .tq());
 
     OBUFDS #( //makes input differential, rn for ck_p and thus ck_n
@@ -757,7 +780,7 @@ module EMI_600 (
     //oser8bits instances on init, it basically is just syntax to insatante several
     //oser8bits.
     for (genvar i = 0; i < 14; i++) begin : a_ser //14address bits, one OSERDES for each bit
-        full_oserder u (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+        full_oserder u (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
                 .ds({
                     cmd[3].a[i],
                     cmd[3].a[i],
@@ -774,7 +797,7 @@ module EMI_600 (
     //Just running every signal throught OSERDES to ddr3 chip
     //_ser is serializer btw
     for (genvar i = 0; i < 3; i++) begin : ba_ser
-        full_oserder u (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+        full_oserder u (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
                 .ds({
                     cmd[3].ba[i],
                     cmd[3].ba[i],
@@ -788,32 +811,32 @@ module EMI_600 (
                 .trie(1'b0), .oq(ba[i]), .tq());
     end : ba_ser
 
-    full_oserder cs_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+    full_oserder cs_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({cmd[3].cs_n, cmd[3].cs_n, cmd[2].cs_n, cmd[2].cs_n,
                  cmd[1].cs_n, cmd[1].cs_n, cmd[0].cs_n, cmd[0].cs_n}),
             .trie(1'b0), .oq(cs_n), .tq());
 
-    full_oserder ras_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+    full_oserder ras_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({cmd[3].ras_n, cmd[3].ras_n, cmd[2].ras_n, cmd[2].ras_n,
                  cmd[1].ras_n, cmd[1].ras_n, cmd[0].ras_n, cmd[0].ras_n}),
             .trie(1'b0), .oq(ras_n), .tq());
 
-    full_oserder cas_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+    full_oserder cas_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({cmd[3].cas_n, cmd[3].cas_n, cmd[2].cas_n, cmd[2].cas_n,
                  cmd[1].cas_n, cmd[1].cas_n, cmd[0].cas_n, cmd[0].cas_n}),
             .trie(1'b0), .oq(cas_n), .tq());
 
-    full_oserder we_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+    full_oserder we_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({cmd[3].we_n, cmd[3].we_n, cmd[2].we_n, cmd[2].we_n,
                  cmd[1].we_n, cmd[1].we_n, cmd[0].we_n, cmd[0].we_n}),
             .trie(1'b0), .oq(we_n), .tq());
 
-    full_oserder cke_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+    full_oserder cke_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({cmd[3].cke, cmd[3].cke, cmd[2].cke, cmd[2].cke,
                  cmd[1].cke, cmd[1].cke, cmd[0].cke, cmd[0].cke}),
             .trie(1'b0), .oq(cke), .tq());
 
-    full_oserder odt_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+    full_oserder odt_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({cmd[3].odt, cmd[3].odt, cmd[2].odt, cmd[2].odt,
                  cmd[1].odt, cmd[1].odt, cmd[0].odt, cmd[0].odt}),
             .trie(1'b0), .oq(odt), .tq());
@@ -822,7 +845,7 @@ module EMI_600 (
     logic [15:0] dq_oq, dq_tq, dq_in; //tq is tri-state out switcher
     for (genvar i = 0; i < 16; i++) begin : dq_ser
         //That literally like beats i had previosely, 8writes of 16bits for 4clk
-        full_oserder dq_ser (.clk333(clk90), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+        full_oserder dq_ser (.clk333(clk90), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({
                 wd_lat[i + 112],
                 wd_lat[i + 96],
@@ -844,7 +867,7 @@ module EMI_600 (
     //dq
     logic [1:0] dqs_oq, dqs_tq, dqs_in;
     for (genvar i = 0; i < 2; i++) begin : dqs_ser
-        full_oserder dqs_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+        full_oserder dqs_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds(dqs_ds), .trie(dqs_md), .oq(dqs_oq[i]), .tq(dqs_tq[i])
         );
 
@@ -855,7 +878,7 @@ module EMI_600 (
 
     //dm doesn't need any buffer since its 1way pin
     for (genvar i = 0; i < 2; i++) begin : dm_ser
-        full_oserder dm_ser (.clk333(clk90), .clkEMI(clkEMI), .rst_n(logic_rst_n),
+        full_oserder dm_ser (.clk333(clk90), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({
                 msk_lat[i + 14],
                 msk_lat[i + 12],
@@ -928,7 +951,7 @@ module EMI_600 (
             .OFB(1'b0),
             .OCLKB(1'b0),
 
-            .RST(!logic_rst_n),
+            .RST(!rst_sync_n),
             .SHIFTIN1(1'b0),
             .SHIFTIN2(1'b0)
         );
@@ -964,7 +987,7 @@ module EMI_600 (
             .INC(1'b0),
             .LD(dly_e[i]),
             .LDPIPEEN(1'b0),
-            .REGRST(!logic_rst_n)
+            .REGRST(!rst_sync_n)
         );
     end : dq_des
 

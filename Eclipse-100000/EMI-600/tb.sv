@@ -28,8 +28,8 @@ module tb;
 
     //Tb acts as PCB and just sets some delays for reads, that just for a test
     //tho
-    localparam int D_LANE0 = 400; //ps, dq[7:0]  + dqs[0]
-    localparam int D_LANE1 = 900; //ps, dq[15:8] + dqs[1]
+    localparam int D_LANE0 = 1200; //ps, dq[7:0]  + dqs[0]
+    localparam int D_LANE1 = 100; //ps, dq[15:8] + dqs[1]
     wire  [15:0] mem_dq;
     wire  [1:0]  mem_dqs_p, mem_dqs_n;
     logic [15:0] mem_dq_d;
