@@ -11,10 +11,10 @@ module EMI_600 (
 
     output logic [127:0] rdata, //read data
     output logic mem_done,
-    output logic EMI_rdy,
+    (* mark_debug = "true" *) output logic EMI_rdy,
 
     output logic EMI_rst_n,
-    output logic calib_failed,
+    (* mark_debug = "true" *) output logic calib_failed,
 
     output logic cke,
     output logic ck_p,
@@ -105,7 +105,7 @@ module EMI_600 (
         READ_OFF,
         JUDGE_OFF
     } run_states;
-    run_states EMI_run_state;
+    (* mark_debug = "true" *) run_states EMI_run_state;
 
     //Struct just syntehzises into wires.
     //Basically in 1EMI clk imma send 4 packed commands to OSERDES
@@ -147,13 +147,19 @@ module EMI_600 (
     logic [79:0] dly_tap_cnt; //dly for every IDELAY(5bits each * 16 = 80)
     logic [79:0] dly_tap_out; //for debugging rn
     logic        idelay_rdy; //whether idelay is ready
-    logic calibrating, clean0, clean1;
-    logic [7:0] mpr_bits0, mpr_bits1; //dq is actually split into 2
-    logic [4:0] tap0, tap1;
+    logic calibrating;
+    (* mark_debug = "true" *) logic [15:0] s0, s1; //dq is actually split into 2
+    logic [14:0] t0, t1;
+    logic clean0_now, clean1_now;
+    (* mark_debug = "true" *) logic clean0_r, clean1_r;
+    //Literally debug so vivado tracks it
+    (* mark_debug = "true" *) logic [4:0] tap0, tap1;
     logic [4:0] start_cur0, start_cur1, start_best0, start_best1;
-    logic [5:0] eye_len_cur0, eye_len_cur1, eye_len_best0, eye_len_best1;
+    logic [5:0] eye_len_cur0, eye_len_cur1;
+    (* mark_debug = "true" *) logic [5:0] eye_len_best0, eye_len_best1;
     logic offcalib, init_offcalib;
-    logic bitslip0, bitslip1, done0, done1, ok0, ok1, ok0_r, ok1_r;
+    logic bitslip0, bitslip1, ok0, ok1;
+    (* mark_debug = "true" *) logic done0, done1, ok0_r, ok1_r;
     logic [63:0] lane0_bytes, lane1_bytes;
 
 
@@ -216,6 +222,8 @@ module EMI_600 (
             done0 <= 0;
             done1 <= 0;
             ok0_r <= 0;
+            clean0_r <= 0;
+            clean1_r <= 0;
             ok1_r <= 0;
 
             EMI_init_state <= INIT_INIT;
@@ -430,10 +438,10 @@ module EMI_600 (
                         //ACTIVATE(ACT)
                         //It goes into third slot of cmd, so it would be 5cycles apart
                         //From RD/WR, bc that's some t i forgot
-                        cmd[2].cs_n  <= calibrating; //if not calibrating, ACT, if calibrating - deselect which is just a NOP
-                        cmd[2].ras_n <= calibrating;
-                        cmd[2].cas_n <= calibrating ? 1 : 0;
-                        cmd[2].we_n  <= calibrating ? 1 : 0;
+                        cmd[2].cs_n  <= 0; //So CS# is just harwired to 0 on my board???
+                        cmd[2].ras_n <= calibrating; //If calibrating - NOP, otherwise ACT
+                        cmd[2].cas_n <= 1;
+                        cmd[2].we_n  <= 1;
 
                         cmd[2].a[13:0] <= offcalib ? 14'h3FFF : req_addr[23:10]; //row
                         cmd[2].ba <= offcalib ? 3'b111 : req_addr[9:7]; //bank
@@ -456,10 +464,14 @@ module EMI_600 (
                         rd_run <= !we_lat;
 
                     end else if (tACC_cnt == (we_lat ? 8'd7 : 8)) begin
-                        if (!we_lat) rdata <= (calibrating | offcalib) ? {dq_q[95:0], dq_q_prev[127:96]} : dq_q; //and temp again
+                        if (!we_lat) rdata <= dq_q;
                         if (offcalib && !we_lat) begin
                             ok0_r <= ok0;
                             ok1_r <= ok1;
+                        end
+                        if (calibrating) begin
+                            clean0_r <= clean0_now;
+                            clean1_r <= clean1_now;
                         end
                         if (offcalib && we_lat) init_offcalib <= 0;
                         dqs_md <= 1;
@@ -535,7 +547,7 @@ module EMI_600 (
                     //pattern x, z or whatever else we've at the edge of an eye
 
                     //For each lane check whether its the best run so far
-                    if (clean0) begin
+                    if (clean0_r) begin
                         if (eye_len_cur0 == 0) start_cur0 <= tap0;
                         eye_len_cur0 <= eye_len_cur0 + 1;
                         if (eye_len_cur0 + 1 > eye_len_best0) begin
@@ -546,7 +558,7 @@ module EMI_600 (
                         eye_len_cur0 <= 0;
                     end
 
-                    if (clean1) begin
+                    if (clean1_r) begin
                         if (eye_len_cur1 == 0) start_cur1 <= tap1;
                         eye_len_cur1 <= eye_len_cur1 + 1;
                         if (eye_len_cur1 + 1 > eye_len_best1) begin
@@ -635,14 +647,27 @@ module EMI_600 (
             end
         end : main_FSM
 
+    //The MRP checks is position(bitsplit) independent.
+    //So its clean, then we can glue it all together.
+    assign dly_tap_cnt = {{8{tap1}}, {8{tap0}}};
+    always_comb begin
+        for (int i = 0; i < 8; i++) begin
+            s0[i]     = dq_q_prev[16*i + 0];
+            s0[i + 8] = dq_q[16*i + 0];
+            s1[i]     = dq_q_prev[16*i + 8];
+            s1[i + 8] = dq_q[16*i + 8];
+        end
+    end
+    assign t0 = s0[15:1] ^ s0[14:0];
+    assign t1 = s1[15:1] ^ s1[14:0];
+    assign clean0_now = (&t0[6:0]) | (&t0[7:1]) | (&t0[8:2])  | (&t0[9:3])  | (&t0[10:4])
+                      | (&t0[11:5]) | (&t0[12:6]) | (&t0[13:7]) | (&t0[14:8]);
+    assign clean1_now = (&t1[6:0]) | (&t1[7:1]) | (&t1[8:2])  | (&t1[9:3])  | (&t1[10:4])
+                      | (&t1[11:5]) | (&t1[12:6]) | (&t1[13:7]) | (&t1[14:8]);
+
     //Gotta compute them combinationally and latch, bc on next cycle they are
     //a little bit outdated. Basically I check for every byte of the 2byte
     //burst read and align them as stated above.
-    assign dly_tap_cnt = {{8{tap1}}, {8{tap0}}};
-    assign mpr_bits0 = {rdata[112], rdata[96],  rdata[80], rdata[64], rdata[48], rdata[32], rdata[16], rdata[0]};
-    assign mpr_bits1 = {rdata[120], rdata[104], rdata[88], rdata[72], rdata[56], rdata[40], rdata[24], rdata[8]};
-    assign clean0 = (mpr_bits0 == 8'b1010_1010) || (mpr_bits0 == 8'b0101_0101);
-    assign clean1 = (mpr_bits1 == 8'b1010_1010) || (mpr_bits1 == 8'b0101_0101);
 
     //Now I check if read value that I wrote matches, if it does - good it is
     //calibrated, if it isn't I increase BITSLIP to check for the next slip.

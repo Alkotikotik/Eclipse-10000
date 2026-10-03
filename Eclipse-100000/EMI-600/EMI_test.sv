@@ -11,12 +11,12 @@ module EMI_test (
     output logic [23:0] req_addr,
     output logic [127:0] req_wd,
     output logic [15:0] req_msk,
-    output logic error_seen,
+    (* mark_debug = "true" *) output logic error_seen,
 
     input logic [127:0] rdata
 );
     logic [23:0] addr;
-    logic [7:0]  pass;
+    (* mark_debug = "true" *) logic [7:0]  pass;
     logic        writing;
     logic [127:0] expected;
 
