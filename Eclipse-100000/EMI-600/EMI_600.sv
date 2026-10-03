@@ -65,7 +65,7 @@ module EMI_600 (
     //ambigous, so you have to refresh them using amplifiers every 64ms.
     //However they "wear off" independently so on average you need to referesh
     //either of rows each 64ms / 8192 = 7.8us. That doesnt' affect performance
-    //as much, only about 5% max. That is the main principle of how memory
+    //as much, only about 2% max. That is the main principle of how memory
     //works. Also hence each bank can open 1row 16KB of rows
     //can be opened at ones.
 

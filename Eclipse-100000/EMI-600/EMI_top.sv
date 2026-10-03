@@ -1,6 +1,8 @@
 module EMI_board_top (
     //EMI top, so top is like the outermost layer of everything.
     //Eg this pin
+    //The vivado project is outside this repo btw bc its heavy asf and very
+    //bloated so its better to keep it out. Same with main CPU btw
     input  logic        sys_clk,        //50MHz crystal, M21, is an actual quartz
     input  logic        sys_rst_n,      //button, H7, active low
     output logic [1:0]  led,            //G21, G20
