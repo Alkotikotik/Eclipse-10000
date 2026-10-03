@@ -474,8 +474,9 @@ module EMI_600 (
                                 8'd4: begin //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
                                     dqs_ds <= 8'b0000_0000;
                                     dqs_md <= 0;
+                                    dq_md <= 0;
                                 end
-                                8'd5: dq_md <= 0; //the tri state was too fast, so solution is just to move all of them 1cycle later
+                                //the tri state was too fast, so solution is just to move all of them 1cycle later
                                 8'd6: dq_md <= 1;
                             endcase
                         end
@@ -845,7 +846,7 @@ module EMI_600 (
     logic [15:0] dq_oq, dq_tq, dq_in; //tq is tri-state out switcher
     for (genvar i = 0; i < 16; i++) begin : dq_ser
         //That literally like beats i had previosely, 8writes of 16bits for 4clk
-        full_oserder dq_ser (.clk333(clk90), .clkEMI(clkEMI), .rst_n(rst_sync_n),
+        full_oserder #(.TQ_MODE("BUF")) dq_ser (.clk333(clk90), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({
                 wd_lat[i + 112],
                 wd_lat[i + 96],

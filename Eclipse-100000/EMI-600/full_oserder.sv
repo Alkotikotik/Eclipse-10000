@@ -1,4 +1,4 @@
-module full_oserder (
+module full_oserder #(parameter TQ_MODE = "SDR") (
     //Wrapper for OSERDES bc imma institate it 40 times.
     input logic clk333,
     input logic clkEMI,
@@ -17,7 +17,7 @@ module full_oserder (
     //And thats it, no shenanigans or anything like that.
     OSERDESE2 #(
         .DATA_RATE_OQ("DDR"),
-        .DATA_RATE_TQ("SDR"),
+        .DATA_RATE_TQ(TQ_MODE),
         .DATA_WIDTH(8),
         .INIT_OQ(1'b0),
         .INIT_TQ(1'b0),
