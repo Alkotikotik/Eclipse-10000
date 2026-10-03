@@ -95,7 +95,9 @@ module EMI_600 (
         REF,
         ACCESS,
         INIT_CALIB,
-        RUN_CALIB
+        LOAD_CALIB,
+        JUDGE_CALIB,
+        EXIT_CALIB
     } run_states;
     run_states EMI_run_state;
 
@@ -122,6 +124,7 @@ module EMI_600 (
     logic [7:0]  tACC_cnt; //Access counter, for RD/WR
     logic [23:0] tZQCS_cnt; //small recallibration every 128ms
     logic tREFI_pending;
+    logic tZQCS_pending;
     logic rd_run;
     logic we_lat;
     logic [15:0]  msk_lat;
@@ -138,7 +141,16 @@ module EMI_600 (
     logic [79:0] dly_tap_cnt; //dly for every IDELAY(5bits each * 16 = 80)
     logic [79:0] dly_tap_out; //for debugging rn
     logic        idelay_rdy; //whether idelay is ready
-    logic calibrating;
+    logic calibrating, clean0, clean1;
+    logic [7:0] mpr_bits0, mpr_bits1; //dq is actually split into 2
+    logic [4:0] tap0, tap1;
+    logic [4:0] start_cur0, start_cur1, start_best0, start_best1;
+    logic [5:0] eye_len_cur0, eye_len_cur1, eye_len_best0, eye_len_best1;
+    assign dly_tap_cnt = {{8{tap1}}, {8{tap0}}};
+    assign mpr_bits0 = {rdata[112], rdata[96],  rdata[80], rdata[64], rdata[48], rdata[32], rdata[16], rdata[0]};
+    assign mpr_bits1 = {rdata[120], rdata[104], rdata[88], rdata[72], rdata[56], rdata[40], rdata[24], rdata[8]};
+    assign clean0 = (mpr_bits0 == 8'b1010_1010) || (mpr_bits0 == 8'b0101_0101);
+    assign clean1 = (mpr_bits1 == 8'b1010_1010) || (mpr_bits1 == 8'b0101_0101);
 
     logic LOCKED;
     logic logic_rst_n;
@@ -164,7 +176,18 @@ module EMI_600 (
             rdata <= 128'h0;
 
             dly_e <= 0;
-            dly_tap_cnt <= 0;
+            tap0 <= 0;
+            tap1 <= 0;
+            start_cur0 <= 0;
+            start_cur1 <= 0;
+            start_best0 <= 0;
+            start_best1 <= 0;
+            eye_len_cur0 <= 0;
+            eye_len_cur1 <= 0;
+            eye_len_best0 <= 0;
+            eye_len_best1 <= 0;
+            tZQCS_cnt <= 0;
+            tZQCS_pending <= 0;
 
             calibrating <= 1;
 
@@ -322,7 +345,7 @@ module EMI_600 (
             end else if (!tREFI_pending) begin
                 tREFI_cnt <= tREFI_cnt + 12'b1;
             end
-            if (tZQCS_cnt > 10,666,600) begin
+            if (tZQCS_cnt > 10_666_600) begin
                 tZQCS_cnt <= 24'b0;
                 tZQCS_pending <= 1;
             end else if (!tZQCS_pending) begin
@@ -343,10 +366,7 @@ module EMI_600 (
                         cmd[0].cas_n <= 0;
                         cmd[0].we_n <= 1;
                         tREFI_pending <= 0;
-                    end else if (tREFI_cnt > 55 && req && !mem_done) begin //160ns tRFC
-                        EMI_run_state <= ACCESS;
-                    end
-                    if (tZQCS_cnt_pending && !(|tZQCS_cnt)) begin
+                    end else if (tZQCS_pending && tREFI_cnt > 14) begin
                         //ZQCS recallibres drivers, mainly based on temp.
                         //It has to be done about every 128ms.
                         cmd[0].cs_n <= 0;
@@ -354,8 +374,8 @@ module EMI_600 (
                         cmd[0].cas_n <= 1;
                         cmd[0].we_n <= 0;
                         cmd[0].a[10] <= 0; //JIC
-                        tZQCS_cnt_pending <= 0;
-                    end else if (tZQCS_cnt > 64 && req && !mem_done) begin //64 cycles
+                        tZQCS_pending <= 0;
+                    end else if (tREFI_cnt > 14 && tZQCS_cnt > 64 && req && !mem_done) begin //160ns tRFC
                         EMI_run_state <= ACCESS;
                     end
                 end
@@ -389,7 +409,7 @@ module EMI_600 (
                         cmd[2].a[13:0] <= req_addr[23:10]; //row
                         cmd[2].ba <= req_addr[9:7]; //bank
 
-                        we_lat <= req_we; //latching jic, 25cycles afterall
+                        we_lat <= req_we & !calibrating; //latching jic, 25cycles afterall
                         msk_lat <= req_msk;
                         wd_lat <= req_wd;
 
@@ -410,8 +430,8 @@ module EMI_600 (
                         if (!we_lat) rdata <= {dq_q[95:0], dq_q_prev[127:96]}; //and temp again
                         dqs_md <= 1;
                         tACC_cnt <= 8'b0;
-                        mem_done <= 1;
-                        EMI_run_state <= calibrating ? RUN_CALIB : IDLE;
+                        mem_done <= !calibrating;
+                        EMI_run_state <= calibrating ? JUDGE_CALIB : IDLE;
                     end else begin
                         if (we_lat) begin //writing on read would short circuit btw
                             case (tACC_cnt)
@@ -433,16 +453,25 @@ module EMI_600 (
                     //maybe something else idk, but essentially it decides
                     //The delay of IODELAY for reads would land directly in
                     //the eye.
-                    if (!(|tMRD_cnt)) begin
-                        cmd[0].ba <= 3'b011; //MR3
-                        a[2]= 1; //MPR
-                    end else if (tMRD_cnt > 4) begin //tMOD + tMRD
-                        EMI_init_state <= RUN_CALIB;
-                    end else begin
-                        tMRD_cnt <= tMRD_cnt + 1;
+                    if (idelay_rdy) begin
+                        if (!(|tMRD_cnt)) begin
+                            cmd[0].cs_n <= 0;
+                            cmd[0].ras_n <= 0;
+                            cmd[0].cas_n <= 0;
+                            cmd[0].we_n <= 0;
+                            cmd[0].ba <= 3'b011; //MR3
+                            cmd[0].a <= 14'b00_0000_0000_0100; //MPR
+                            dly_e <= '1;
+                            tMRD_cnt <= tMRD_cnt + 1;
+                        end else if (tMRD_cnt > 4) begin //tMOD + tMRD
+                            tMRD_cnt <= 0;
+                            EMI_run_state <= LOAD_CALIB;
+                        end else begin
+                            tMRD_cnt <= tMRD_cnt + 1;
+                        end
                     end
                 end
-                RUN_CALIB: begin
+                LOAD_CALIB: begin
                     //It does that by enabling MPR, which is a special
                     //register in the chip holding the bit sequence of
                     //1010101010101010 something like that. When it is enabled
@@ -450,11 +479,79 @@ module EMI_600 (
                     //Test each cnt of taps and seeing where eye lands the
                     //best. Thats basically an actual memory training that happened
                     //On your PC when you first booted, in your CPU its cached tho.
-                    EMI_run_state <= ACCESS;
-                    dly_tap_cnt <= dly_tap_cnt + 1;
-                    //check if its good
+                    if (tREFI_pending && !(|tREFI_cnt)) begin
+                        cmd[0].cs_n <= 0;
+                        cmd[0].ras_n <= 0;
+                        cmd[0].cas_n <= 0;
+                        cmd[0].we_n <= 1;
+                        tREFI_pending <= 0;
+                        tMRD_cnt <= 0;
+                    end else if (tREFI_cnt > 14) begin
+                        if (tMRD_cnt == 3) begin
+                            tMRD_cnt <= 0;
+                            EMI_run_state <= ACCESS;
+                        end else begin
+                            tMRD_cnt <= tMRD_cnt + 1;
+                        end
+                    end
+                end
+                JUDGE_CALIB: begin
 
+                    //Check if pattern matches, if it doesn't like different
+                    //pattern x, z or whatever else we've at the edge of an eye
 
+                    //For each lane check whether its the best run so far
+                    if (clean0) begin
+                        if (eye_len_cur0 == 0) start_cur0 <= tap0;
+                        eye_len_cur0 <= eye_len_cur0 + 1;
+                        if (eye_len_cur0 + 1 > eye_len_best0) begin
+                            eye_len_best0 <= eye_len_cur0 + 1;
+                            start_best0 <= (eye_len_cur0 == 0) ? tap0 : start_cur0;
+                        end
+                    end else begin
+                        eye_len_cur0 <= 0;
+                    end
+
+                    if (clean1) begin
+                        if (eye_len_cur1 == 0) start_cur1 <= tap1;
+                        eye_len_cur1 <= eye_len_cur1 + 1;
+                        if (eye_len_cur1 + 1 > eye_len_best1) begin
+                            eye_len_best1 <= eye_len_cur1 + 1;
+                            start_best1 <= (eye_len_cur1 == 0) ? tap1 : start_cur1;
+                        end
+                    end else begin
+                        eye_len_cur1 <= 0;
+                    end
+
+                    if (tap0 == 5'd31) begin
+                        tMRD_cnt <= 0;
+                        EMI_run_state <= EXIT_CALIB;
+                    end else begin
+                        tap0 <= tap0 + 1;
+                        tap1 <= tap1 + 1;
+                        EMI_run_state <= LOAD_CALIB;
+                    end
+                end
+                EXIT_CALIB: begin
+                    if (!(|tMRD_cnt)) begin
+                        //Just finilize the taps, set MR3 to regualr reads
+                        //And exit to IDLE
+                        tap0 <= start_best0 + eye_len_best0[5:1]; //<<1 btw
+                        tap1 <= start_best1 + eye_len_best1[5:1];
+                        cmd[0].cs_n <= 0;
+                        cmd[0].ras_n <= 0;
+                        cmd[0].cas_n <= 0;
+                        cmd[0].we_n <= 0;
+                        cmd[0].ba <= 3'b011; //MR3
+                        cmd[0].a <= 14'b0;
+                        tMRD_cnt <= tMRD_cnt + 1;
+                    end else if (tMRD_cnt > 4) begin
+                        tMRD_cnt <= 0;
+                        calibrating <= 0;
+                        EMI_run_state <= IDLE;
+                    end else begin
+                        tMRD_cnt <= tMRD_cnt + 1;
+                    end
                 end
                 endcase
             end
