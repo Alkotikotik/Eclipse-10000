@@ -97,7 +97,9 @@ module EMI_600 (
         INIT_CALIB,
         LOAD_CALIB,
         JUDGE_CALIB,
-        EXIT_CALIB
+        EXIT_CALIB,
+        READ_OFF,
+        JUDGE_OFF
     } run_states;
     run_states EMI_run_state;
 
@@ -146,11 +148,10 @@ module EMI_600 (
     logic [4:0] tap0, tap1;
     logic [4:0] start_cur0, start_cur1, start_best0, start_best1;
     logic [5:0] eye_len_cur0, eye_len_cur1, eye_len_best0, eye_len_best1;
-    assign dly_tap_cnt = {{8{tap1}}, {8{tap0}}};
-    assign mpr_bits0 = {rdata[112], rdata[96],  rdata[80], rdata[64], rdata[48], rdata[32], rdata[16], rdata[0]};
-    assign mpr_bits1 = {rdata[120], rdata[104], rdata[88], rdata[72], rdata[56], rdata[40], rdata[24], rdata[8]};
-    assign clean0 = (mpr_bits0 == 8'b1010_1010) || (mpr_bits0 == 8'b0101_0101);
-    assign clean1 = (mpr_bits1 == 8'b1010_1010) || (mpr_bits1 == 8'b0101_0101);
+    logic offcalib, init_offcalib;
+    logic bitslip0, bitslip1, done0, done1, ok0, ok1, ok0_r, ok1_r;
+    logic [63:0] lane0_bytes, lane1_bytes;
+
 
     logic LOCKED;
     logic logic_rst_n;
@@ -190,6 +191,14 @@ module EMI_600 (
             tZQCS_pending <= 0;
 
             calibrating <= 1;
+            offcalib <= 0;
+            init_offcalib <= 0;
+            bitslip0 <= 0;
+            bitslip1 <= 0;
+            done0 <= 0;
+            done1 <= 0;
+            ok0_r <= 0;
+            ok1_r <= 0;
 
             EMI_init_state <= INIT_INIT;
             EMI_run_state <= IDLE;
@@ -338,6 +347,8 @@ module EMI_600 (
                 cmd[i].odt   <= 0;
             end
             mem_done <= 0;
+            bitslip0 <= 0;
+            bitslip1 <= 0;
             dq_q_prev <= dq_q; //again - temp var
             if (tREFI_cnt > 625) begin //7.8us
                 tREFI_cnt <= 12'b0;
@@ -409,9 +420,9 @@ module EMI_600 (
                         cmd[2].a[13:0] <= offcalib ? 14'h3FFF : req_addr[23:10]; //row
                         cmd[2].ba <= offcalib ? 3'b111 : req_addr[9:7]; //bank
 
-                        we_lat <= req_we & !calibrating; //latching jic, 25cycles afterall
+                        we_lat <= offcalib ? init_offcalib : (req_we & !calibrating); //latching jic, 25cycles afterall
                         msk_lat <= offcalib ? 16'h0 : req_msk;
-                        wd_lat <= offcalib ? 128'hFFFF_EEEE_DDDD_CCCC_BBBB_AAAA_9999_8888 : req_wd;
+                        wd_lat <= init_offcalib ? 128'hFFFF_EEEE_DDDD_CCCC_BBBB_AAAA_9999_8888 : req_wd;
 
                     end else if (tACC_cnt == 8'h1) begin
                         //READ/WRITE
@@ -419,19 +430,24 @@ module EMI_600 (
                         cmd[3].cs_n <= 0;
                         cmd[3].ras_n <= 1;
                         cmd[3].cas_n <= 0;
-                        cmd[3].we_n <= (offcalib ? 0 : !we_lat) | calibrating; //WE# = 0 on write, RD on calibrating
+                        cmd[3].we_n <= !we_lat | calibrating; //WE# = 0 on write, RD on calibrating
 
-                        cmd[3].ba <= req_addr[9:7];
-                        cmd[3].a <= {3'b000, 1'b1, req_addr[6:0], 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
+                        cmd[3].ba <= offcalib ? 3'b111 : req_addr[9:7];
+                        cmd[3].a <= {3'b000, 1'b1, (offcalib ? 7'h7F : req_addr[6:0]), 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
 
                         rd_run <= !we_lat;
 
                     end else if (tACC_cnt == (we_lat ? 8'd7 : 8)) begin
-                        if (!we_lat) rdata <= {dq_q[95:0], dq_q_prev[127:96]}; //and temp again
+                        if (!we_lat) rdata <= (calibrating | offcalib) ? {dq_q[95:0], dq_q_prev[127:96]} : dq_q; //and temp again
+                        if (offcalib && !we_lat) begin
+                            ok0_r <= ok0;
+                            ok1_r <= ok1;
+                        end
+                        if (offcalib && we_lat) init_offcalib <= 0;
                         dqs_md <= 1;
                         tACC_cnt <= 8'b0;
-                        mem_done <= !(calibrating | offcalib)
-                        EMI_run_state <= calibrating ? JUDGE_CALIB : (offcalib ? READ_OFF : IDLE);
+                        mem_done <= !(calibrating | offcalib);
+                        EMI_run_state <= calibrating ? JUDGE_CALIB : (offcalib ? (we_lat ? READ_OFF : JUDGE_OFF) : IDLE);
                     end else begin
                         if (we_lat) begin //writing on read would short circuit btw
                             case (tACC_cnt)
@@ -548,6 +564,7 @@ module EMI_600 (
                         tMRD_cnt <= 0;
                         calibrating <= 0;
                         EMI_run_state <= ACCESS;
+                        init_offcalib <= 1;
                         offcalib <= 1;
                     end else begin
                         tMRD_cnt <= tMRD_cnt + 1;
@@ -564,13 +581,62 @@ module EMI_600 (
                     //bit offset is a built-in feature of ISERDES called
                     //BITSLIP, so I just test each BITSLIP, figure out which value
                     //Reads the exact data.
+                    EMI_run_state <= ACCESS; //READ
                 end
                 JUDGE_OFF: begin
+                    //lane 0 = low byte of each beat, lane 1 = high byte
+                    if (tMRD_cnt == 0) begin
+                        if (!done0) begin
+                            if (ok0_r) done0 <= 1;
+                            else bitslip0 <= 1;
+                        end
+                        if (!done1) begin
+                            if (ok1_r) done1 <= 1;
+                            else bitslip1 <= 1;
+                        end
+                    end
 
+                    if ((done0 | ok0_r) && (done1 | ok1_r)) begin //calib doneeee
+                        tMRD_cnt <= 0;
+                        offcalib <= 0;
+                        EMI_run_state <= IDLE;
+                    end else if (tMRD_cnt > 3) begin
+                        tMRD_cnt <= 0;
+                        EMI_run_state <= READ_OFF;
+                    end else begin
+                        tMRD_cnt <= tMRD_cnt + 1;
+                    end
                 end
                 endcase
             end
         end : main_FSM
+
+    //Gotta compute them combinationally and latch, bc on next cycle they are
+    //a little bit outdated. Basically I check for every byte of the 2byte
+    //burst read and align them as stated above.
+    assign dly_tap_cnt = {{8{tap1}}, {8{tap0}}};
+    assign mpr_bits0 = {rdata[112], rdata[96],  rdata[80], rdata[64], rdata[48], rdata[32], rdata[16], rdata[0]};
+    assign mpr_bits1 = {rdata[120], rdata[104], rdata[88], rdata[72], rdata[56], rdata[40], rdata[24], rdata[8]};
+    assign clean0 = (mpr_bits0 == 8'b1010_1010) || (mpr_bits0 == 8'b0101_0101);
+    assign clean1 = (mpr_bits1 == 8'b1010_1010) || (mpr_bits1 == 8'b0101_0101);
+
+    //Now I check if read value that I wrote matches, if it does - good it is
+    //calibrated, if it isn't I increase BITSLIP to check for the next slip.
+    //Regarding bitslip, its kinda like rotl but not really, it specifies
+    //where read value starts, pulsing its value ones just increases it. Fun
+    //fact about it on DDR mode, on first pulse it increases by shifts right
+    //by 1, on second shifts left by 3, and so on. Idk why it is like that,
+    //but I assume because it happens on every edge of a clock. Anyways it
+    //doesn't matter bc if it goes out of bounds it just returns from other
+    //side, so +1, -3 pattern eventually will cover every slip and find the
+    //right one.
+    assign lane0_bytes = {dq_q[119:112], dq_q[103:96], dq_q[87:80], dq_q[71:64],
+                          dq_q[55:48],   dq_q[39:32],  dq_q[23:16], dq_q[7:0]};
+    assign lane1_bytes = {dq_q[127:120], dq_q[111:104], dq_q[95:88], dq_q[79:72],
+                          dq_q[63:56],   dq_q[47:40],   dq_q[31:24], dq_q[15:8]};
+    assign ok0 = (lane0_bytes == 64'hFF_EE_DD_CC_BB_AA_99_88); //ok
+    assign ok1 = (lane1_bytes == 64'hFF_EE_DD_CC_BB_AA_99_88);
+
 
     //This is outdated comment about writes, it was here before now its gone.
     //The main idea is still prolly there tho.
