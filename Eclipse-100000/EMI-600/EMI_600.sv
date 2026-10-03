@@ -406,12 +406,12 @@ module EMI_600 (
                         cmd[2].cas_n <= !calibrating;
                         cmd[2].we_n <= !calibrating;
 
-                        cmd[2].a[13:0] <= req_addr[23:10]; //row
-                        cmd[2].ba <= req_addr[9:7]; //bank
+                        cmd[2].a[13:0] <= offcalib ? 14'h3FFF : req_addr[23:10]; //row
+                        cmd[2].ba <= offcalib ? 3'b111 : req_addr[9:7]; //bank
 
                         we_lat <= req_we & !calibrating; //latching jic, 25cycles afterall
-                        msk_lat <= req_msk;
-                        wd_lat <= req_wd;
+                        msk_lat <= offcalib ? 16'h0 : req_msk;
+                        wd_lat <= offcalib ? 128'hFFFF_EEEE_DDDD_CCCC_BBBB_AAAA_9999_8888 : req_wd;
 
                     end else if (tACC_cnt == 8'h1) begin
                         //READ/WRITE
@@ -419,7 +419,7 @@ module EMI_600 (
                         cmd[3].cs_n <= 0;
                         cmd[3].ras_n <= 1;
                         cmd[3].cas_n <= 0;
-                        cmd[3].we_n <= !we_lat | calibrating; //WE# = 0 on write, RD on calibrating
+                        cmd[3].we_n <= (offcalib ? 0 : !we_lat) | calibrating; //WE# = 0 on write, RD on calibrating
 
                         cmd[3].ba <= req_addr[9:7];
                         cmd[3].a <= {3'b000, 1'b1, req_addr[6:0], 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
@@ -430,8 +430,8 @@ module EMI_600 (
                         if (!we_lat) rdata <= {dq_q[95:0], dq_q_prev[127:96]}; //and temp again
                         dqs_md <= 1;
                         tACC_cnt <= 8'b0;
-                        mem_done <= !calibrating;
-                        EMI_run_state <= calibrating ? JUDGE_CALIB : IDLE;
+                        mem_done <= !(calibrating | offcalib)
+                        EMI_run_state <= calibrating ? JUDGE_CALIB : (offcalib ? READ_OFF : IDLE);
                     end else begin
                         if (we_lat) begin //writing on read would short circuit btw
                             case (tACC_cnt)
@@ -496,7 +496,6 @@ module EMI_600 (
                     end
                 end
                 JUDGE_CALIB: begin
-
                     //Check if pattern matches, if it doesn't like different
                     //pattern x, z or whatever else we've at the edge of an eye
 
@@ -536,7 +535,7 @@ module EMI_600 (
                     if (!(|tMRD_cnt)) begin
                         //Just finilize the taps, set MR3 to regualr reads
                         //And exit to IDLE
-                        tap0 <= start_best0 + eye_len_best0[5:1]; //<<1 btw
+                        tap0 <= start_best0 + eye_len_best0[5:1]; //<<1, which is /2 which is just average
                         tap1 <= start_best1 + eye_len_best1[5:1];
                         cmd[0].cs_n <= 0;
                         cmd[0].ras_n <= 0;
@@ -548,10 +547,26 @@ module EMI_600 (
                     end else if (tMRD_cnt > 4) begin
                         tMRD_cnt <= 0;
                         calibrating <= 0;
-                        EMI_run_state <= IDLE;
+                        EMI_run_state <= ACCESS;
+                        offcalib <= 1;
                     end else begin
                         tMRD_cnt <= tMRD_cnt + 1;
                     end
+                end
+                READ_OFF: begin
+                    //So i couldn't figure out for a while why it didn't work,
+                    //until I realized that beats kinda overlap, if they have
+                    //like different latency one if last beats of first
+                    //8 beats might land at first beats of second 8beats. So
+                    //this is next calib stage, I write some arbitary number
+                    //To some arbitary address and then read it using
+                    //different bit offsets. And the cool part is that this
+                    //bit offset is a built-in feature of ISERDES called
+                    //BITSLIP, so I just test each BITSLIP, figure out which value
+                    //Reads the exact data.
+                end
+                JUDGE_OFF: begin
+
                 end
                 endcase
             end
@@ -828,7 +843,7 @@ module EMI_600 (
             .SHIFTOUT1(),
             .SHIFTOUT2(),
 
-            .BITSLIP(1'b0),
+            .BITSLIP(i < 8 ? bitslip0 : bitslip1),
             .CE1(1'b1),
             .CE2(1'b1),
 

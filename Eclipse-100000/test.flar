@@ -1,0 +1,4 @@
+parallel [u32 i : arr.len<()>] {
+    arr[i].rgbpck<(var0, var1)>;
+
+}
