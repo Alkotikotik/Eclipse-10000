@@ -1,5 +1,6 @@
 ## Xilinx design constaint(XDC/.xdc)
 ## This thing maps my signal to a physical ports, or more specifically balls of the FPGA
+## Idk why they call it constaint, i'd call it oppurtunity xdo
 
 ##DQ one ball for one bit of dq
 ##Honestly idk why are those specific balls, I just copied it from MIG, I assume its due to FPGA's structure

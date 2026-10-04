@@ -143,6 +143,10 @@ module EMI_600 (
     logic [2:0]  beat;
     logic cke_r;
 
+    logic [7:0] open_banks;
+    logic [13:0] open_bank_rows [8];
+
+
     logic [15:0] dq_dly; //delayed dq
     logic [15:0] dly_e; //dly enable for each DQ
     logic [79:0] dly_tap_cnt; //dly for every IDELAY(5bits each * 16 = 80)
@@ -430,17 +434,32 @@ module EMI_600 (
                         cmd[0].a[10] <= 0; //JIC
                         tZQCS_pending <= 0;
                     end else if (tREFI_cnt > 14 && tZQCS_cnt > 64 && req && !mem_done && EMI_rdy) begin //160ns tRFC
-                        //Moving ACT to here to save up 12ns of latency on each access
-                        //ACTIVATE(ACT)
-                        //It goes into third slot of cmd, so it would be 5cycles apart
-                        //From RD/WR, bc that's some t i forgot
-                        cmd[2].cs_n  <= 0; //So CS# is just harwired to 0 on my board???
-                        cmd[2].ras_n <= 0;
-                        cmd[2].cas_n <= 1;
-                        cmd[2].we_n  <= 1;
+                        //Hit - very very good, we can straight up write
+                        if (open_banks[req_addr[9:7]] && open_bank_rows[req_addr[23:10]].req_addr[9:7] == req_addr[23:10]) begin
+                            //WRITE
 
-                        cmd[2].a[13:0] <= req_addr[23:10]; //row
-                        cmd[2].ba <= req_addr[9:7]; //bank
+
+                        //Closed - gotta open bank through ACT
+                        end else if (!open_banks[req_addr[9:7]]) begin
+                            //Moving ACT to here to save up 12ns of latency on each access
+                            //ACTIVATE(ACT)
+                            //It goes into third slot of cmd, so it would be 5cycles apart
+                            //From RD/WR, bc that's some t i forgot
+                            cmd[2].cs_n  <= 0; //So CS# is just harwired to 0 on my board???
+                            cmd[2].ras_n <= 0;
+                            cmd[2].cas_n <= 1;
+                            cmd[2].we_n  <= 1;
+
+                            cmd[2].a[13:0] <= req_addr[23:10]; //row
+                            cmd[2].ba <= req_addr[9:7]; //bank
+                            open_banks[req_addr[9:7]] <= 1;
+                            open_bnk_row[req_addr[23:10]].req_addr[9:7] <= req_addr[23:10];
+
+                        //Complete miss - need to precharge(close) the bank and open another one
+                        end else begin
+                            //PREA, ACT
+
+                        end
 
                         we_lat <= req_we; //latching jic, 25cycles afterall
                         msk_lat <= req_msk;
@@ -919,6 +938,18 @@ module EMI_600 (
                 }),
                 .trie(1'b0), .oq(ba[i]), .tq());
     end : ba_ser
+
+    //Alright so eye catching and taps and calib overall its a interesting one
+    //idk if I already fully explained it but I will do it again. Basically
+    //due to board's wire length and temp electrisity takes different time to
+    //travel from fpga to ddr3. And Im p sure i explained taps, which is eye
+    //catching. That introduces another problem tho - the beats get offset by
+    //a different amount usually, and they might overlap. Like one beat is
+    //giving output of the other one, kinda like that:
+    // a b c d e f g h
+    //               a b c d e f g h
+    //h and a are overlapped, so this is where bitslip comes in, i explained
+    //it below.
 
     full_oserder cs_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({cmd[3].cs_n, cmd[3].cs_n, cmd[2].cs_n, cmd[2].cs_n,

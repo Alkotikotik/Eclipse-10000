@@ -9,8 +9,10 @@
 
 #ORG 64
 ~init:
-    LOAD rx2 <- 3
-    LDX ry00 <- rx31, rx2 << 1, *data
-    STX ry00 -> rx31, rx31 << 0, 4016
+    >_#ALIA ry00 : test
+    >_#ALIA 0x40000000 : VRAM_BASE
+    LOAD rx2 <- 3 : three
+    LDX  test <- rx31, three << 1, *data
+    STX  test -> rx31, rx31 << 0, 4016
 
     JMP ~init
