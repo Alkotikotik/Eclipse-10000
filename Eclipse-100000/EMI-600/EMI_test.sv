@@ -37,7 +37,7 @@ module EMI_test (
             error_seen <= 0;
         end else if (mem_done) begin
             if (!writing && rdata != expected) error_seen <= 1;
-            if (addr == 1023) begin
+            if (addr == 24'hFF_FFFF) begin //whole memory
                 addr <= 0;
                 writing <= !writing;
                 if (!writing) pass <= pass + 1;

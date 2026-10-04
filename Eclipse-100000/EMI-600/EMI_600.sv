@@ -135,6 +135,7 @@ module EMI_600 (
     logic we_lat;
     logic [15:0]  msk_lat;
     logic [127:0] wd_lat;
+    logic [6:0]   col_lat;
     logic [127:0] dq_q; //thats a funny word
     logic [127:0] dq_q_prev; //temp imma change it later
     logic dqs_md, dq_md; //dq Manipulation disable 1 = (z), 0 = EMI drives
@@ -152,6 +153,12 @@ module EMI_600 (
     logic [14:0] t0, t1;
     logic clean0_now, clean1_now;
     (* mark_debug = "true" *) logic clean0_r, clean1_r;
+    logic [8:0] m0, m1;
+    logic sig0_now, sig1_now;
+    (* mark_debug = "true" *) logic sig0_r, sig1_r;
+    logic acc_clean0, acc_clean1, acc_sig0, acc_sig1, run_sig0, run_sig1;
+    logic tap_clean0, tap_clean1, tap_sig0, tap_sig1;
+    logic [1:0] cal_rd_cnt;
     //Literally debug so vivado tracks it
     (* mark_debug = "true" *) logic [4:0] tap0, tap1;
     logic [4:0] start_cur0, start_cur1, start_best0, start_best1;
@@ -189,12 +196,13 @@ module EMI_600 (
             tACC_cnt <= 8'b0;
             EMI_rst_n <= 0;
             for (integer i = 0; i <= 3; i++) begin
-                cmd[i] <= '{cs_n: 1, ras_n: 1, cas_n: 1, we_n: 1, ba: 3'b0, a: 14'b0, cke: 0, odt: 0};
+                cmd[i] <= {cs_n: 1, ras_n: 1, cas_n: 1, we_n: 1, ba: 3'b0, a: 14'b0, cke: 0, odt: 0};
             end
             cke_r <= 0;
             mem_done <= 0;
             rd_run <= 0;
             we_lat <= 0;
+            col_lat <= 0;
             dqs_md <= 1;
             dq_md <= 1;
             dqs_ds <= 8'b0000_0000;
@@ -224,6 +232,15 @@ module EMI_600 (
             ok0_r <= 0;
             clean0_r <= 0;
             clean1_r <= 0;
+            sig0_r <= 0;
+            sig1_r <= 0;
+            acc_clean0 <= 0;
+            acc_clean1 <= 0;
+            acc_sig0 <= 0;
+            acc_sig1 <= 0;
+            run_sig0 <= 0;
+            run_sig1 <= 0;
+            cal_rd_cnt <= 0;
             ok1_r <= 0;
 
             EMI_init_state <= INIT_INIT;
@@ -413,14 +430,33 @@ module EMI_600 (
                         cmd[0].a[10] <= 0; //JIC
                         tZQCS_pending <= 0;
                     end else if (tREFI_cnt > 14 && tZQCS_cnt > 64 && req && !mem_done && EMI_rdy) begin //160ns tRFC
+                        //Moving ACT to here to save up 12ns of latency on each access
+                        //ACTIVATE(ACT)
+                        //It goes into third slot of cmd, so it would be 5cycles apart
+                        //From RD/WR, bc that's some t i forgot
+                        cmd[2].cs_n  <= 0; //So CS# is just harwired to 0 on my board???
+                        cmd[2].ras_n <= 0;
+                        cmd[2].cas_n <= 1;
+                        cmd[2].we_n  <= 1;
+
+                        cmd[2].a[13:0] <= req_addr[23:10]; //row
+                        cmd[2].ba <= req_addr[9:7]; //bank
+
+                        we_lat <= req_we; //latching jic, 25cycles afterall
+                        msk_lat <= req_msk;
+                        wd_lat <= req_wd;
+                        col_lat <= req_addr[6:0];
                         EMI_run_state <= ACCESS;
+                        mem_done <= req_we; //I already latches all the needed data so if if its a write
+                        //I don't need anything from caller hence its safe to
+                        //set mem_done to 1;
+                        tACC_cnt <= 1;
                     end
                 end
                 ACCESS: begin
                     //Both READ and WRITE start the same, activate, wait for
                     //5cycles init READ/WRITE and then the branch. After, they
                     //come back and finish
-
                     //What is really cool about it, is how
                     //that 24bit address is structured. In reality it is
                     //actually 27bit address(2byte aligned), however last
@@ -434,22 +470,15 @@ module EMI_600 (
                     //past, would actually just put me in another bank, which
                     //ofc reduces access speed.
                     tACC_cnt <= tACC_cnt + 1;
-                    if (!(|tACC_cnt)) begin
-                        //ACTIVATE(ACT)
-                        //It goes into third slot of cmd, so it would be 5cycles apart
-                        //From RD/WR, bc that's some t i forgot
-                        cmd[2].cs_n  <= 0; //So CS# is just harwired to 0 on my board???
-                        cmd[2].ras_n <= calibrating; //If calibrating - NOP, otherwise ACT
-                        cmd[2].cas_n <= 1;
-                        cmd[2].we_n  <= 1;
+                    if (!(|tACC_cnt)) begin //This is purely for calib
+                        cmd[2].ras_n <= calibrating;
 
-                        cmd[2].a[13:0] <= offcalib ? 14'h3FFF : req_addr[23:10]; //row
-                        cmd[2].ba <= offcalib ? 3'b111 : req_addr[9:7]; //bank
+                        cmd[2].a[13:0] <= 14'h3FFF; //row
+                        cmd[2].ba <= 3'b111; //bank
 
-                        we_lat <= offcalib ? init_offcalib : (req_we & !calibrating); //latching jic, 25cycles afterall
-                        msk_lat <= offcalib ? 16'h0 : req_msk;
-                        wd_lat <= init_offcalib ? 128'hFFFF_EEEE_DDDD_CCCC_BBBB_AAAA_9999_8888 : req_wd;
-
+                        we_lat <= init_offcalib; //latching jic, 25cycles afterall
+                        msk_lat <= 16'h0;
+                        wd_lat <= 128'hFFFF_EEEE_DDDD_CCCC_BBBB_AAAA_9999_8888;
                     end else if (tACC_cnt == 8'h1) begin
                         //READ/WRITE
                         //On the last one so its aligned and 5cycles apart
@@ -458,10 +487,11 @@ module EMI_600 (
                         cmd[3].cas_n <= 0;
                         cmd[3].we_n <= !we_lat | calibrating; //WE# = 0 on write, RD on calibrating
 
-                        cmd[3].ba <= offcalib ? 3'b111 : req_addr[9:7];
-                        cmd[3].a <= {3'b000, 1'b1, (offcalib ? 7'h7F : req_addr[6:0]), 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
-
+                        cmd[3].ba <= offcalib ? 3'b111 : cmd[2].ba; //cmd[2].ba is effectively bank lat
+                        cmd[3].a <= {3'b000, 1'b1, (offcalib ? 7'h7F : col_lat), 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
+                        cmd[3].odt <= we_lat; //odt on writes, odt terminates the signal more in .xdc
                         rd_run <= !we_lat;
+
 
                     end else if (tACC_cnt == (we_lat ? 8'd7 : 8)) begin
                         if (!we_lat) rdata <= dq_q;
@@ -472,17 +502,28 @@ module EMI_600 (
                         if (calibrating) begin
                             clean0_r <= clean0_now;
                             clean1_r <= clean1_now;
+                            sig0_r <= sig0_now;
+                            sig1_r <= sig1_now;
                         end
                         if (offcalib && we_lat) init_offcalib <= 0;
                         dqs_md <= 1;
                         tACC_cnt <= 8'b0;
-                        mem_done <= !(calibrating | offcalib);
+                        mem_done <= !we_lat && !(calibrating | offcalib); //already fired mem_done on writes
                         EMI_run_state <= calibrating ? JUDGE_CALIB : (offcalib ? (we_lat ? READ_OFF : JUDGE_OFF) : IDLE);
                     end else begin
                         if (we_lat) begin //writing on read would short circuit btw
                             case (tACC_cnt)
-                                8'd2: dqs_ds <= 8'b0000_0000; //preamble
-                                8'd3: dqs_ds <= 8'b1010_1010; //burst
+                                8'd2: begin
+                                    dqs_ds <= 8'b0000_0000; //preamble
+                                    cmd[0].odt <= 1; //odt should pulse for 6 clk333 cycles which is 6 cmd slots
+                                    cmd[1].odt <= 1;
+                                    cmd[2].odt <= 1;
+                                    cmd[3].odt <= 1;
+                                end
+                                8'd3: begin
+                                    dqs_ds <= 8'b1010_1010; //burst
+                                    cmd[0].odt <= 1;
+                                end
                                 8'd4: begin //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
                                     dqs_ds <= 8'b0000_0000;
                                     dqs_md <= 0;
@@ -547,35 +588,64 @@ module EMI_600 (
                     //pattern x, z or whatever else we've at the edge of an eye
 
                     //For each lane check whether its the best run so far
-                    if (clean0_r) begin
-                        if (eye_len_cur0 == 0) start_cur0 <= tap0;
-                        eye_len_cur0 <= eye_len_cur0 + 1;
-                        if (eye_len_cur0 + 1 > eye_len_best0) begin
-                            eye_len_best0 <= eye_len_cur0 + 1;
-                            start_best0 <= (eye_len_cur0 == 0) ? tap0 : start_cur0;
-                        end
-                    end else begin
-                        eye_len_cur0 <= 0;
-                    end
-
-                    if (clean1_r) begin
-                        if (eye_len_cur1 == 0) start_cur1 <= tap1;
-                        eye_len_cur1 <= eye_len_cur1 + 1;
-                        if (eye_len_cur1 + 1 > eye_len_best1) begin
-                            eye_len_best1 <= eye_len_cur1 + 1;
-                            start_best1 <= (eye_len_cur1 == 0) ? tap1 : start_cur1;
-                        end
-                    end else begin
-                        eye_len_cur1 <= 0;
-                    end
-
-                    if (tap0 == 5'd31) begin
-                        tMRD_cnt <= 0;
-                        EMI_run_state <= EXIT_CALIB;
-                    end else begin
-                        tap0 <= tap0 + 1;
-                        tap1 <= tap1 + 1;
+                    if (cal_rd_cnt != 2'd3) begin
+                        acc_clean0 <= tap_clean0;
+                        acc_clean1 <= tap_clean1;
+                        acc_sig0 <= tap_sig0;
+                        acc_sig1 <= tap_sig1;
+                        cal_rd_cnt <= cal_rd_cnt + 1;
                         EMI_run_state <= LOAD_CALIB;
+                    end else begin
+                        cal_rd_cnt <= 0;
+
+                        if (tap_clean0) begin
+                            if (eye_len_cur0 != 0 && tap_sig0 == run_sig0) begin
+                                eye_len_cur0 <= eye_len_cur0 + 1;
+                                if (eye_len_cur0 + 1 > eye_len_best0) begin
+                                    eye_len_best0 <= eye_len_cur0 + 1;
+                                    start_best0 <= start_cur0;
+                                end
+                            end else begin
+                                start_cur0 <= tap0;
+                                run_sig0 <= tap_sig0;
+                                eye_len_cur0 <= 1;
+                                if (eye_len_best0 == 0) begin
+                                    eye_len_best0 <= 1;
+                                    start_best0 <= tap0;
+                                end
+                            end
+                        end else begin
+                            eye_len_cur0 <= 0;
+                        end
+
+                        if (tap_clean1) begin
+                            if (eye_len_cur1 != 0 && tap_sig1 == run_sig1) begin
+                                eye_len_cur1 <= eye_len_cur1 + 1;
+                                if (eye_len_cur1 + 1 > eye_len_best1) begin
+                                    eye_len_best1 <= eye_len_cur1 + 1;
+                                    start_best1 <= start_cur1;
+                                end
+                            end else begin
+                                start_cur1 <= tap1;
+                                run_sig1 <= tap_sig1;
+                                eye_len_cur1 <= 1;
+                                if (eye_len_best1 == 0) begin
+                                    eye_len_best1 <= 1;
+                                    start_best1 <= tap1;
+                                end
+                            end
+                        end else begin
+                            eye_len_cur1 <= 0;
+                        end
+
+                        if (tap0 == 5'd31) begin
+                            tMRD_cnt <= 0;
+                            EMI_run_state <= EXIT_CALIB;
+                        end else begin
+                            tap0 <= tap0 + 1;
+                            tap1 <= tap1 + 1;
+                            EMI_run_state <= LOAD_CALIB;
+                        end
                     end
                 end
                 EXIT_CALIB: begin
@@ -658,12 +728,25 @@ module EMI_600 (
             s1[i + 8] = dq_q[16*i + 8];
         end
     end
+    //So there was this bug before that it would falsely accuse edge between
+    //beats to be an eye, because between beats there is basically guaranteed
+    //To be some valid data.
     assign t0 = s0[15:1] ^ s0[14:0];
     assign t1 = s1[15:1] ^ s1[14:0];
-    assign clean0_now = (&t0[6:0]) | (&t0[7:1]) | (&t0[8:2])  | (&t0[9:3])  | (&t0[10:4])
-                      | (&t0[11:5]) | (&t0[12:6]) | (&t0[13:7]) | (&t0[14:8]);
-    assign clean1_now = (&t1[6:0]) | (&t1[7:1]) | (&t1[8:2])  | (&t1[9:3])  | (&t1[10:4])
-                      | (&t1[11:5]) | (&t1[12:6]) | (&t1[13:7]) | (&t1[14:8]);
+    always_comb begin
+        for (int i = 0; i < 9; i++) begin
+            m0[i] = (&t0[i +: 7]) & ~s0[i];
+            m1[i] = (&t1[i +: 7]) & ~s1[i];
+        end
+    end
+    assign clean0_now = |m0;
+    assign clean1_now = |m1;
+    assign sig0_now = |(m0 & 9'b0_1010_1010);
+    assign sig1_now = |(m1 & 9'b0_1010_1010);
+    assign tap_clean0 = (cal_rd_cnt == 0) ? clean0_r : (acc_clean0 & clean0_r & (sig0_r == acc_sig0));
+    assign tap_clean1 = (cal_rd_cnt == 0) ? clean1_r : (acc_clean1 & clean1_r & (sig1_r == acc_sig1));
+    assign tap_sig0 = (cal_rd_cnt == 0) ? sig0_r : acc_sig0;
+    assign tap_sig1 = (cal_rd_cnt == 0) ? sig1_r : acc_sig1;
 
     //Gotta compute them combinationally and latch, bc on next cycle they are
     //a little bit outdated. Basically I check for every byte of the 2byte
@@ -893,7 +976,7 @@ module EMI_600 (
     //dq
     logic [1:0] dqs_oq, dqs_tq, dqs_in;
     for (genvar i = 0; i < 2; i++) begin : dqs_ser
-        full_oserder dqs_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
+        full_oserder #(.TQ_MODE("BUF")) dqs_ser (.clk333(clk333), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds(dqs_ds), .trie(dqs_md), .oq(dqs_oq[i]), .tq(dqs_tq[i])
         );
 
