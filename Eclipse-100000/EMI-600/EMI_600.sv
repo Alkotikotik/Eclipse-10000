@@ -145,7 +145,7 @@ module EMI_600 (
 
     logic [7:0] open_banks;
     logic [13:0] open_bank_rows [8];
-
+    logic impaccable_hit;
 
     logic [15:0] dq_dly; //delayed dq
     logic [15:0] dly_e; //dly enable for each DQ
@@ -434,9 +434,15 @@ module EMI_600 (
                         cmd[0].a[10] <= 0; //JIC
                         tZQCS_pending <= 0;
                     end else if (tREFI_cnt > 14 && tZQCS_cnt > 64 && req && !mem_done && EMI_rdy) begin //160ns tRFC
+                        cmd[impaccable_hit_val].a[13:0] <= req_addr[23:10]; //row
+                        cmd[impaccable_hit_val].ba <= req_addr[9:7]; //bank
                         //Hit - very very good, we can straight up write
-                        if (open_banks[req_addr[9:7]] && open_bank_rows[req_addr[23:10]].req_addr[9:7] == req_addr[23:10]) begin
+                        if (impaccable_hit) begin
                             //WRITE
+                            cmd[3].cs_n <= 0;
+                            cmd[3].ras_n <= 1;
+                            cmd[3].cas_n <= 0;
+                            cmd[3].we_n <= !we_lat
 
 
                         //Closed - gotta open bank through ACT
@@ -450,11 +456,8 @@ module EMI_600 (
                             cmd[2].cas_n <= 1;
                             cmd[2].we_n  <= 1;
 
-                            cmd[2].a[13:0] <= req_addr[23:10]; //row
-                            cmd[2].ba <= req_addr[9:7]; //bank
                             open_banks[req_addr[9:7]] <= 1;
                             open_bnk_row[req_addr[23:10]].req_addr[9:7] <= req_addr[23:10];
-
                         //Complete miss - need to precharge(close) the bank and open another one
                         end else begin
                             //PREA, ACT
@@ -735,6 +738,17 @@ module EMI_600 (
                 endcase
             end
         end : main_FSM
+
+    //Combinationally compute what goes into a for RD/WD bc it can go to both
+    //IDLE and access and I hate duplicating code.
+    always_comb begin : issue //im bad at naming ik
+        impaccable_hit = open_banks[req_addr[9:7]] && (open_bank_rows[req_addr[9:7]] == req_addr[23:10]);
+        impaccable_hit_val = impaccable_hit ? 3 : 2;
+
+        a_col = (EMI_run_state == IDLE) ? req_addr[6:0] : (offcalib ? 7'h7F : col_lat);
+        //a actual
+        a_a = {3'b000, (calibrating | offcalib), a_col, 3'b000}; //auto-precharge only during calib
+    end : issue
 
     //The MRP checks is position(bitsplit) independent.
     //So its clean, then we can glue it all together.
