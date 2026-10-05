@@ -129,7 +129,13 @@ module EMI_600 (
     logic [11:0] tMRD_cnt, tREFI_cnt; //tREFI - refresh, tMRD - I use it alot tbh
     logic [7:0]  tACC_cnt; //Access counter, for RD/WR
     logic [23:0] tZQCS_cnt; //small recallibration every 128ms
-    logic tREFI_pending;
+    logic [3:0] ref_owed; //refreshes owed, DDR3 allows postponing up to 8
+    logic [4:0] tRFC_cnt; //cycles since last REF
+    logic ref_tick, tRFC_ok;
+    logic [13:0] row_lat;
+    logic [2:0]  bank_lat;
+    assign ref_tick = (tREFI_cnt > 625);
+    assign tRFC_ok  = (tRFC_cnt > 14);
     logic tZQCS_pending;
     logic rd_run;
     logic we_lat;
@@ -230,6 +236,10 @@ module EMI_600 (
             eye_len_best1 <= 0;
             tZQCS_cnt <= 0;
             tZQCS_pending <= 0;
+            ref_owed <= 0;
+            tRFC_cnt <= 5'd31;
+            row_lat <= 0;
+            bank_lat <= 0;
 
             calibrating <= 1;
             offcalib <= 0;
@@ -288,7 +298,7 @@ module EMI_600 (
                         cmd[0].a <= 14'b0;
                         EMI_init_state <= MR3;
 
-                        tREFI_pending <= 0;
+                        ref_owed <= 0;
                         tREFI_cnt <= 0;
                     end else begin
                         tMRD_cnt <= tMRD_cnt + 6'h1;
@@ -402,12 +412,16 @@ module EMI_600 (
             bitslip0 <= 0;
             bitslip1 <= 0;
             dq_q_prev <= dq_q; //again - temp var
-            if (tREFI_cnt > 625) begin //7.8us
+            if (ref_tick) begin //7.8us
                 tREFI_cnt <= 12'b0;
-                tREFI_pending <= 1;
-            end else if (!tREFI_pending) begin
+                //you can't refresh while MPR is on, however micron allows up
+                //to 5 delayed, or rather owed refreshes, so I just count how
+                //much I owed then give it back at REF. 5 should be plenty tho
+                ref_owed <= ref_owed + 1;
+            end else begin
                 tREFI_cnt <= tREFI_cnt + 12'b1;
             end
+            if (tRFC_cnt != 5'd31) tRFC_cnt <= tRFC_cnt + 1;
             if (tZQCS_cnt > 10_666_600) begin
                 tZQCS_cnt <= 24'b0;
                 tZQCS_pending <= 1;
@@ -416,33 +430,50 @@ module EMI_600 (
             end
             case (EMI_run_state)
                 IDLE: begin
-                    if (tREFI_pending && !(|tREFI_cnt)) begin
-                        //REF(resh)
-                        //As I mentioned, I have to manually refresh
-                        //Either of rows every 7.8us. The thing is tho
-                        //I just need to initiate a REF command every 7.8us
-                        //Because the ddr3's internal counter increases
-                        //On every REF and point to the next row within the
-                        //bank. Hence in 64ms it would refresh every row.
-                        cmd[0].cs_n <= 0;
-                        cmd[0].ras_n <= 0;
-                        cmd[0].cas_n <= 0;
-                        cmd[0].we_n <= 1;
-                        tREFI_pending <= 0;
-                    end else if (tZQCS_pending && tREFI_cnt > 14) begin
-                        //ZQCS recallibres drivers, mainly based on temp.
-                        //It has to be done about every 128ms.
-                        cmd[0].cs_n <= 0;
-                        cmd[0].ras_n <= 1;
-                        cmd[0].cas_n <= 1;
-                        cmd[0].we_n <= 0;
-                        cmd[0].a[10] <= 0; //JIC
-                        tZQCS_pending <= 0;
+                    if (ref_owed != 0 && tRFC_ok) begin
+                        if (|open_banks) begin
+                            //PREA
+                            cmd[0].ras_n <= 0;
+                            cmd[0].cas_n <= 1;
+                            cmd[0].we_n  <= 0;
+                            cmd[0].a[10] <= 1; //PREA
+                            open_banks <= 3'b0;
+                        end else begin
+                            //REF(resh)
+                            //As I mentioned, I have to manually refresh
+                            //Either of rows every 7.8us. The thing is tho
+                            //I just need to initiate a REF command every 7.8us
+                            //Because the ddr3's internal counter increases
+                            //On every REF and point to the next row within the
+                            //bank. Hence in 64ms it would refresh every row.
+                            cmd[2].cs_n <= 0;
+                            cmd[2].ras_n <= 0;
+                            cmd[2].cas_n <= 0;
+                            cmd[2].we_n <= 1;
+                            ref_owed <= ref_owed - 1 + ref_tick;
+                            tRFC_cnt <= 0;
+                        end
+                    end else if (tZQCS_pending && tRFC_ok) begin
+                        if (|open_banks) begin
+                            cmd[0].ras_n <= 0;
+                            cmd[0].cas_n <= 1;
+                            cmd[0].we_n  <= 0;
+                            cmd[0].a[10] <= 1;
+                            open_banks <= 3'b0;
+                        end else begin
+                            //ZQCS recallibres drivers, mainly based on temp.
+                            //It has to be done about every 128ms.
+                            cmd[2].cs_n <= 0;
+                            cmd[2].ras_n <= 1;
+                            cmd[2].cas_n <= 1;
+                            cmd[2].we_n <= 0;
+                            cmd[2].a[10] <= 0; //JIC
+                            tZQCS_pending <= 0;
+                        end
                     end else if (rdwd_rdy) begin //160ns tRFC
                         //Hit - very very good, we can straight up write
                         if (impaccable_hit) begin
                             tACC_cnt <= 2;
-
                         //Closed - gotta open bank through ACT
                         end else if (!open_banks[req_addr[9:7]]) begin
                             //Moving ACT to here to save up 12ns of latency on each access
@@ -461,8 +492,19 @@ module EMI_600 (
                             open_bank_rows[req_addr[9:7]] <= req_addr[23:10];
                         //Complete miss - need to precharge(close) the bank and open another one
                         end else begin
-                            //PREA, ACT
+                            //PRE, precharges open row within specified bank
+                            cmd[0].cs_n  <= 0;
+                            cmd[0].ras_n <= 0;
+                            cmd[0].cas_n <= 1;
+                            cmd[0].we_n  <= 0;
+                            cmd[0].ba <= req_addr[9:7];
+                            cmd[0].a[10] <= 0; //PRE
+                            open_banks[req_addr[9:7]] <= 1;
+                            open_bank_rows[req_addr[9:7]] <= req_addr[23:10];
 
+                            row_lat <= req_addr[23:10];
+                            bank_lat <= req_addr[9:7];
+                            tACC_cnt <= 0;
                         end
 
                         we_lat <= req_we; //latching jic, 25cycles afterall
@@ -493,28 +535,25 @@ module EMI_600 (
                     //ofc reduces access speed.
                     tACC_cnt <= tACC_cnt + 1;
                     if (!(|tACC_cnt)) begin //This is purely for calib
-                        cmd[2].ras_n <= calibrating;
+                        if (calibrating | offcalib) begin
+                            cmd[2].ras_n <= calibrating;
 
-                        cmd[2].a[13:0] <= 14'h3FFF; //row
-                        cmd[2].ba <= 3'b111; //bank
+                            cmd[2].a[13:0] <= 14'h3FFF; //row
+                            cmd[2].ba <= 3'b111; //bank
 
-                        we_lat <= init_offcalib; //latching jic, 25cycles afterall
-                        msk_lat <= 16'h0;
-                        wd_lat <= 128'hFFFF_EEEE_DDDD_CCCC_BBBB_AAAA_9999_8888;
-                    end else if (tACC_cnt == 8'h1) begin
-                        //READ/WRITE
-                        //On the last one so its aligned and 5cycles apart
-                        cmd[3].cs_n <= 0;
-                        cmd[3].ras_n <= 1;
-                        cmd[3].cas_n <= 0;
-                        cmd[3].we_n <= !we_lat | calibrating; //WE# = 0 on write, RD on calibrating
+                            we_lat <= init_offcalib; //latching jic, 25cycles afterall
+                            msk_lat <= 16'h0;
+                            wd_lat <= 128'hFFFF_EEEE_DDDD_CCCC_BBBB_AAAA_9999_8888;
+                        end else begin
+                            cmd[2].ras_n <= 0;
+                            cmd[2].a <= row_lat;
+                            cmd[2].ba <= bank_lat;
+                        end
 
-                        cmd[3].ba <= offcalib ? 3'b111 : cmd[2].ba; //cmd[2].ba is effectively bank lat
-                        cmd[3].a <= {3'b000, 1'b1, (offcalib ? 7'h7F : col_lat), 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
-                        cmd[3].odt <= we_lat; //odt on writes, odt terminates the signal more in .xdc
-                        rd_run <= !we_lat;
-
+                    //WRITE/READ happen below
                     end else if (tACC_cnt == (we_lat ? 8'd7 : 8)) begin
+                        //the tri state was too fast, so solution is just to move all of them 1cycle later
+                        dq_md <= 1;
                         if (!we_lat) rdata <= dq_q;
                         if (offcalib && !we_lat) begin
                             ok0_r <= ok0;
@@ -527,10 +566,10 @@ module EMI_600 (
                             sig1_r <= sig1_now;
                         end
                         if (offcalib && we_lat) init_offcalib <= 0;
-                        dqs_md <= 1;
-                        tACC_cnt <= 8'b0;
-                        mem_done <= !we_lat && !(calibrating | offcalib); //already fired mem_done on writes
-                        EMI_run_state <= calibrating ? JUDGE_CALIB : (offcalib ? (we_lat ? READ_OFF : JUDGE_OFF) : IDLE);
+                            dqs_md <= 1;
+                            tACC_cnt <= 8'b0;
+                            mem_done <= !we_lat && !(calibrating | offcalib); //already fired mem_done on writes
+                            EMI_run_state <= calibrating ? JUDGE_CALIB : (offcalib ? (we_lat ? READ_OFF : JUDGE_OFF) : IDLE);
                     end else begin
                         if (we_lat) begin //writing on read would short circuit btw
                             case (tACC_cnt)
@@ -550,8 +589,6 @@ module EMI_600 (
                                     dqs_md <= 0;
                                     dq_md <= 0;
                                 end
-                                //the tri state was too fast, so solution is just to move all of them 1cycle later
-                                8'd6: dq_md <= 1;
                             endcase
                         end
                     end
@@ -588,14 +625,7 @@ module EMI_600 (
                     //Test each cnt of taps and seeing where eye lands the
                     //best. Thats basically an actual memory training that happened
                     //On your PC when you first booted, in your CPU its cached tho.
-                    if (tREFI_pending && !(|tREFI_cnt)) begin
-                        cmd[0].cs_n <= 0;
-                        cmd[0].ras_n <= 0;
-                        cmd[0].cas_n <= 0;
-                        cmd[0].we_n <= 1;
-                        tREFI_pending <= 0;
-                        tMRD_cnt <= 0;
-                    end else if (tREFI_cnt > 14) begin
+                    if (tRFC_ok) begin
                         if (tMRD_cnt == 3) begin
                             tMRD_cnt <= 0;
                             EMI_run_state <= ACCESS;
@@ -741,6 +771,7 @@ module EMI_600 (
                 //here.
                 if (issue_rw) begin
                     //READ/WRITE
+                    //On the last one so its aligned and 5cycles apart
                     cmd[3].cs_n <= 0;
                     cmd[3].ras_n <= 1;
                     cmd[3].cas_n <= 0;
@@ -758,9 +789,9 @@ module EMI_600 (
         impaccable_hit = open_banks[req_addr[9:7]] && (open_bank_rows[req_addr[9:7]] == req_addr[23:10]);
 
         //basically a big checked moved from IDLE check
-        rdwd_rdy = !(tREFI_pending && !(|tREFI_cnt))
+        rdwd_rdy = (ref_owed == 0)
              && !tZQCS_pending
-             && tREFI_cnt > 14 && tZQCS_cnt > 64
+             && tRFC_ok && tZQCS_cnt > 64
              && req && !mem_done && EMI_rdy;
 
         //read/write
