@@ -146,6 +146,10 @@ module EMI_600 (
     logic [7:0] open_banks;
     logic [13:0] open_bank_rows [8];
     logic impaccable_hit;
+    logic rdwd_rdy, issue_rw, rw_we;
+    logic [6:0]  rw_col;
+    logic [13:0] rw_a;
+    logic [2:0]  rw_ba;
 
     logic [15:0] dq_dly; //delayed dq
     logic [15:0] dly_e; //dly enable for each DQ
@@ -194,6 +198,7 @@ module EMI_600 (
     always_ff @(posedge clkEMI or negedge rst_sync_n) begin : main_FSM
         if (!rst_sync_n) begin
             EMI_rdy <= 0;
+            open_banks <= 8'b0;
             calib_failed <= 0;
             cke_cnt <= 32'b0;
             tMRD_cnt <= 6'b0;
@@ -433,17 +438,10 @@ module EMI_600 (
                         cmd[0].we_n <= 0;
                         cmd[0].a[10] <= 0; //JIC
                         tZQCS_pending <= 0;
-                    end else if (tREFI_cnt > 14 && tZQCS_cnt > 64 && req && !mem_done && EMI_rdy) begin //160ns tRFC
-                        cmd[impaccable_hit_val].a[13:0] <= req_addr[23:10]; //row
-                        cmd[impaccable_hit_val].ba <= req_addr[9:7]; //bank
+                    end else if (rdwd_rdy) begin //160ns tRFC
                         //Hit - very very good, we can straight up write
                         if (impaccable_hit) begin
-                            //WRITE
-                            cmd[3].cs_n <= 0;
-                            cmd[3].ras_n <= 1;
-                            cmd[3].cas_n <= 0;
-                            cmd[3].we_n <= !we_lat
-
+                            tACC_cnt <= 2;
 
                         //Closed - gotta open bank through ACT
                         end else if (!open_banks[req_addr[9:7]]) begin
@@ -455,9 +453,12 @@ module EMI_600 (
                             cmd[2].ras_n <= 0;
                             cmd[2].cas_n <= 1;
                             cmd[2].we_n  <= 1;
+                            cmd[2].a <= req_addr[23:10];
+                            cmd[2].ba <= req_addr[9:7];
+                            tACC_cnt <= 1;
 
                             open_banks[req_addr[9:7]] <= 1;
-                            open_bnk_row[req_addr[23:10]].req_addr[9:7] <= req_addr[23:10];
+                            open_bank_rows[req_addr[9:7]] <= req_addr[23:10];
                         //Complete miss - need to precharge(close) the bank and open another one
                         end else begin
                             //PREA, ACT
@@ -472,7 +473,6 @@ module EMI_600 (
                         mem_done <= req_we; //I already latches all the needed data so if if its a write
                         //I don't need anything from caller hence its safe to
                         //set mem_done to 1;
-                        tACC_cnt <= 1;
                     end
                 end
                 ACCESS: begin
@@ -513,7 +513,6 @@ module EMI_600 (
                         cmd[3].a <= {3'b000, 1'b1, (offcalib ? 7'h7F : col_lat), 3'b000}; //a[10] = auto-precharge(auto-close row), a[9:0] = col
                         cmd[3].odt <= we_lat; //odt on writes, odt terminates the signal more in .xdc
                         rd_run <= !we_lat;
-
 
                     end else if (tACC_cnt == (we_lat ? 8'd7 : 8)) begin
                         if (!we_lat) rdata <= dq_q;
@@ -609,7 +608,6 @@ module EMI_600 (
                     //Check if pattern matches, if it doesn't like different
                     //pattern x, z or whatever else we've at the edge of an eye
 
-                    //For each lane check whether its the best run so far
                     if (cal_rd_cnt != 2'd3) begin
                         acc_clean0 <= tap_clean0;
                         acc_clean1 <= tap_clean1;
@@ -620,6 +618,8 @@ module EMI_600 (
                     end else begin
                         cal_rd_cnt <= 0;
 
+                        //For each lane check whether its the best run so far
+                        //It really is just that
                         if (tap_clean0) begin
                             if (eye_len_cur0 != 0 && tap_sig0 == run_sig0) begin
                                 eye_len_cur0 <= eye_len_cur0 + 1;
@@ -736,6 +736,19 @@ module EMI_600 (
                     end
                 end
                 endcase
+                //Since both IDLE and ACCESS can write, and I don't want to
+                //duplicate the code I just check it combinationally and write
+                //here.
+                if (issue_rw) begin
+                    //READ/WRITE
+                    cmd[3].cs_n <= 0;
+                    cmd[3].ras_n <= 1;
+                    cmd[3].cas_n <= 0;
+                    cmd[3].we_n <= !rw_we | calibrating;
+                    cmd[3].ba <= rw_ba;
+                    cmd[3].a <= rw_a;
+                    cmd[3].odt <= rw_we;
+                end
             end
         end : main_FSM
 
@@ -743,11 +756,22 @@ module EMI_600 (
     //IDLE and access and I hate duplicating code.
     always_comb begin : issue //im bad at naming ik
         impaccable_hit = open_banks[req_addr[9:7]] && (open_bank_rows[req_addr[9:7]] == req_addr[23:10]);
-        impaccable_hit_val = impaccable_hit ? 3 : 2;
 
-        a_col = (EMI_run_state == IDLE) ? req_addr[6:0] : (offcalib ? 7'h7F : col_lat);
-        //a actual
-        a_a = {3'b000, (calibrating | offcalib), a_col, 3'b000}; //auto-precharge only during calib
+        //basically a big checked moved from IDLE check
+        rdwd_rdy = !(tREFI_pending && !(|tREFI_cnt))
+             && !tZQCS_pending
+             && tREFI_cnt > 14 && tZQCS_cnt > 64
+             && req && !mem_done && EMI_rdy;
+
+        //read/write
+        rw_col = (EMI_run_state == IDLE) ? req_addr[6:0]
+                                        : (offcalib ? 7'h7F : col_lat); //req addr i idle lat in access
+        rw_a = {3'b000, (calibrating | offcalib), rw_col, 3'b000};//auto precharge only during calib
+        rw_ba = offcalib ? 3'b111 : (EMI_run_state == IDLE) ? req_addr[9:7] : cmd[2].ba;
+        rw_we = (EMI_run_state == IDLE) ? req_we : we_lat;
+
+        issue_rw = (EMI_run_state == IDLE && rdwd_rdy && impaccable_hit)
+                    || (EMI_run_state == ACCESS && tACC_cnt == 1);
     end : issue
 
     //The MRP checks is position(bitsplit) independent.
