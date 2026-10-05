@@ -11,6 +11,7 @@ module EMI_600 (
 
     output logic [127:0] rdata, //read data
     output logic mem_done,
+    output logic req_awck, // read acknowledged
     (* mark_debug = "true" *) output logic EMI_rdy,
 
     output logic EMI_rst_n,
@@ -134,6 +135,9 @@ module EMI_600 (
     logic ref_tick, tRFC_ok;
     logic [13:0] row_lat;
     logic [2:0]  bank_lat;
+    logic new_req, nxt_req_miss, nxt_req_closed;
+    logic [2:0]  nxt_bnk;
+    logic [13:0] nxt_row;
     assign ref_tick = (tREFI_cnt > 625);
     assign tRFC_ok  = (tRFC_cnt > 14);
     logic tZQCS_pending;
@@ -511,10 +515,8 @@ module EMI_600 (
                         msk_lat <= req_msk;
                         wd_lat <= req_wd;
                         col_lat <= req_addr[6:0];
+                        bank_lat <= req_addr[9:7];
                         EMI_run_state <= ACCESS;
-                        mem_done <= req_we; //I already latches all the needed data so if if its a write
-                        //I don't need anything from caller hence its safe to
-                        //set mem_done to 1;
                     end
                 end
                 ACCESS: begin
@@ -568,7 +570,7 @@ module EMI_600 (
                         if (offcalib && we_lat) init_offcalib <= 0;
                             dqs_md <= 1;
                             tACC_cnt <= 8'b0;
-                            mem_done <= !we_lat && !(calibrating | offcalib); //already fired mem_done on writes
+                            mem_done <= !we_lat && !(calibrating | offcalib);
                             EMI_run_state <= calibrating ? JUDGE_CALIB : (offcalib ? (we_lat ? READ_OFF : JUDGE_OFF) : IDLE);
                     end else begin
                         if (we_lat) begin //writing on read would short circuit btw
@@ -780,30 +782,67 @@ module EMI_600 (
                     cmd[3].a <= rw_a;
                     cmd[3].odt <= rw_we;
                 end
+                if (nxt_req_miss && tACC_cnt == (we_lat ? 6 : 4)) begin
+                    //4 for reads 6 for writes so just 6 ck cycles
+                    //PRE
+                    //Close bank early so IDLE can start with ACT saving 1 cycle
+                    cmd[3].ras_n <= 0;
+                    cmd[3].cas_n <= 1;
+                    cmd[3].we_n  <= 0;
+                    cmd[3].a[10] <= 0; //PRE
+                    cmd[3].ba <= nxt_bnk;
+                    open_banks[nxt_bnk] <= 0;
+                end else if (nxt_req_closed && tACC_cnt == 1) begin
+                    //ACT
+                    //So IDLE can just straight up read/write to that bank
+                    cmd[2].cs_n  <= 0;
+                    cmd[2].ras_n <= 0;
+                    cmd[2].cas_n <= 1;
+                    cmd[2].we_n  <= 1;
+                    cmd[2].a <= nxt_row;
+                    cmd[2].ba <= nxt_bnk;
+
+                    open_banks[nxt_bnk] <= 1;
+                    open_bank_rows[nxt_bnk] <= nxt_row;
+                end
             end
         end : main_FSM
 
     //Combinationally compute what goes into a for RD/WD bc it can go to both
     //IDLE and access and I hate duplicating code.
-    always_comb begin : issue //im bad at naming ik
+    always_comb begin : lookahead
         impaccable_hit = open_banks[req_addr[9:7]] && (open_bank_rows[req_addr[9:7]] == req_addr[23:10]);
 
         //basically a big checked moved from IDLE check
         rdwd_rdy = (ref_owed == 0)
              && !tZQCS_pending
              && tRFC_ok && tZQCS_cnt > 64
-             && req && !mem_done && EMI_rdy;
+             && req && EMI_rdy;
 
         //read/write
         rw_col = (EMI_run_state == IDLE) ? req_addr[6:0]
                                         : (offcalib ? 7'h7F : col_lat); //req addr i idle lat in access
+
         rw_a = {3'b000, (calibrating | offcalib), rw_col, 3'b000};//auto precharge only during calib
-        rw_ba = offcalib ? 3'b111 : (EMI_run_state == IDLE) ? req_addr[9:7] : cmd[2].ba;
+        rw_ba = offcalib ? 3'b111 : (EMI_run_state == IDLE) ? req_addr[9:7] : bank_lat;
         rw_we = (EMI_run_state == IDLE) ? req_we : we_lat;
 
         issue_rw = (EMI_run_state == IDLE && rdwd_rdy && impaccable_hit)
                     || (EMI_run_state == ACCESS && tACC_cnt == 1);
-    end : issue
+
+        req_awck = (EMI_run_state == IDLE) && rdwd_rdy;
+
+        nxt_bnk = req_addr[9:7];
+        nxt_row = req_addr[23:10];
+
+        //Actual lookahead logic it peeks at the next request and checks
+        //whether its misses/hits or closed.
+        new_req = (EMI_run_state == ACCESS) && req && !calibrating && !offcalib;
+        //Miss within bank
+        nxt_req_miss = new_req && (nxt_bnk == bank_lat) && (nxt_row != open_bank_rows[nxt_bnk]);
+        //closed bank
+        nxt_req_closed = new_req && (nxt_bnk != bank_lat) && !open_banks[nxt_bnk];
+    end : lookahead
 
     //The MRP checks is position(bitsplit) independent.
     //So its clean, then we can glue it all together.

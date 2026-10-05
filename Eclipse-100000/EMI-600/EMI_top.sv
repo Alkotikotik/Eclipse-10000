@@ -20,7 +20,7 @@ module EMI_board_top (
     inout  wire  [1:0]  ddr3_dqs_p, ddr3_dqs_n
 );
     logic         clkEMI, rst_sync_n;
-    logic         req, req_we, mem_done, EMI_rdy, calib_failed, error_seen;
+    logic         req, req_we, mem_done, req_awck, EMI_rdy, calib_failed, error_seen;
     logic [23:0]  req_addr;
     logic [127:0] req_wd, rdata;
     logic [15:0]  req_msk;
@@ -37,6 +37,7 @@ module EMI_board_top (
 
         .rdata(rdata),
         .mem_done(mem_done),
+        .req_awck(req_awck),
         .EMI_rdy(EMI_rdy),
 
         .EMI_rst_n(ddr3_reset_n),
@@ -69,6 +70,7 @@ module EMI_board_top (
         .rst_sync_n(rst_sync_n),
         .EMI_rdy(EMI_rdy),
         .mem_done(mem_done),
+        .req_awck(req_awck),
 
         .req(req),
         .req_we(req_we),

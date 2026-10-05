@@ -17,6 +17,7 @@ module tb;
     logic [15:0]  req_msk;
     logic [127:0] rdata;
     logic mem_done;
+    logic req_awck;
 
     initial rst_n = 0;
     initial #1000 rst_n = 1;
@@ -64,7 +65,7 @@ module tb;
 
         //write
         req_we = 1; req = 1;
-        @(posedge mem_done); req = 0;
+        @(posedge req_awck); @(posedge emi.clkEMI); req = 0;
         repeat (5) @(posedge emi.clk333);
 
         //read it back
@@ -99,6 +100,7 @@ module tb;
 
         .rdata(rdata),
         .mem_done(mem_done),
+        .req_awck(req_awck),
 
         .cs_n(cs_n),
         .ras_n(ras_n),

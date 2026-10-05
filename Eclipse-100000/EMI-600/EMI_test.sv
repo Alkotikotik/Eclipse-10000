@@ -5,6 +5,7 @@ module EMI_test (
     input logic rst_sync_n,
     input logic EMI_rdy,
     input logic mem_done,
+    input logic req_awck,
 
     output logic req,
     output logic req_we,
@@ -17,8 +18,10 @@ module EMI_test (
 );
     logic [23:0] addr;
     (* mark_debug = "true" *) logic [7:0]  pass;
-    logic        writing;
+    logic         writing;
     logic [127:0] expected;
+    logic [23:0]  chk_addr; //address of the read that comes back next
+    logic [7:0]   chk_pass;
 
     //Basically writing some value and then reading from that address and
     //checking whether its the same
@@ -35,14 +38,25 @@ module EMI_test (
             pass <= 0;
             writing <= 1;
             error_seen <= 0;
-        end else if (mem_done) begin
-            if (!writing && rdata != expected) error_seen <= 1;
-            if (addr == 24'hFF_FFFF) begin //whole memory
-                addr <= 0;
-                writing <= !writing;
-                if (!writing) pass <= pass + 1;
-            end else
-                addr <= addr + 1;
+            chk_addr <= 0;
+            chk_pass <= 0;
+        end else begin
+            if (req_awck) begin
+                if (addr == 24'hFF_FFFF) begin //whole memory
+                    addr <= 0;
+                    writing <= !writing;
+                    if (!writing) pass <= pass + 1;
+                end else
+                    addr <= addr + 1;
+            end
+            if (mem_done) begin
+                if (rdata != {4{chk_pass ^ 8'hFA, chk_addr}}) error_seen <= 1;
+                if (chk_addr == 24'hFF_FFFF) begin
+                    chk_addr <= 0;
+                    chk_pass <= chk_pass + 1;
+                end else
+                    chk_addr <= chk_addr + 1;
+            end
         end
     end
 
