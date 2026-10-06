@@ -141,20 +141,19 @@ module EMI_600 (
     assign ref_tick = (tREFI_cnt > 625);
     assign tRFC_ok  = (tRFC_cnt > 14);
     logic tZQCS_pending;
-    logic rd_run;
     logic we_lat;
-    logic pure_rd;
-    logic [8:0]   rd_pipe;
+    logic pure_rd, pure_wr;
+    logic [7:0]   rd_pipe;
+    logic [5:0]   wr_pipe;
     logic [2:0]   lat0, lat1, lat_max;
     logic miss_blocked;
-    logic [15:0]  msk_lat;
-    logic [127:0] wd_lat;
+    logic [15:0]  msk_lat, msk_temp, msk_temp2, msk_reg;
+    logic [127:0] wd_lat, wd_temp, wd_temp2, wd_reg;
     logic [6:0]   col_lat;
     logic [127:0] dq_q; //thats a funny word
     logic [127:0] dq_q_prev; //temp imma change it later
     logic dqs_md, dq_md; //dq Manipulation disable 1 = (z), 0 = EMI drives
     logic [7:0]   dqs_ds;
-    logic [2:0]   beat;
     logic cke_r;
 
     logic [7:0] open_banks;
@@ -229,7 +228,6 @@ module EMI_600 (
                 cmd[i] <= {cs_n: 1, ras_n: 1, cas_n: 1, we_n: 1, ba: 3'b0, a: 14'b0, cke: 0, odt: 0};
             end
             cke_r <= 0;
-            rd_run <= 0;
             we_lat <= 0;
             col_lat <= 0;
             dqs_md <= 1;
@@ -242,6 +240,7 @@ module EMI_600 (
             early_pre_cnt <= 0;
             early_act_cnt <= 0;
             rd_pipe <= 0;
+            wr_pipe <= 0;
 
             dly_e <= 0;
             tap0 <= 0;
@@ -260,7 +259,13 @@ module EMI_600 (
             tRFC_cnt <= 5'd31;
             row_lat <= 0;
             wd_lat <= 0;
+            wd_temp <= 0;
+            wd_temp2 <= 0;
+            wd_reg <= 0;
             msk_lat <= 0;
+            msk_temp <= 0;
+            msk_temp2 <= 0;
+            msk_reg <= 0;
             dq_q_prev <= 0;
             tREFI_cnt <= 0;
             bank_lat <= 0;
@@ -458,7 +463,7 @@ module EMI_600 (
             end
             case (EMI_run_state)
                 IDLE: begin
-                    if (ref_owed != 0 && tRFC_ok && !rd_pipe[0]) begin
+                    if (ref_owed != 0 && tRFC_ok && !rd_pipe[0] && !wr_pipe[3:0]) begin
                         if (|open_banks) begin
                             //PREA
                             cmd[0].ras_n <= 0;
@@ -481,7 +486,7 @@ module EMI_600 (
                             ref_owed <= ref_owed - 1 + ref_tick;
                             tRFC_cnt <= 0;
                         end
-                    end else if (tZQCS_pending && tRFC_ok && !rd_pipe[0]) begin
+                    end else if (tZQCS_pending && tRFC_ok && !rd_pipe[0] && !wr_pipe[3:0]) begin
                         if (|open_banks) begin
                             cmd[0].ras_n <= 0;
                             cmd[0].cas_n <= 1;
@@ -502,12 +507,11 @@ module EMI_600 (
                         EMI_run_state <= ACCESS;
                         //Hit - very very good, we can straight up write
                         if (impaccable_hit) begin
-                            tACC_cnt <= 2;
                             hit_cnt <= hit_cnt + 1;
                             //RD already issued, no need for access, however
                             //if next instruction is read as well, we can
                             //issue it on the next cycle bc we are in IDLE.
-                           if (!req_we) EMI_run_state <= IDLE;
+                            EMI_run_state <= IDLE;
                         //Closed - gotta open bank through ACT
                         end else if (!open_banks[req_addr[9:7]]) begin
                             //Moving ACT to here to save up 12ns of latency on each access
@@ -584,7 +588,6 @@ module EMI_600 (
                     //WRITE/READ happen below
                     end else if (tACC_cnt == (we_lat ? 8'd7 : 8)) begin
                         //the tri state was too fast, so solution is just to move all of them 1cycle later
-                        dq_md <= 1;
                         if (calibrating) begin
                             clean0_r <= clean0_now;
                             clean1_r <= clean1_now;
@@ -592,30 +595,8 @@ module EMI_600 (
                             sig1_r <= sig1_now;
                         end
                         if (offcalib && we_lat) init_offcalib <= 0;
-                            dqs_md <= 1;
                             tACC_cnt <= 8'b0;
                             EMI_run_state <= calibrating ? JUDGE_CALIB : (offcalib ? (we_lat ? READ_OFF : JUDGE_OFF) : IDLE);
-                    end else begin
-                        if (we_lat) begin //writing on read would short circuit btw
-                            case (tACC_cnt)
-                                8'd2: begin
-                                    dqs_ds <= 8'b0000_0000; //preamble
-                                    cmd[0].odt <= 1; //odt should pulse for 6 clk333 cycles which is 6 cmd slots
-                                    cmd[1].odt <= 1;
-                                    cmd[2].odt <= 1;
-                                    cmd[3].odt <= 1;
-                                end
-                                8'd3: begin
-                                    dqs_ds <= 8'b1010_1010; //burst
-                                    cmd[0].odt <= 1;
-                                end
-                                8'd4: begin //DQS manipulations enable, meaning EMI is driving DQ, not ddr3 or someone else
-                                    dqs_ds <= 8'b0000_0000;
-                                    dqs_md <= 0;
-                                    dq_md <= 0;
-                                end
-                            endcase
-                        end
                     end
                 end
                 INIT_CALIB: begin
@@ -849,7 +830,19 @@ module EMI_600 (
                 //of FSM. So I can issue next instruction sooner without
                 //waiting for ACCESS to end.
                 //And thats a really nice trick - a shifter I just love it
-                rd_pipe <= {rd_pipe[7:0], pure_rd};
+                rd_pipe <= {rd_pipe[6:0], pure_rd};
+                wr_pipe <= {wr_pipe[4:0], pure_wr};
+
+                //So if we do consequetive writes wd_lat wouldn't get
+                //ovverwritten, and wd_reg becomes exactly at the right time
+                //when its read from to ddr3 which is t+3 from the start
+                wd_temp <= wd_lat;
+                wd_temp2 <= wd_temp;
+                wd_reg <= wd_temp2; //yes thats kinda expensive but only ff wise, and i've got 126k of ffs
+                //same for msk
+                msk_temp <= msk_lat;
+                msk_temp2 <= msk_temp;
+                msk_reg <= msk_temp2;
                 //And this is latency calibration, basically rdata wasn't
                 //working, i didn't know why. But yeah the fix is very similar
                 //to other calibs, just shift it by the lanetcy found,
@@ -864,6 +857,20 @@ module EMI_600 (
                         lat1 <= rd_pipe[4] ? 3'd4 : rd_pipe[5] ? 3'd5 : rd_pipe[6] ? 3'd6 : 3'd7;
                     end
                 end
+
+                //A case moved from ACCESS
+                //Copied it here bc its more readable
+                //Basically same thing as reads but for writes
+                if (wr_pipe[0]) begin //preamble
+                    cmd[0].odt <= 1;
+                    cmd[1].odt <= 1;
+                    cmd[2].odt <= 1;
+                    cmd[3].odt <= 1;
+                end
+                if (wr_pipe[1]) cmd[0].odt <= 1;
+                dqs_ds <= wr_pipe[1] ? 8'b1010_1010 : 8'b0000_0000; //burst
+                dq_md  <= !(|wr_pipe[4:2]); //I love that trick
+                dqs_md <= !(|wr_pipe[4:2]);
             end
         end : main_FSM
 
@@ -879,15 +886,16 @@ module EMI_600 (
         impaccable_hit = open_banks[req_addr[9:7]] && (open_bank_rows[req_addr[9:7]] == req_addr[23:10]);
 
         //basically a big checked moved from IDLE check
-        miss_blocked = open_banks[req_addr[9:7]] && !impaccable_hit && rd_pipe[0];
+        miss_blocked = open_banks[req_addr[9:7]] && !impaccable_hit && (rd_pipe[0] || |wr_pipe[3:0]);
         rdwd_rdy = (ref_owed == 0)
-             && !tZQCS_pending
-             && tRFC_ok && tZQCS_cnt > 64
-             && req && EMI_rdy
-             && !miss_blocked
-             //Prevent read/write collision, which is short circuit I talked about.
-             //The immediate switch between two only costs 2 EMI cycles
-             && !(req_we && rd_pipe[0]);
+            && !tZQCS_pending
+            && tRFC_ok && tZQCS_cnt > 64
+            && req && EMI_rdy
+            && !miss_blocked
+            //Prevent read/write collision, which is short circuit I talked about.
+            //The immediate switch between two only costs 2 EMI cycles
+            && !(req_we && rd_pipe[0])
+            && !(!req_we && |wr_pipe[2:0]);
         //the data is shifted by the latency found during calib, and then
         //masked.
         rdata = (((lat0 < lat_max) ? dq_q_prev : dq_q) & {8{16'h00FF}})
@@ -895,11 +903,8 @@ module EMI_600 (
 
         //So im gonna pipeline the EMI, bc micron allows it, it only needs
         //some delay of 4ck, which is exactly 1EMI cycle between consequetive
-        //reads. 8th cycle of rd btw, bc takes 1EMI cycle for pure_rd from actual
-        //rd call for ff to settle
+        //reads. Which is same cycle
         mem_done = rd_pipe[lat_max] && !offcalib;
-
-        pure_rd = issue_rw && !rw_we && !calibrating;
 
         //read/write
         rw_col = (EMI_run_state == IDLE) ? req_addr[6:0]
@@ -907,10 +912,14 @@ module EMI_600 (
 
         rw_a = {3'b000, (calibrating | offcalib), rw_col, 3'b000};//auto precharge only during calib
         rw_ba = offcalib ? 3'b111 : (EMI_run_state == IDLE) ? req_addr[9:7] : bank_lat;
-        rw_we = (EMI_run_state == IDLE) ? req_we : we_lat;
+        rw_we = ((EMI_run_state == IDLE) ? req_we : we_lat);
 
         issue_rw = (EMI_run_state == IDLE && rdwd_rdy && impaccable_hit)
                     || (EMI_run_state == ACCESS && tACC_cnt == 1);
+
+        //Ik duplicate but alternatives just doesn't matter after syntehzises
+        pure_rd = issue_rw && !rw_we && !calibrating;
+        pure_wr = issue_rw &&  rw_we && !calibrating;
 
         req_awck = (EMI_run_state == IDLE) && rdwd_rdy;
 
@@ -1178,14 +1187,14 @@ module EMI_600 (
         //That literally like beats i had previosely, 8writes of 16bits for 4clk
         full_oserder #(.TQ_MODE("BUF")) dq_ser (.clk333(clk90), .clkEMI(clkEMI), .rst_n(rst_sync_n),
             .ds({
-                wd_lat[i + 112],
-                wd_lat[i + 96],
-                wd_lat[i + 80],
-                wd_lat[i + 64],
-                wd_lat[i + 48],
-                wd_lat[i + 32],
-                wd_lat[i + 16],
-                wd_lat[i + 00]
+                wd_reg[i + 112],
+                wd_reg[i + 96],
+                wd_reg[i + 80],
+                wd_reg[i + 64],
+                wd_reg[i + 48],
+                wd_reg[i + 32],
+                wd_reg[i + 16],
+                wd_reg[i + 00]
             }), .trie(dq_md), .oq(dq_oq[i]), .tq(dq_tq[i])
         );
 
