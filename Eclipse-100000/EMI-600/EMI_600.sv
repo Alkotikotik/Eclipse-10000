@@ -154,7 +154,9 @@ module EMI_600 (
     logic cke_r;
 
     logic [7:0] open_banks;
-    logic [13:0] open_bank_rows [8];
+    //LUTRAM
+    (* ram_style = "distributed" *) logic [13:0] open_bank_rows [8];
+    logic tbl_we;
     logic impaccable_hit;
     logic rdwd_rdy, issue_rw, rw_we;
     logic [6:0]  rw_col;
@@ -186,6 +188,10 @@ module EMI_600 (
     logic bitslip0, bitslip1, ok0, ok1;
     (* mark_debug = "true" *) logic done0, done1, ok0_r, ok1_r;
     logic [63:0] lane0_bytes, lane1_bytes;
+
+
+    //Just for debug
+    (* mark_debug = "true" *) logic [15:0] hit_cnt, closed_cnt, miss_cnt, early_pre_cnt, early_act_cnt;
 
 
     logic LOCKED;
@@ -227,6 +233,12 @@ module EMI_600 (
             dqs_ds <= 8'b0000_0000;
             rdata <= 128'h0;
 
+            hit_cnt <= 0;
+            closed_cnt <= 0;
+            miss_cnt <= 0;
+            early_pre_cnt <= 0;
+            early_act_cnt <= 0;
+
             dly_e <= 0;
             tap0 <= 0;
             tap1 <= 0;
@@ -243,6 +255,10 @@ module EMI_600 (
             ref_owed <= 0;
             tRFC_cnt <= 5'd31;
             row_lat <= 0;
+            wd_lat <= 0;
+            msk_lat <= 0;
+            dq_q_prev <= 0;
+            tREFI_cnt <= 0;
             bank_lat <= 0;
 
             calibrating <= 1;
@@ -478,6 +494,7 @@ module EMI_600 (
                         //Hit - very very good, we can straight up write
                         if (impaccable_hit) begin
                             tACC_cnt <= 2;
+                            hit_cnt <= hit_cnt + 1;
                         //Closed - gotta open bank through ACT
                         end else if (!open_banks[req_addr[9:7]]) begin
                             //Moving ACT to here to save up 12ns of latency on each access
@@ -493,7 +510,7 @@ module EMI_600 (
                             tACC_cnt <= 1;
 
                             open_banks[req_addr[9:7]] <= 1;
-                            open_bank_rows[req_addr[9:7]] <= req_addr[23:10];
+                            closed_cnt <= closed_cnt + 1;
                         //Complete miss - need to precharge(close) the bank and open another one
                         end else begin
                             //PRE, precharges open row within specified bank
@@ -504,11 +521,11 @@ module EMI_600 (
                             cmd[0].ba <= req_addr[9:7];
                             cmd[0].a[10] <= 0; //PRE
                             open_banks[req_addr[9:7]] <= 1;
-                            open_bank_rows[req_addr[9:7]] <= req_addr[23:10];
 
                             row_lat <= req_addr[23:10];
                             bank_lat <= req_addr[9:7];
                             tACC_cnt <= 0;
+                            miss_cnt <= miss_cnt + 1;
                         end
 
                         we_lat <= req_we; //latching jic, 25cycles afterall
@@ -792,6 +809,7 @@ module EMI_600 (
                     cmd[3].a[10] <= 0; //PRE
                     cmd[3].ba <= nxt_bnk;
                     open_banks[nxt_bnk] <= 0;
+                    early_pre_cnt <= early_pre_cnt + 1;
                 end else if (nxt_req_closed && tACC_cnt == 1) begin
                     //ACT
                     //So IDLE can just straight up read/write to that bank
@@ -803,10 +821,17 @@ module EMI_600 (
                     cmd[2].ba <= nxt_bnk;
 
                     open_banks[nxt_bnk] <= 1;
-                    open_bank_rows[nxt_bnk] <= nxt_row;
+                    early_act_cnt <= early_act_cnt + 1;
                 end
             end
         end : main_FSM
+
+    //Row table in LUTRAM: no reset, one write port, async read
+    assign tbl_we = (EMI_run_state == IDLE && rdwd_rdy && !impaccable_hit)   //closed or miss opens a new row
+                 || (nxt_req_closed && tACC_cnt == 1);                       //early ACT
+    always_ff @(posedge clkEMI) begin
+        if (tbl_we) open_bank_rows[req_addr[9:7]] <= req_addr[23:10];
+    end
 
     //Combinationally compute what goes into a for RD/WD bc it can go to both
     //IDLE and access and I hate duplicating code.
@@ -839,7 +864,7 @@ module EMI_600 (
         //whether its misses/hits or closed.
         new_req = (EMI_run_state == ACCESS) && req && !calibrating && !offcalib;
         //Miss within bank
-        nxt_req_miss = new_req && (nxt_bnk == bank_lat) && (nxt_row != open_bank_rows[nxt_bnk]);
+        nxt_req_miss = new_req && (nxt_bnk == bank_lat) && (nxt_row != open_bank_rows[req_addr[9:7]]);
         //closed bank
         nxt_req_closed = new_req && (nxt_bnk != bank_lat) && !open_banks[nxt_bnk];
     end : lookahead
