@@ -77,7 +77,7 @@ module tb;
     //print every read as it comes back
     always @(negedge emi.clkEMI) if (mem_done) $display("%t rdata = %h", $time, rdata);
 
-    EMI_600 emi (
+    EMI_1200 emi (
         .clk_crystal(clk_crystal),
         .rst_n(rst_n),
         .EMI_rst_n(EMI_rst_n),

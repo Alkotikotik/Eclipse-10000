@@ -25,7 +25,7 @@ module EMI_board_top (
     logic [127:0] req_wd, rdata;
     logic [15:0]  req_msk;
 
-    EMI_600 EMI (
+    EMI_1200 EMI (
         .clk_crystal(sys_clk),
         .rst_n(sys_rst_n),
 

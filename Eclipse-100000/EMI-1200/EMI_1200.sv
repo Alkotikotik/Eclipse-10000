@@ -1,5 +1,7 @@
-module EMI_600 (
-    //Eclipse Memory Interface(EMI)
+module EMI_1200 (
+    //Eclipse Memory Interface(EMI) - 1200
+    //1200 because it achieves up to 1208MB/s on sequential
+    //Read/Writes.
     input logic clk_crystal,
     input logic rst_n,
 
@@ -12,10 +14,10 @@ module EMI_600 (
     output logic [127:0] rdata, //read data
     output logic mem_done,
     output logic req_awck, // read acknowledged
-    (* mark_debug = "true" *) output logic EMI_rdy,
+    output logic EMI_rdy,
 
     output logic EMI_rst_n,
-    (* mark_debug = "true" *) output logic calib_failed,
+    output logic calib_failed,
 
     output logic cke,
     output logic ck_p,
@@ -106,7 +108,7 @@ module EMI_600 (
         READ_OFF,
         JUDGE_OFF
     } run_states;
-    (* mark_debug = "true" *) run_states EMI_run_state;
+    run_states EMI_run_state;
 
     //Struct just syntehzises into wires.
     //Basically in 1EMI clk imma send 4 packed commands to OSERDES
@@ -128,7 +130,7 @@ module EMI_600 (
 
     logic [31:0] cke_cnt; //cke init
     logic [11:0] tMRD_cnt, tREFI_cnt; //tREFI - refresh, tMRD - I use it alot tbh
-    logic [7:0]  tACC_cnt; //Access counter, for RD/WR
+    logic [3:0]  tACC_cnt; //Access counter, for RD/WR
     logic [23:0] tZQCS_cnt; //small recallibration every 128ms
     logic [3:0] ref_owed; //refreshes owed, DDR3 allows postponing up to 8
     logic [4:0] tRFC_cnt; //cycles since last REF
@@ -162,6 +164,7 @@ module EMI_600 (
     logic tbl_we;
     logic impaccable_hit;
     logic rdwd_rdy, issue_rw, rw_we;
+    logic [1:0] rw_slot;
     logic [6:0]  rw_col;
     logic [13:0] rw_a;
     logic [2:0]  rw_ba;
@@ -172,30 +175,29 @@ module EMI_600 (
     logic [79:0] dly_tap_out; //for debugging rn
     logic        idelay_rdy; //whether idelay is ready
     logic calibrating;
-    (* mark_debug = "true" *) logic [15:0] s0, s1; //dq is actually split into 2
+    logic [15:0] s0, s1; //dq is actually split into 2
     logic [14:0] t0, t1;
     logic clean0_now, clean1_now;
-    (* mark_debug = "true" *) logic clean0_r, clean1_r;
+    logic clean0_r, clean1_r;
     logic [8:0] m0, m1;
     logic sig0_now, sig1_now;
-    (* mark_debug = "true" *) logic sig0_r, sig1_r;
+    logic sig0_r, sig1_r;
     logic acc_clean0, acc_clean1, acc_sig0, acc_sig1, run_sig0, run_sig1;
     logic tap_clean0, tap_clean1, tap_sig0, tap_sig1;
     logic [1:0] cal_rd_cnt;
     //Literally debug so vivado tracks it
-    (* mark_debug = "true" *) logic [4:0] tap0, tap1;
+    logic [4:0] tap0, tap1;
     logic [4:0] start_cur0, start_cur1, start_best0, start_best1;
     logic [5:0] eye_len_cur0, eye_len_cur1;
-    (* mark_debug = "true" *) logic [5:0] eye_len_best0, eye_len_best1;
+    logic [5:0] eye_len_best0, eye_len_best1;
     logic offcalib, init_offcalib;
     logic bitslip0, bitslip1, ok0, ok1;
     logic [3:0] slip_cnt0, slip_cnt1;
-    (* mark_debug = "true" *) logic done0, done1, found0, found1;
+    logic done0, done1, found0, found1;
     logic [63:0] lane0_bytes, lane1_bytes;
 
 
     //Just for debug
-    (* mark_debug = "true" *) logic [15:0] hit_cnt, closed_cnt, miss_cnt, early_pre_cnt, early_act_cnt;
 
 
     logic LOCKED;
@@ -222,7 +224,7 @@ module EMI_600 (
             calib_failed <= 0;
             cke_cnt <= 32'b0;
             tMRD_cnt <= 6'b0;
-            tACC_cnt <= 8'b0;
+            tACC_cnt <= 4'b0;
             EMI_rst_n <= 0;
             for (integer i = 0; i <= 3; i++) begin
                 cmd[i] <= {cs_n: 1, ras_n: 1, cas_n: 1, we_n: 1, ba: 3'b0, a: 14'b0, cke: 0, odt: 0};
@@ -234,11 +236,6 @@ module EMI_600 (
             dq_md <= 1;
             dqs_ds <= 8'b0000_0000;
 
-            hit_cnt <= 0;
-            closed_cnt <= 0;
-            miss_cnt <= 0;
-            early_pre_cnt <= 0;
-            early_act_cnt <= 0;
             rd_pipe <= 0;
             wr_pipe <= 0;
 
@@ -507,7 +504,6 @@ module EMI_600 (
                         EMI_run_state <= ACCESS;
                         //Hit - very very good, we can straight up write
                         if (impaccable_hit) begin
-                            hit_cnt <= hit_cnt + 1;
                             //RD already issued, no need for access, however
                             //if next instruction is read as well, we can
                             //issue it on the next cycle bc we are in IDLE.
@@ -527,7 +523,6 @@ module EMI_600 (
                             tACC_cnt <= 1;
 
                             open_banks[req_addr[9:7]] <= 1;
-                            closed_cnt <= closed_cnt + 1;
                         //Complete miss - need to precharge(close) the bank and open another one
                         end else begin
                             //PRE, precharges open row within specified bank
@@ -542,7 +537,6 @@ module EMI_600 (
                             row_lat <= req_addr[23:10];
                             bank_lat <= req_addr[9:7];
                             tACC_cnt <= 0;
-                            miss_cnt <= miss_cnt + 1;
                         end
 
                         we_lat <= req_we; //latching jic, 25cycles afterall
@@ -586,7 +580,7 @@ module EMI_600 (
                         end
 
                     //WRITE/READ happen below
-                    end else if (tACC_cnt == (we_lat ? 8'd7 : 8)) begin
+                    end else if (tACC_cnt == (we_lat ? 4'd7 : 8)) begin
                         //the tri state was too fast, so solution is just to move all of them 1cycle later
                         if (calibrating) begin
                             clean0_r <= clean0_now;
@@ -595,7 +589,7 @@ module EMI_600 (
                             sig1_r <= sig1_now;
                         end
                         if (offcalib && we_lat) init_offcalib <= 0;
-                            tACC_cnt <= 8'b0;
+                            tACC_cnt <= 4'b0;
                             EMI_run_state <= calibrating ? JUDGE_CALIB : (offcalib ? (we_lat ? READ_OFF : JUDGE_OFF) : IDLE);
                     end
                 end
@@ -643,7 +637,6 @@ module EMI_600 (
                 JUDGE_CALIB: begin
                     //Check if pattern matches, if it doesn't like different
                     //pattern x, z or whatever else we've at the edge of an eye
-
                     if (cal_rd_cnt != 2'd3) begin
                         acc_clean0 <= tap_clean0;
                         acc_clean1 <= tap_clean1;
@@ -746,7 +739,7 @@ module EMI_600 (
                 end
                 JUDGE_OFF: begin
                     //lane 0 = low byte of each beat, lane 1 = high byte
-                    if (tMRD_cnt == 1) begin
+                    if (tMRD_cnt == 2) begin
                         if (!done0) begin
                             if (found0) done0 <= 1;
                             else begin
@@ -768,8 +761,9 @@ module EMI_600 (
                         offcalib <= 0;
                         EMI_rdy <= 1;
                         EMI_run_state <= IDLE;
-                        lat_max <= (lat0 > lat1) ? lat0 : lat1;
-                        if (lat0 > lat1 + 3'd1 || lat1 > lat0 + 3'd1) begin
+                        lat_max <= lat0;
+                        //Should be good
+                        if (lat0 != lat1) begin
                             calib_failed <= 1;
                             EMI_rdy <= 0;
                         end
@@ -794,13 +788,13 @@ module EMI_600 (
                 if (issue_rw) begin
                     //READ/WRITE
                     //On the last one so its aligned and 5cycles apart
-                    cmd[3].cs_n <= 0;
-                    cmd[3].ras_n <= 1;
-                    cmd[3].cas_n <= 0;
-                    cmd[3].we_n <= !rw_we | calibrating;
-                    cmd[3].ba <= rw_ba;
-                    cmd[3].a <= rw_a;
-                    cmd[3].odt <= rw_we;
+                    cmd[rw_slot].cs_n <= 0;
+                    cmd[rw_slot].ras_n <= 1;
+                    cmd[rw_slot].cas_n <= 0;
+                    cmd[rw_slot].we_n <= !rw_we | calibrating;
+                    cmd[rw_slot].ba <= rw_ba;
+                    cmd[rw_slot].a <= rw_a;
+                    cmd[rw_slot].odt <= rw_we;
                 end
                 if (nxt_req_miss && tACC_cnt == (we_lat ? 6 : 4)) begin
                     //4 for reads 6 for writes so just 6 ck cycles
@@ -812,7 +806,6 @@ module EMI_600 (
                     cmd[3].a[10] <= 0; //PRE
                     cmd[3].ba <= nxt_bnk;
                     open_banks[nxt_bnk] <= 0;
-                    early_pre_cnt <= early_pre_cnt + 1;
                 end else if (nxt_req_closed && tACC_cnt == 1) begin
                     //ACT
                     //So IDLE can just straight up read/write to that bank
@@ -824,7 +817,6 @@ module EMI_600 (
                     cmd[2].ba <= nxt_bnk;
 
                     open_banks[nxt_bnk] <= 1;
-                    early_act_cnt <= early_act_cnt + 1;
                 end
                 //This keeps pipeline of current instruction stage independent
                 //of FSM. So I can issue next instruction sooner without
@@ -889,7 +881,7 @@ module EMI_600 (
         miss_blocked = open_banks[req_addr[9:7]] && !impaccable_hit && (rd_pipe[0] || |wr_pipe[3:0]);
         rdwd_rdy = (ref_owed == 0)
             && !tZQCS_pending
-            && tRFC_ok && tZQCS_cnt > 64
+            && tRFC_ok && tZQCS_cnt > 16
             && req && EMI_rdy
             && !miss_blocked
             //Prevent read/write collision, which is short circuit I talked about.
@@ -898,8 +890,7 @@ module EMI_600 (
             && !(!req_we && |wr_pipe[2:0]);
         //the data is shifted by the latency found during calib, and then
         //masked.
-        rdata = (((lat0 < lat_max) ? dq_q_prev : dq_q) & {8{16'h00FF}})
-                | (((lat1 < lat_max) ? dq_q_prev : dq_q) & {8{16'hFF00}});
+        rdata = dq_q;
 
         //So im gonna pipeline the EMI, bc micron allows it, it only needs
         //some delay of 4ck, which is exactly 1EMI cycle between consequetive
@@ -915,7 +906,8 @@ module EMI_600 (
         rw_we = ((EMI_run_state == IDLE) ? req_we : we_lat);
 
         issue_rw = (EMI_run_state == IDLE && rdwd_rdy && impaccable_hit)
-                    || (EMI_run_state == ACCESS && tACC_cnt == 1);
+                    || (EMI_run_state == ACCESS && tACC_cnt == ((we_lat || calibrating) ? 8'd1 : 8'd2));
+        rw_slot = (rw_we || calibrating) ? 2'd3 : 2'd0;
 
         //Ik duplicate but alternatives just doesn't matter after syntehzises
         pure_rd = issue_rw && !rw_we && !calibrating;
