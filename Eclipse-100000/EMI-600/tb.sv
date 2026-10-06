@@ -70,7 +70,7 @@ module tb;
 
         //read it back
         req_we = 0; req = 1;
-        @(posedge mem_done); req = 0;
+        @(posedge mem_done); @(negedge emi.clkEMI); req = 0;
 
         $display("rdata = %h", rdata);
         if (rdata == req_wd) $display("PASS");

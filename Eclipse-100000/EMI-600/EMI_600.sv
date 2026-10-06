@@ -143,14 +143,16 @@ module EMI_600 (
     logic tZQCS_pending;
     logic rd_run;
     logic we_lat;
+    logic pure_rd;
+    logic [6:0]   rd_pipe;
     logic [15:0]  msk_lat;
     logic [127:0] wd_lat;
     logic [6:0]   col_lat;
     logic [127:0] dq_q; //thats a funny word
     logic [127:0] dq_q_prev; //temp imma change it later
     logic dqs_md, dq_md; //dq Manipulation disable 1 = (z), 0 = EMI drives
-    logic [7:0]  dqs_ds;
-    logic [2:0]  beat;
+    logic [7:0]   dqs_ds;
+    logic [2:0]   beat;
     logic cke_r;
 
     logic [7:0] open_banks;
@@ -186,6 +188,7 @@ module EMI_600 (
     (* mark_debug = "true" *) logic [5:0] eye_len_best0, eye_len_best1;
     logic offcalib, init_offcalib;
     logic bitslip0, bitslip1, ok0, ok1;
+    logic [3:0] slip_cnt0, slip_cnt1;
     (* mark_debug = "true" *) logic done0, done1, ok0_r, ok1_r;
     logic [63:0] lane0_bytes, lane1_bytes;
 
@@ -224,20 +227,19 @@ module EMI_600 (
                 cmd[i] <= {cs_n: 1, ras_n: 1, cas_n: 1, we_n: 1, ba: 3'b0, a: 14'b0, cke: 0, odt: 0};
             end
             cke_r <= 0;
-            mem_done <= 0;
             rd_run <= 0;
             we_lat <= 0;
             col_lat <= 0;
             dqs_md <= 1;
             dq_md <= 1;
             dqs_ds <= 8'b0000_0000;
-            rdata <= 128'h0;
 
             hit_cnt <= 0;
             closed_cnt <= 0;
             miss_cnt <= 0;
             early_pre_cnt <= 0;
             early_act_cnt <= 0;
+            rd_pipe <= 0;
 
             dly_e <= 0;
             tap0 <= 0;
@@ -266,6 +268,8 @@ module EMI_600 (
             init_offcalib <= 0;
             bitslip0 <= 0;
             bitslip1 <= 0;
+            slip_cnt0 <= 0;
+            slip_cnt1 <= 0;
             done0 <= 0;
             done1 <= 0;
             ok0_r <= 0;
@@ -428,7 +432,6 @@ module EMI_600 (
                 cmd[i].cke   <= cke_r;
                 cmd[i].odt   <= 0;
             end
-            mem_done <= 0;
             bitslip0 <= 0;
             bitslip1 <= 0;
             dq_q_prev <= dq_q; //again - temp var
@@ -573,7 +576,6 @@ module EMI_600 (
                     end else if (tACC_cnt == (we_lat ? 8'd7 : 8)) begin
                         //the tri state was too fast, so solution is just to move all of them 1cycle later
                         dq_md <= 1;
-                        if (!we_lat) rdata <= dq_q;
                         if (offcalib && !we_lat) begin
                             ok0_r <= ok0;
                             ok1_r <= ok1;
@@ -587,7 +589,6 @@ module EMI_600 (
                         if (offcalib && we_lat) init_offcalib <= 0;
                             dqs_md <= 1;
                             tACC_cnt <= 8'b0;
-                            mem_done <= !we_lat && !(calibrating | offcalib);
                             EMI_run_state <= calibrating ? JUDGE_CALIB : (offcalib ? (we_lat ? READ_OFF : JUDGE_OFF) : IDLE);
                     end else begin
                         if (we_lat) begin //writing on read would short circuit btw
@@ -760,11 +761,17 @@ module EMI_600 (
                     if (tMRD_cnt == 0) begin
                         if (!done0) begin
                             if (ok0_r) done0 <= 1;
-                            else bitslip0 <= 1;
+                            else begin
+                                bitslip0 <= 1;
+                                slip_cnt0 <= slip_cnt0 + 1;
+                            end
                         end
                         if (!done1) begin
                             if (ok1_r) done1 <= 1;
-                            else bitslip1 <= 1;
+                            else begin
+                                bitslip1 <= 1;
+                                slip_cnt1 <= slip_cnt1 + 1;
+                            end
                         end
                     end
 
@@ -780,8 +787,11 @@ module EMI_600 (
                         tMRD_cnt <= tMRD_cnt + 1;
                     end
 
-                    if ((bitslip0 | bitslip1) > 9) begin
+                    if (slip_cnt0 > 8 || slip_cnt1 > 8) begin
                         calib_failed <= 1;
+                        EMI_rdy <= 0; //block EMI
+                        EMI_run_state <= IDLE; //keep refreshing to not kill the RAM,
+                        //but it doesn't really matter its just that no new hardware is needed
                     end
                 end
                 endcase
@@ -823,12 +833,16 @@ module EMI_600 (
                     open_banks[nxt_bnk] <= 1;
                     early_act_cnt <= early_act_cnt + 1;
                 end
+                //This keeps pipeline of current instruction stage independent
+                //of FSM. So I can issue next instruction sooner without
+                //waiting for ACCESS to end.
+                //And thats a really nice trick - a shifter I just love it
+                rd_pipe <= {rd_pipe[5:0], pure_rd};
             end
         end : main_FSM
 
-    //Row table in LUTRAM: no reset, one write port, async read
-    assign tbl_we = (EMI_run_state == IDLE && rdwd_rdy && !impaccable_hit)   //closed or miss opens a new row
-                 || (nxt_req_closed && tACC_cnt == 1);                       //early ACT
+    assign tbl_we = (EMI_run_state == IDLE && rdwd_rdy && !impaccable_hit)
+                 || (nxt_req_closed && tACC_cnt == 1); //early ACT
     always_ff @(posedge clkEMI) begin
         if (tbl_we) open_bank_rows[req_addr[9:7]] <= req_addr[23:10];
     end
@@ -843,6 +857,14 @@ module EMI_600 (
              && !tZQCS_pending
              && tRFC_ok && tZQCS_cnt > 64
              && req && EMI_rdy;
+
+        //So im gonna pipeline the EMI, bc micron allows it, it only needs
+        //some delay of 4ck, which is exactly 1EMI cycle between consequetive
+        //reads. 8th cycle of rd btw, bc takes 1EMI cycle for pure_rd from actual
+        //rd call for ff to settle
+        mem_done = rd_pipe[6];
+
+        pure_rd = issue_rw && !rw_we && !(calibrating | offcalib);
 
         //read/write
         rw_col = (EMI_run_state == IDLE) ? req_addr[6:0]
@@ -868,6 +890,8 @@ module EMI_600 (
         //closed bank
         nxt_req_closed = new_req && (nxt_bnk != bank_lat) && !open_banks[nxt_bnk];
     end : lookahead
+    //Saving up 1 cycle on reads by assigning comb
+    assign rdata = dq_q;
 
     //The MRP checks is position(bitsplit) independent.
     //So its clean, then we can glue it all together.
