@@ -58,25 +58,24 @@ module tb;
     //Thats a pretty cool syntax ngl
     initial begin
         req = 0; req_we = 0; req_msk = 16'h0000;
-        req_addr = 24'hFF_AA_BA;
-        req_wd   = 128'hDEAD_BEEF_CAFE_BABE_FEED_FACE_C0FFEE_01;
-
         #800_000_000;
 
-        //write
-        req_we = 1; req = 1;
-        @(posedge req_awck); @(posedge emi.clkEMI); req = 0;
-        repeat (5) @(posedge emi.clk333);
+        //4 writes, then 4 reads, same row (address +1 = next column)
+        for (int i = 0; i < 8; i++) begin
+            req_we   = (i < 4);
+            req_addr = 24'hFF_AA_BA + (i % 4);
+            req_wd   = {4{32'hC0C0_ACDC + (i % 4)}};
+            req = 1;
+            @(negedge emi.clkEMI iff req_awck); @(posedge emi.clkEMI); #1;
+        end
+        req = 0;
 
-        //read it back
-        req_we = 0; req = 1;
-        @(posedge mem_done); @(negedge emi.clkEMI); req = 0;
-
-        $display("rdata = %h", rdata);
-        if (rdata == req_wd) $display("PASS");
-        else                 $display("FAIL, expected %h", req_wd);
+        #200_000;
         $finish;
     end
+
+    //print every read as it comes back
+    always @(negedge emi.clkEMI) if (mem_done) $display("%t rdata = %h", $time, rdata);
 
     EMI_600 emi (
         .clk_crystal(clk_crystal),

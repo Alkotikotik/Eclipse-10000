@@ -144,7 +144,9 @@ module EMI_600 (
     logic rd_run;
     logic we_lat;
     logic pure_rd;
-    logic [6:0]   rd_pipe;
+    logic [8:0]   rd_pipe;
+    logic [2:0]   lat0, lat1, lat_max;
+    logic miss_blocked;
     logic [15:0]  msk_lat;
     logic [127:0] wd_lat;
     logic [6:0]   col_lat;
@@ -189,7 +191,7 @@ module EMI_600 (
     logic offcalib, init_offcalib;
     logic bitslip0, bitslip1, ok0, ok1;
     logic [3:0] slip_cnt0, slip_cnt1;
-    (* mark_debug = "true" *) logic done0, done1, ok0_r, ok1_r;
+    (* mark_debug = "true" *) logic done0, done1, found0, found1;
     logic [63:0] lane0_bytes, lane1_bytes;
 
 
@@ -272,7 +274,10 @@ module EMI_600 (
             slip_cnt1 <= 0;
             done0 <= 0;
             done1 <= 0;
-            ok0_r <= 0;
+            found0 <= 0;
+            lat0 <= 0;
+            lat1 <= 0;
+            lat_max <= 0;
             clean0_r <= 0;
             clean1_r <= 0;
             sig0_r <= 0;
@@ -284,7 +289,7 @@ module EMI_600 (
             run_sig0 <= 0;
             run_sig1 <= 0;
             cal_rd_cnt <= 0;
-            ok1_r <= 0;
+            found1 <= 0;
 
             EMI_init_state <= INIT_INIT;
             EMI_run_state <= IDLE;
@@ -453,7 +458,7 @@ module EMI_600 (
             end
             case (EMI_run_state)
                 IDLE: begin
-                    if (ref_owed != 0 && tRFC_ok) begin
+                    if (ref_owed != 0 && tRFC_ok && !rd_pipe[0]) begin
                         if (|open_banks) begin
                             //PREA
                             cmd[0].ras_n <= 0;
@@ -476,7 +481,7 @@ module EMI_600 (
                             ref_owed <= ref_owed - 1 + ref_tick;
                             tRFC_cnt <= 0;
                         end
-                    end else if (tZQCS_pending && tRFC_ok) begin
+                    end else if (tZQCS_pending && tRFC_ok && !rd_pipe[0]) begin
                         if (|open_banks) begin
                             cmd[0].ras_n <= 0;
                             cmd[0].cas_n <= 1;
@@ -494,10 +499,15 @@ module EMI_600 (
                             tZQCS_pending <= 0;
                         end
                     end else if (rdwd_rdy) begin //160ns tRFC
+                        EMI_run_state <= ACCESS;
                         //Hit - very very good, we can straight up write
                         if (impaccable_hit) begin
                             tACC_cnt <= 2;
                             hit_cnt <= hit_cnt + 1;
+                            //RD already issued, no need for access, however
+                            //if next instruction is read as well, we can
+                            //issue it on the next cycle bc we are in IDLE.
+                           if (!req_we) EMI_run_state <= IDLE;
                         //Closed - gotta open bank through ACT
                         end else if (!open_banks[req_addr[9:7]]) begin
                             //Moving ACT to here to save up 12ns of latency on each access
@@ -536,7 +546,6 @@ module EMI_600 (
                         wd_lat <= req_wd;
                         col_lat <= req_addr[6:0];
                         bank_lat <= req_addr[9:7];
-                        EMI_run_state <= ACCESS;
                     end
                 end
                 ACCESS: begin
@@ -576,10 +585,6 @@ module EMI_600 (
                     end else if (tACC_cnt == (we_lat ? 8'd7 : 8)) begin
                         //the tri state was too fast, so solution is just to move all of them 1cycle later
                         dq_md <= 1;
-                        if (offcalib && !we_lat) begin
-                            ok0_r <= ok0;
-                            ok1_r <= ok1;
-                        end
                         if (calibrating) begin
                             clean0_r <= clean0_now;
                             clean1_r <= clean1_now;
@@ -754,20 +759,22 @@ module EMI_600 (
                     //bit offset is a built-in feature of ISERDES called
                     //BITSLIP, so I just test each BITSLIP, figure out which value
                     //Reads the exact data.
+                    found0 <= 0;
+                    found1 <= 0;
                     EMI_run_state <= ACCESS; //READ
                 end
                 JUDGE_OFF: begin
                     //lane 0 = low byte of each beat, lane 1 = high byte
-                    if (tMRD_cnt == 0) begin
+                    if (tMRD_cnt == 1) begin
                         if (!done0) begin
-                            if (ok0_r) done0 <= 1;
+                            if (found0) done0 <= 1;
                             else begin
                                 bitslip0 <= 1;
                                 slip_cnt0 <= slip_cnt0 + 1;
                             end
                         end
                         if (!done1) begin
-                            if (ok1_r) done1 <= 1;
+                            if (found1) done1 <= 1;
                             else begin
                                 bitslip1 <= 1;
                                 slip_cnt1 <= slip_cnt1 + 1;
@@ -775,11 +782,16 @@ module EMI_600 (
                         end
                     end
 
-                    if ((done0 | ok0_r) && (done1 | ok1_r)) begin //calib doneeee
+                    if ((done0 | found0) && (done1 | found1)) begin //calib doneeee
                         tMRD_cnt <= 0;
                         offcalib <= 0;
                         EMI_rdy <= 1;
                         EMI_run_state <= IDLE;
+                        lat_max <= (lat0 > lat1) ? lat0 : lat1;
+                        if (lat0 > lat1 + 3'd1 || lat1 > lat0 + 3'd1) begin
+                            calib_failed <= 1;
+                            EMI_rdy <= 0;
+                        end
                     end else if (tMRD_cnt > 3) begin
                         tMRD_cnt <= 0;
                         EMI_run_state <= READ_OFF;
@@ -837,7 +849,21 @@ module EMI_600 (
                 //of FSM. So I can issue next instruction sooner without
                 //waiting for ACCESS to end.
                 //And thats a really nice trick - a shifter I just love it
-                rd_pipe <= {rd_pipe[5:0], pure_rd};
+                rd_pipe <= {rd_pipe[7:0], pure_rd};
+                //And this is latency calibration, basically rdata wasn't
+                //working, i didn't know why. But yeah the fix is very similar
+                //to other calibs, just shift it by the lanetcy found,
+                //nothing too complicated.
+                if (offcalib && |rd_pipe[7:4]) begin
+                    if (ok0 && !found0) begin
+                        found0 <= 1;
+                        lat0 <= rd_pipe[4] ? 3'd4 : rd_pipe[5] ? 3'd5 : rd_pipe[6] ? 3'd6 : 3'd7;
+                    end
+                    if (ok1 && !found1) begin
+                        found1 <= 1;
+                        lat1 <= rd_pipe[4] ? 3'd4 : rd_pipe[5] ? 3'd5 : rd_pipe[6] ? 3'd6 : 3'd7;
+                    end
+                end
             end
         end : main_FSM
 
@@ -853,18 +879,27 @@ module EMI_600 (
         impaccable_hit = open_banks[req_addr[9:7]] && (open_bank_rows[req_addr[9:7]] == req_addr[23:10]);
 
         //basically a big checked moved from IDLE check
+        miss_blocked = open_banks[req_addr[9:7]] && !impaccable_hit && rd_pipe[0];
         rdwd_rdy = (ref_owed == 0)
              && !tZQCS_pending
              && tRFC_ok && tZQCS_cnt > 64
-             && req && EMI_rdy;
+             && req && EMI_rdy
+             && !miss_blocked
+             //Prevent read/write collision, which is short circuit I talked about.
+             //The immediate switch between two only costs 2 EMI cycles
+             && !(req_we && rd_pipe[0]);
+        //the data is shifted by the latency found during calib, and then
+        //masked.
+        rdata = (((lat0 < lat_max) ? dq_q_prev : dq_q) & {8{16'h00FF}})
+                | (((lat1 < lat_max) ? dq_q_prev : dq_q) & {8{16'hFF00}});
 
         //So im gonna pipeline the EMI, bc micron allows it, it only needs
         //some delay of 4ck, which is exactly 1EMI cycle between consequetive
         //reads. 8th cycle of rd btw, bc takes 1EMI cycle for pure_rd from actual
         //rd call for ff to settle
-        mem_done = rd_pipe[6];
+        mem_done = rd_pipe[lat_max] && !offcalib;
 
-        pure_rd = issue_rw && !rw_we && !(calibrating | offcalib);
+        pure_rd = issue_rw && !rw_we && !calibrating;
 
         //read/write
         rw_col = (EMI_run_state == IDLE) ? req_addr[6:0]
@@ -891,7 +926,6 @@ module EMI_600 (
         nxt_req_closed = new_req && (nxt_bnk != bank_lat) && !open_banks[nxt_bnk];
     end : lookahead
     //Saving up 1 cycle on reads by assigning comb
-    assign rdata = dq_q;
 
     //The MRP checks is position(bitsplit) independent.
     //So its clean, then we can glue it all together.
