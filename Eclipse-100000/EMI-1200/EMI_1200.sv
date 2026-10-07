@@ -1,7 +1,18 @@
 module EMI_1200 (
     //Eclipse Memory Interface(EMI) - 1200
-    //1200 because it achieves up to 1208MB/s on sequential
-    //Read/Writes.
+    //EMI is lightweight yet fast memory interface, using only 535LUT6s and 819FFs
+    //1200 because it achieves up to 1208MB/s on sequential Read/Writes.
+    //With row changing every 8accesses it is around 600MB/s
+    //With constantely alternating WRITEs/READs EMI runs at 366MB/s
+    //On a truly random access speed drops down to about 130MB/s
+    //so just don't do it.
+    //The latency on hit is 7clkEMI cycles which is 84ns
+    //Latency on closed is 108ns, and 120ns on a miss.
+    //However at the very worst case is about 470ns where
+    //REF hits right before access.
+    //EMI utilizes only 1PLL and 4BUFGs
+    //1clkEMI cycle is 83.3MHz, and interface clk is 333.3MHz
+    //I tested it on my board with DDR3-667 on CL5.
     input logic clk_crystal,
     input logic rst_n,
 
