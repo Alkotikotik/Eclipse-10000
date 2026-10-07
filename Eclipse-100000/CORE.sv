@@ -1342,7 +1342,6 @@ module CORE(
     assign EX_gpr1 = EX_rx1_val;
     assign EX_gpr2 = EX_rx2_val;
 
-
     function automatic [31:0] fwd_mux(input from_mem, input [1:0] mem_byte, input [7:2] fwd_src, input [31:0] mem_val, input [31:0] ex_val);
         unique case ({mem_byte[1], from_mem, mem_byte[0]})
             3'b010:  fwd_mux[7:0] = mem_val[7:0];
