@@ -15,9 +15,9 @@ module RAM(
     /* verilator lint_on UNUSEDSIGNAL */
     output logic [63:0] instr_data_out
 );
-    logic [7:0] ramm [0:67108863]; //64MB
-    logic [11:0] unused_bits;
-    assign unused_bits = {addrRead[31:26], addrWrite[31:26]};
+    logic [7:0] ramm [0:268435455]; //256MB babyyy
+    logic [7:0] unused_bits;
+    assign unused_bits = {addrRead[31:28], addrWrite[31:28]};
     initial begin
         $readmemh("program.hex", ramm);
     end
@@ -27,15 +27,15 @@ module RAM(
     //Reads give the whole word, MEM picks the fragment, so as usual
     always_ff @(posedge clk) begin
         if (mem_read) begin
-            data_out <= {ramm[addrRead[25:0]    ],
-                         ramm[addrRead[25:0] + 1],
-                         ramm[addrRead[25:0] + 2],
-                         ramm[addrRead[25:0] + 3]};
+            data_out <= {ramm[addrRead[27:0]    ],
+                         ramm[addrRead[27:0] + 1],
+                         ramm[addrRead[27:0] + 2],
+                         ramm[addrRead[27:0] + 3]};
         end
     end
 
     logic [31:0] ia4;
-    assign ia4 = {6'h0, instr_address[25:2], 2'b00};   // 4-byte aligned
+    assign ia4 = {4'h0, instr_address[27:2], 2'b00};   // 4-byte aligned
     //IF needs instruction every cycle so read enable isn't even needed
     assign instr_data_out = {ramm[ia4+4], ramm[ia4+5],
                             ramm[ia4+6], ramm[ia4+7],
@@ -45,15 +45,15 @@ module RAM(
     always_ff @(posedge clk) begin
         if (mem_write) begin
             if (byte_enable == 4'b1111) begin
-                ramm[addrWrite[25:0]    ] <= data_in[31:24];
-                ramm[addrWrite[25:0] + 1] <= data_in[23:16];
-                ramm[addrWrite[25:0] + 2] <= data_in[15:8];
-                ramm[addrWrite[25:0] + 3] <= data_in[7:0];
+                ramm[addrWrite[27:0]    ] <= data_in[31:24];
+                ramm[addrWrite[27:0] + 1] <= data_in[23:16];
+                ramm[addrWrite[27:0] + 2] <= data_in[15:8];
+                ramm[addrWrite[27:0] + 3] <= data_in[7:0];
             end else if (byte_enable == 4'b0011) begin
-                ramm[addrWrite[25:0]    ] <= data_in[15:8];
-                ramm[addrWrite[25:0] + 1] <= data_in[7:0];
+                ramm[addrWrite[27:0]    ] <= data_in[15:8];
+                ramm[addrWrite[27:0] + 1] <= data_in[7:0];
             end else begin
-                ramm[addrWrite[25:0]    ] <= data_in[7:0];
+                ramm[addrWrite[27:0]    ] <= data_in[7:0];
             end
         end
     end

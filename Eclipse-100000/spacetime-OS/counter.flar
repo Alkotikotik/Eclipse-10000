@@ -18,11 +18,12 @@ inline[
 
     #ORG 116 >_ 0x74 ZeroDiv
         RETU
+    #ORG 0x1000
     ~boot:
 outline];
 
 
-#def u32 VRAM_BASE = 0x04000000;
+#def u32 VRAM_BASE = 0x10000000;
 #def u32 SCREEN_WIDTH = 640;
 
 >_ 16x8 font, I drew it in font Forge and formatted using quick rust script it ../fonts/export_font.rs

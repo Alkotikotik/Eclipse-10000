@@ -15,6 +15,7 @@ inline[
 
     #ORG 112   >_ 0x70 Memory Fault Vector
         RETU
+    #ORG 0x1000
     ~boot:
 outline];
 
@@ -26,7 +27,7 @@ regarch RGBA {
 };
 
 func main() {
-    u32 ptr = 0x04000000;
+    u32 ptr = 0x10000000;
     [4096] = 11;
 
     #rx29 RGBA colors;

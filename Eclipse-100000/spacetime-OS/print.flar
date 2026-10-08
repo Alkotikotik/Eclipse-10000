@@ -18,11 +18,12 @@ inline[
 
     #ORG 116 >_ 0x74 ZeroDiv
         RETU
+    #ORG 0x1000
     ~boot:
 outline];
 
 
-#def u32 VRAM_BASE = 0x04000000;
+#def u32 VRAM_BASE = 0x10000000;
 #def u32 SCREEN_WIDTH = 640;
 #def #rz293 u8 last_key = 0xFF;
 #def #rz292 u8 key_ready = 0;
@@ -253,7 +254,7 @@ func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len){
 
     for [u32 char; char < len; char = char + 1] {
         u32 char_idx = [string + char];
-        [4000 + char * 4] = [string + char];
+        >_[4000 + char * 4] = [string + char];
 
         if [char_idx == 0xFF]{ >_0xFF is no character
             return;
@@ -283,13 +284,13 @@ func kprintr(u16 cell_x, u16 cell_y, u16 fg, u16 bg, *u8 string, u8 len){
 }
 
 func HandleKey() {
-    #rx0 u32 ioAddr = 0x04100000;
+    #rx0 u32 ioAddr = 0x10100000;
     #rx1 u32 ioVal  = [ioAddr];
     last_key = ioVal as u8;
 
-    ioAddr = 0x04100004;
+    ioAddr = 0x10100004;
     ioVal  = [ioAddr];
-    [0x4100010] = ioVal;
+    [0x10100010] = ioVal;
 
     if [ioVal == 0] {
         if [last_key >= 11] {

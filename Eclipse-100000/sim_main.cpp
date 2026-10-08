@@ -240,7 +240,7 @@ int main(int argc, char **argv) {
 
     std::cout << "\n--- VRAM DUMP ---" << std::endl;
     for (uint32_t vram_offset = 0; vram_offset <= 0x200; vram_offset += 4) {
-        uint32_t bus_addr = 0x04000000 + vram_offset;
+        uint32_t bus_addr = 0x10000000 + vram_offset;
         uint32_t word = (vram_buffer[vram_offset + 0] << 24) | (vram_buffer[vram_offset + 1] << 16) |
                         (vram_buffer[vram_offset + 2] << 8) | vram_buffer[vram_offset + 3];
 
@@ -272,7 +272,7 @@ int main(int argc, char **argv) {
 
     std::cout << "\n--- MMIO DUMP ---" << std::endl;
     for (uint32_t vram_offset = 0; vram_offset <= 0x10; vram_offset += 4) {
-        uint32_t bus_addr = 0x04100000 + vram_offset;
+        uint32_t bus_addr = 0x10100000 + vram_offset;
         uint32_t word = (vram_buffer[vram_offset + 0] << 24) | (vram_buffer[vram_offset + 1] << 16) |
                         (vram_buffer[vram_offset + 2] << 8) | vram_buffer[vram_offset + 3];
 

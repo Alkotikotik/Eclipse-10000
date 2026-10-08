@@ -1,54 +1,113 @@
-JMP ~init_0x00
-#[ init_db 32 =>>= globals_0x00 ]#
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-#[ end ]#
-
+#ORG 60
+~JmpBoot:
+	JMP ~boot
+	
+#ORG 100   >_ 0x64 Syscall Vector
+	RETU
+	
+#ORG 104   >_ 0x68 Timer Vector
+	RETU
+	
+#ORG 108   >_ 0x6C Key Interrupt Vector
+	JMP ~HandleKey
+	>_RETU
+	
+#ORG 112   >_ 0x70 Memory Fault Vector
+	RETU
+#ORG 0x1000
+~boot:
+#ORG 0x1000
+LMA rx31 <- ~this_is_the_end_0x00
+SPRSET rx31 -> SP
 ~init_0x00:
 	XOR [rx31, rx31]
-	LMA  rx30 <- *globals_0x00
-	SPRSET rx30 -> GP
 
 ~main:
-	SPRSUB rx31 ->SP<- 32
-	SPRLEA rx27 <- [SP 0]
-	LOAD rx25 <- 0
+	LMA  rx26 <- 268435456
+	LOAD rx30 <- 11
+	STX  rx30 >=> [rx31, rx31 << 0 + 4096]
+	LOAD rx29 <- 0
+	LOAD rz290 <- 15
+	LOAD rz291 <- 0
+	LOAD rz292 <- 0
+	LOAD rz293 <- 15
+	LOAD rz250 <- 0
 
-	IBGEU [rx25 <-> 4] >-> ~Lab_for_end_1
+~Lab_while_start_0:
+	LOAD rx30 <- 12
+	STX  rx30 >=> [rx31, rx31 << 0 + 4092]
+	MOV  rz280 <- rz290 0
+	MOV  rx27 <- rz280 0
+	SHL  [rx27, rx31 12]
+	MOV  rz280 <- rz291 0
+	MOV  rx28 <- rz280 0
+	SHL  [rx28, rx31 8]
+	OR  [rx27, rx28 0]
+	MOV  rz280 <- rz292 0
+	MOV  rx28 <- rz280 0
+	SHL  [rx28, rx31 4]
+	OR  [rx27, rx28 0]
+	MOV  rz280 <- rz293 0
+	MOV  rx30 <- rz280 0
+	MOV  ry280 <- rx27 0
+	OR  [ry280, rx30 0]
+	STR  ry280 -> [rx26 0]
+	ADD  rx26 <- [rx26, rx31 2]
+
+	IBNE [rz250 <-> 0] >-> ~Lab_else_2
+
+	SUB  rz290 <- [rz290, rx31 1]
+	ADD  rz291 <- [rz291, rx31 1]
+	MOV  rz280 <- rz291 0
+
+	IBNE [rz280 <-> 15] >-> ~Lab_endif_5
+
+	LOAD rz250 <- 1
+
+~Lab_endif_5:
+	JMP  -> ~Lab_endif_3
 
 
-~Lab_for_start_0:
-	LOAD rx26 <- 0
+~Lab_else_2:
 
-	IBGEU [rx26 <-> 4] >-> ~Lab_for_end_3
+	IBNE [rz250 <-> 1] >-> ~Lab_else_6
 
+	SUB  rz291 <- [rz291, rx31 1]
+	ADD  rz292 <- [rz292, rx31 1]
+	MOV  rz280 <- rz292 0
 
-~Lab_for_start_2:
-	MUL  rx29 <- [rx26, rx25 0]
-	MDSX ry290 >=> [rx27, [rx26 * 2] + [rx25 << 3] + 0]
-	SPRLEA rx29 <- [GP 0]
-	MDLX ry280 <=< [rx29, [rx26 * 2] + [rx25 << 3] + 0]
-	SPRLEA rx29 <- [GP 0]
-	MDSX ry280 >=> [rx29, [rx25 * 2] + [rx26 << 3] + 0]
-	SPRLEA rx29 <- [GP 0]
-	MDLX ry280 <=< [rx29, [rx25 * 2] + [rx26 << 3] + 0]
-	LOAD rx30 <- 4
-	MUL  rx29 <- [rx26, rx30 0]
-	LOAD rx30 <- 4000
-	ADD  rx29 <- [rx30, rx29 0]
-	ADD  rx29 <- [rx29, rx25 0]
-	STR  ry280 -> [rx29 0]
-	ADD  rx26 <- [rx26, rx31 1]
+	IBNE [rz280 <-> 15] >-> ~Lab_endif_9
 
-	IBSU [rx26 <-> 4] >-> ~Lab_for_start_2
+	LOAD rz250 <- 2
+
+~Lab_endif_9:
+	JMP  -> ~Lab_endif_7
 
 
-~Lab_for_end_3:
-	ADD  rx25 <- [rx25, rx31 1]
+~Lab_else_6:
 
-	IBSU [rx25 <-> 4] >-> ~Lab_for_start_0
+	IBNE [rz250 <-> 2] >-> ~Lab_endif_11
+
+	SUB  rz292 <- [rz292, rx31 1]
+	ADD  rz290 <- [rz290, rx31 1]
+	MOV  rz280 <- rz290 0
+
+	IBNE [rz280 <-> 15] >-> ~Lab_endif_13
+
+	LOAD rz250 <- 0
+
+~Lab_endif_13:
+
+~Lab_endif_11:
+
+~Lab_endif_7:
+
+~Lab_endif_3:
+	LOAD rx30 <- 13
+	STX  rx30 >=> [rx31, rx31 << 0 + 4088]
+	JMP  -> ~Lab_while_start_0
 
 
-~Lab_for_end_1:
-	SPRADD rx31 ->SP<- 32
+~Lab_while_end_1:
 	RET
+~this_is_the_end_0x00:

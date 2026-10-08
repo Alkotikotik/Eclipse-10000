@@ -45,10 +45,12 @@ rz212 mid-high 8 bits of rx21
 //Big endian
 Thats it
 
-//VRAM & Screen
+//VRAM & Screen & Stack
+ISA is dedicated at 256MB of main memory
 There is dedicated 1MB of VRAM at 04000000 - 0x040FFFFF, the screen resolution is 480p. The pixel format is standard RGBA4444, taking up exactly 2bytes or u16
 
-By default stack lives at 0x03FFFFF0
+The stack grows upwards and hence starts at lower addresses right after program. The ISA provides a dedicated GP register that suppose to point to the SP at the start of the program, but nothing enforces that.
+
 //Opcodes
 ALU Instructions (R-Type)
 000100 : MOV    rx0, rx1

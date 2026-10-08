@@ -4,8 +4,11 @@ use std::fmt::Write;
 
 pub fn generate_assembly(asm_in: Vec<AsmInst>, globals: Option<(&str, &[u8])>) -> Result<String, std::fmt::Error> {
     let mut assembly = String::new();
+    writeln!(assembly, "#ORG 0x1000")?; //KSP
+    writeln!(assembly, "LMA rx31 <- ~this_is_the_end_0x00")?;
+    writeln!(assembly, "SPRSET rx31 -> SP")?;
 
-     if let Some((label, image)) = globals {
+    if let Some((label, image)) = globals {
         if !image.is_empty() {
             writeln!(assembly, "JMP ~init_0x00")?; //So it wouldn't literally execute globals
             writeln!(assembly, "#[ init_db {} =>>= {} ]#", image.len(), label)?;
@@ -90,7 +93,7 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>, globals: Option<(&str, &[u8])>) -
             AsmInst::Mdcx(dest, base, idx, stride, sh, val, off) => {
                 writeln!(assembly, "\tMDCX {} <=< [{}, [{} * {}] + [{} << {}] + {}]", dest, base, idx, stride, sh, val, off)?
             }
-            
+
             AsmInst::SprLdr(rx0, spr, imm16) => {
                 writeln!(assembly, "\tSPRLDR {} <- [{:?} {}]", rx0, spr, imm16)?
             }
@@ -121,5 +124,6 @@ pub fn generate_assembly(asm_in: Vec<AsmInst>, globals: Option<(&str, &[u8])>) -
             AsmInst::Ret         => writeln!(assembly, "\tRET")?,
         }
     }
+    writeln!(assembly, "~this_is_the_end_0x00:")?;
     Ok(assembly)
 }

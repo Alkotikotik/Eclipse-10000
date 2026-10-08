@@ -20,7 +20,7 @@
 
 
 ~init:
-    lma rx3 <- 0x04000000
+    lma rx3 <- 0x10000000
     xor rx0, rx0
     load rx4 <- 4
 

@@ -2110,7 +2110,7 @@ impl<'a> Codegen<'a> {
         }
 
         if self.frame_size > 0 {
-            compiled.push(AsmInst::SprSub(
+            compiled.push(AsmInst::SprAdd(
                 rx31(),
                 Spr::SP,
                 AsmOperand::Imm16(self.frame_size as i16),
@@ -2126,7 +2126,7 @@ impl<'a> Codegen<'a> {
             compiled.push(AsmInst::SprStr(
                 reg_op(rx30_reg()),
                 Spr::SP,
-                AsmOperand::Imm16(self.lr_slot.unwrap() as i16),
+                AsmOperand::Imm16(self.sp_off(self.lr_slot.unwrap())),
             ));
         }
 
@@ -2281,14 +2281,20 @@ impl<'a> Codegen<'a> {
         }
     }
 
+    //Stack grows up now, so SP sits at the end of the frame and frame offset off is at SP - frame_size + off
+    fn sp_off(&self, off: usize) -> i16 {
+        (off as i32 - self.frame_size as i32) as i16
+    }
+
     //So we can load into stack, pointer, or raw address that function resolves that
     fn resolve_addr(&self, ptr_addr: &IROperand, out: &mut Vec<AsmInst>) -> (AddrBase, i32, bool) {
         match ptr_addr {
-            IROperand::FrameSlot(off) => (AddrBase::Spr(Spr::SP), *off as i32, false),
+            IROperand::FrameSlot(off) => (AddrBase::Spr(Spr::SP), self.sp_off(*off) as i32, false),
             IROperand::GlobalSlot(off) => (AddrBase::Spr(Spr::GP), *off as i32, false),
+            //Caller pushes overflowed args in reverse so fetch them in reverse as well
             IROperand::IncomingArgSlot(idx) => (
                 AddrBase::Spr(Spr::SP),
-                (self.frame_size + idx * 4) as i32,
+                -((self.frame_size + 4 + idx * 4) as i32),
                 false,
             ),
             _ if is_const(ptr_addr) && fits(const_val(ptr_addr) as i64, 29, true) => {
@@ -2997,7 +3003,7 @@ impl<'a> Codegen<'a> {
                 out.push(AsmInst::SprLea(
                     dest_asm,
                     Spr::SP,
-                    AsmOperand::Imm16(*offset as i16),
+                    AsmOperand::Imm16(self.sp_off(*offset)),
                 ));
             }
             IRInst::GlobalAddr { dest, offset } => {
@@ -3078,7 +3084,7 @@ impl<'a> Codegen<'a> {
                 out.push(AsmInst::Call(name.clone()));
 
                 if !stack_args.is_empty() {
-                    out.push(AsmInst::SprAdd(
+                    out.push(AsmInst::SprSub(
                         rx31(),
                         Spr::SP,
                         AsmOperand::Imm16((stack_args.len() * 4) as i16),
@@ -3105,7 +3111,7 @@ impl<'a> Codegen<'a> {
                     out.push(AsmInst::SprLdr(
                         reg_op(rx30_reg()),
                         Spr::SP,
-                        AsmOperand::Imm16(lr_off as i16),
+                        AsmOperand::Imm16(self.sp_off(lr_off)),
                     ));
                     out.push(AsmInst::SprSet(reg_op(rx30_reg()), Spr::LR));
                 }
@@ -3122,7 +3128,7 @@ impl<'a> Codegen<'a> {
                 }
 
                 if self.frame_size > 0 {
-                    out.push(AsmInst::SprAdd(
+                    out.push(AsmInst::SprSub(
                         rx31(),
                         Spr::SP,
                         AsmOperand::Imm16(self.frame_size as i16),

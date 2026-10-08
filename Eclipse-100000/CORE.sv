@@ -991,7 +991,7 @@ module CORE(
     //MMIO cs but basically in MEM
     logic MEM_mmio_cs;
     assign MEM_mmio_cs = (MEM_memTarget[31:8] == 24'hFFFFFF);
-    assign MEM_io_cs   = (MEM_memTarget[31:8] == 24'h041000);
+    assign MEM_io_cs   = (MEM_memTarget[31:8] == 24'h101000);
 
     //MEM stalls when waiting for memory, soon when FPGA will arrive ill make
     //a MIG and SDRAM connection and that will govern mem_ready, however at
@@ -1456,8 +1456,8 @@ module CORE(
     logic [31:0] other_addr;
     always_comb begin
         unique case (opcode)
-            6'b100100: other_addr = (SelectedSPR - {29'd0, push_pop_bytes}); // PUSH
-            6'b100101: other_addr = SelectedSPR;                            // POP
+            6'b100100: other_addr = SelectedSPR - {29'd0, (EX_kernel_mode ? push_pop_bytes : 3'd0)}; // PUSH
+            6'b100101: other_addr = SelectedSPR - {29'd0, (EX_kernel_mode ? 3'd0 : push_pop_bytes)}; // POP
             6'b101000,
             6'b101001,
             6'b101101: other_addr = SelectedSPR + sign_ext_imm16;      // SPRLDR/SPRSTR/SPRLEA
@@ -1488,8 +1488,10 @@ module CORE(
     logic [31:0] spr_other;
     always_comb begin
         unique case (SPRSrc)
-            3'b100:  spr_other = SelectedSPR - {29'd0, push_pop_bytes};    // PUSH
-            3'b101:  spr_other = SelectedSPR + {29'd0, push_pop_bytes};     // POP
+            //So stack finally grows upwards, lets go, but KSP grows downwards
+            //which is pretty nice imo
+            3'b100:  spr_other = SelectedSPR + (EX_kernel_mode ? -{29'd0, push_pop_bytes} : {29'd0, push_pop_bytes}); // PUSH
+            3'b101:  spr_other = SelectedSPR + (EX_kernel_mode ? {29'd0, push_pop_bytes} : -{29'd0, push_pop_bytes}); // POP
             default: spr_other = SelectedSPR;
         endcase
     end
@@ -1525,14 +1527,14 @@ module CORE(
     assign SPRNext = (MEM_SPRSrc == 3'b011) ? MEM_rx0_val : MEM_spr_result; //SPRSET, else PUSH/POP/SPRADD/SPRSUB
 
     logic  MEM_LR_write;
-    logic [31:0] MEM_LR_val;
+    logic  [31:0] MEM_LR_val;
     assign MEM_LR_write  = isMEM_valid && (MEM_is_call || (MEM_SPRWrite && (MEM_spr_target_sel == 2'b01)));
     assign MEM_LR_val    = MEM_is_call ? MEM_PCNext : SPRNext;
 
     always_ff @(posedge clk or posedge reset) begin : SPR_ffs
         if (reset) begin
-            SP <= 32'h03FFFFF0;
-            KSP <= 32'h000000FC;
+            SP <= 32'h00001FFF; //Jic itll be reset anyway
+            KSP <= 32'h00001000; //4KB for Kernel operations
             LR  <= 32'd0;
             KScratch <= 32'd0;
             GP  <= 32'd0;
@@ -1608,10 +1610,10 @@ module CORE(
         MEM_ram_cs  = 0;
         MEM_vram_cs = 0;
 
-        if (MEM_memTarget[31:26] == 6'b0) begin //A little optimizations
+        if (MEM_memTarget[31:28] == 4'b0) begin //A little optimizations
             MEM_ram_cs = 1;
         end
-        else if (MEM_memTarget[31:20] == 12'h040) begin
+        else if (MEM_memTarget[31:20] == 12'h100) begin
             MEM_vram_cs = 1;
         end
         //Else memFault, not really actually its either IO_cs or memFault,
