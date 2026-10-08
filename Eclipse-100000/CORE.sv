@@ -1456,8 +1456,10 @@ module CORE(
     logic [31:0] other_addr;
     always_comb begin
         unique case (opcode)
-            6'b100100: other_addr = SelectedSPR - {29'd0, (EX_kernel_mode ? push_pop_bytes : 3'd0)}; // PUSH
-            6'b100101: other_addr = SelectedSPR - {29'd0, (EX_kernel_mode ? 3'd0 : push_pop_bytes)}; // POP
+            //6'b100100: other_addr = SelectedSPR - {29'd0, (EX_kernel_mode ? push_pop_bytes : 3'd0)}; // PUSH
+            //6'b100101: other_addr = SelectedSPR - {29'd0, (EX_kernel_mode ? 3'd0 : push_pop_bytes)}; // POP
+            6'b100100: other_addr = SelectedSPR + push_pop_bytes; // PUSH
+            6'b100101: other_addr = SelectedSPR - push_pop_bytes; // POP
             6'b101000,
             6'b101001,
             6'b101101: other_addr = SelectedSPR + sign_ext_imm16;      // SPRLDR/SPRSTR/SPRLEA
@@ -1490,8 +1492,11 @@ module CORE(
         unique case (SPRSrc)
             //So stack finally grows upwards, lets go, but KSP grows downwards
             //which is pretty nice imo
-            3'b100:  spr_other = SelectedSPR + (EX_kernel_mode ? -{29'd0, push_pop_bytes} : {29'd0, push_pop_bytes}); // PUSH
-            3'b101:  spr_other = SelectedSPR + (EX_kernel_mode ? {29'd0, push_pop_bytes} : -{29'd0, push_pop_bytes}); // POP
+            //3'b100:  spr_other = SelectedSPR + (EX_kernel_mode ? -{29'd0, push_pop_bytes} : {29'd0, push_pop_bytes}); // PUSH
+            //3'b101:  spr_other = SelectedSPR + (EX_kernel_mode ? {29'd0, push_pop_bytes} : -{29'd0, push_pop_bytes}); // POP
+
+            3'b100:  spr_other = SelectedSPR + push_pop_bytes; // PUSH
+            3'b100:  spr_other = SelectedSPR - push_pop_bytes; // PUSH
             default: spr_other = SelectedSPR;
         endcase
     end
