@@ -46,6 +46,7 @@ module L1_D (
     logic [12:0]  cur_tag;
     logic [143:0] D_data_read;
     logic miss;
+    logic Dreq_EMI;
 
     logic [2:0] req_cnt, mem_done_cnt;
 
@@ -54,29 +55,29 @@ module L1_D (
             Dread_addr_lat <= 28'h0;
             req_cnt <= 3'b00;
             mem_done_cnt <= 3'b00;
+            Dreq_EMI <= 0;
         end else begin
             if (advance) begin //latch em bc BRAM req starts at EX and arrives at the start of MEM
                 Dread_addr_lat <= Dread_addr;
             end
 
-            //On miss req 4reads from EMI, 4 because im prefetching.
+            //On miss req 4reads from EMI, 4 because im fetching 4 at ones.
             //basically thats kinda like cache works, if I want this data
             //chances are I might want data near it.
-            if (miss || (re | we) && req_cnt != 3) begin
-                Dreq_EMI <= 1'b1;
-                Dreq_we <= 1'b0; //READ
-                //24bits of addr. read 4conseq 128bit chunks so 512bit of
-                //total data. the [5:4] bits prefetch the data CPU needs the
-                //most first and then the rest
-                Dreq_addr <= {Dread_addr_lat[27:6], Dread_addr_lat[5:4] + req_cnt[1:0]};
-                req_cnt <= req_cnt + 1;
-                if (req_awck) begin
+            if (Dreq_EMI) begin
+                if (Dreq && req_awck) begin
+                    req_cnt <= req_cnt + 1;
+                end
+                if (mem_done) begin
                     mem_done_cnt <= mem_done_cnt + 1;
                 end
-            end else begin
-                req_cnt <= 2'b00;
-                mem_done_cnt <= 2'b00;
-                Dreq_EMI <= 1'b0;
+                if (mem_done_cnt == 4) begin
+                    req_cnt <= 3'd0;
+                    mem_done_cnt <= 3'd0;
+                    Dreq_EMI <= 1'b0;
+                end
+            end else if ((re | we) && miss) begin
+                Dreq_EMI <= 1'b1;
             end
         end
     end
@@ -85,7 +86,7 @@ module L1_D (
     //will be the same and i feel like reading on every cycle is safer.
     //also in separate always_ff without async reset, otherwise vivado
     //just wouldn't map it on actual bram bc it doesn't support async
-    //rst, or any other tbh.
+    //rst, it supports sync tho, but idgaf.
     always_ff @(posedge clk) begin : D1_read
         D_data_read[35:0] <= D_cache0[Dread_addr[14:4]];
         D_data_read[71:36] <= D_cache1[Dread_addr[14:4]];
@@ -93,32 +94,16 @@ module L1_D (
         D_data_read[143:108] <= D_cache3[Dread_addr[14:4]];
     end : D1_read
 
-    //Write to BRAM's respective address based on current beat and ofc addr
+    //Write to BRAM's respective address based on current beat and ofc addr.
+    //Also im writing tag to the parity bits which is why it looks so evil.
     always_ff @(posedge clk) begin : EMI_D1_write
-        if ((re | we) && req_cnt != 3;) begin
-            D_cache0[Dread_addr_lat[14:6], mem_done_cnt[1:0]] <= rdata[127:95];
-            D_cache1[Dread_addr_lat[14:6], mem_done_cnt[1:0]] <= rdata[94:60];
-            D_cache2[Dread_addr_lat[14:6], mem_done_cnt[1:0]] <= rdata[59:32];
-            D_cache3[Dread_addr_lat[14:6], mem_done_cnt[1:0]] <= rdata[31:0];
-
-            D_cache0[8]   <= Dread_addr_lat[31];
-            D_cache0[17]  <= Dread_addr_lat[30];
-            D_cache0[26]  <= Dread_addr_lat[29];
-            D_cache0[35]  <= Dread_addr_lat[28];
-
-            D_cache1[44]  <= Dread_addr_lat[27];
-            D_cache1[53]  <= Dread_addr_lat[26];
-            D_cache1[62]  <= Dread_addr_lat[25];
-            D_cache1[71]  <= Dread_addr_lat[24];
- 
-            D_cache2[80]  <= Dread_addr_lat[23];
-            D_cache2[89]  <= Dread_addr_lat[22];
-            D_cache2[107] <= Dread_addr_lat[21];
-            D_cache2[116] <= Dread_addr_lat[20];
-
-            D_cache3[35] <= 1;
+        if (mem_done) begin
+            D_cache0[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
+            D_cache1[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
+            D_cache2[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
+            D_cache3[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {1'b1,               EMI_rdata[127:120], 1'b0,               EMI_rdata[119:112], 1'b0,               EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
         end
-    end : EMI_D1_read
+    end : EMI_D1_write
 
     always_comb begin : data_out
         unique case (Dread_addr_lat[3:2])
@@ -128,6 +113,12 @@ module L1_D (
             2'd3: D_data_out = {D_data_read[142:135], D_data_read[133:126], D_data_read[124:117], D_data_read[115:108]};
         endcase
     end : data_out
+
+    assign Dreq_we = 1'b0;
+    //24bits of addr. read 4conseq 128bit chunks so 512bit of
+    //total data. the [5:4] bits requests the data CPU needs the
+    //most first and then the rest
+    assign Dreq_addr = Dreq ? {Dread_addr_lat[27:6], Dread_addr_lat[5:4] + req_cnt[1:0]} : 24'h0; //placeholder for later
 
     assign cur_tag = {D_data_read[8], D_data_read[17], D_data_read[26], D_data_read[35], D_data_read[44], D_data_read[53], D_data_read[62], D_data_read[71], D_data_read[80], D_data_read[89], D_data_read[98], D_data_read[107], D_data_read[116]};
     //Miss on invalid bit[143]
@@ -139,6 +130,6 @@ module L1_D (
     assign miss = !D_data_read[143] || cur_tag != Dread_addr_lat[27:15];
     //If mem_rdy would become active during read or write address will change
     //mid-access leading to corruption ofc
-    assign mem_rdy = (!re && !we) || !miss;
-    assign Dreq = Dreq_EMI; //There would be other Dreqs causes here
+    assign mem_rdy = (!re && !we) || (!miss && !Dreq_EMI);
+    assign Dreq = Dreq_EMI && req_cnt != 4; //There would be other Dreqs causes here
 endmodule
