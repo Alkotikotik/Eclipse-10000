@@ -42,29 +42,83 @@ module L1_D (
     (* ram_style = "block" *) logic [35:0] D_cache2 [0:2047];
     (* ram_style = "block" *) logic [35:0] D_cache3 [0:2047];
 
-    logic [27:0] Dread_addr_lat;
-    logic [12:0] cur_tag;
+    logic [27:0]  Dread_addr_lat;
+    logic [12:0]  cur_tag;
     logic [143:0] D_data_read;
     logic miss;
+
+    logic [2:0] req_cnt, mem_done_cnt;
 
     always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
             Dread_addr_lat <= 28'h0;
+            req_cnt <= 3'b00;
+            mem_done_cnt <= 3'b00;
         end else begin
             if (advance) begin //latch em bc BRAM req starts at EX and arrives at the start of MEM
                 Dread_addr_lat <= Dread_addr;
             end
+
+            //On miss req 4reads from EMI, 4 because im prefetching.
+            //basically thats kinda like cache works, if I want this data
+            //chances are I might want data near it.
+            if (miss || (re | we) && req_cnt != 3) begin
+                Dreq_EMI <= 1'b1;
+                Dreq_we <= 1'b0; //READ
+                //24bits of addr. read 4conseq 128bit chunks so 512bit of
+                //total data. the [5:4] bits prefetch the data CPU needs the
+                //most first and then the rest
+                Dreq_addr <= {Dread_addr_lat[27:6], Dread_addr_lat[5:4] + req_cnt[1:0]};
+                req_cnt <= req_cnt + 1;
+                if (req_awck) begin
+                    mem_done_cnt <= mem_done_cnt + 1;
+                end
+            end else begin
+                req_cnt <= 2'b00;
+                mem_done_cnt <= 2'b00;
+                Dreq_EMI <= 1'b0;
+            end
         end
     end
 
+    //reading every cycle, no matter whether its stall or not, address
+    //will be the same and i feel like reading on every cycle is safer.
+    //also in separate always_ff without async reset, otherwise vivado
+    //just wouldn't map it on actual bram bc it doesn't support async
+    //rst, or any other tbh.
     always_ff @(posedge clk) begin : D1_read
-            //Reading every cycle, no matter whether its stall or not, address
-            //will be the same and i feel like reading on every cycle is safer.
-            D_data_read[35:0] <= D_cache0[Dread_addr[14:4]];
-            D_data_read[71:36] <= D_cache1[Dread_addr[14:4]];
-            D_data_read[107:72] <= D_cache2[Dread_addr[14:4]];
-            D_data_read[143:108] <= D_cache3[Dread_addr[14:4]];
+        D_data_read[35:0] <= D_cache0[Dread_addr[14:4]];
+        D_data_read[71:36] <= D_cache1[Dread_addr[14:4]];
+        D_data_read[107:72] <= D_cache2[Dread_addr[14:4]];
+        D_data_read[143:108] <= D_cache3[Dread_addr[14:4]];
     end : D1_read
+
+    //Write to BRAM's respective address based on current beat and ofc addr
+    always_ff @(posedge clk) begin : EMI_D1_write
+        if ((re | we) && req_cnt != 3;) begin
+            D_cache0[Dread_addr_lat[14:6], mem_done_cnt[1:0]] <= rdata[127:95];
+            D_cache1[Dread_addr_lat[14:6], mem_done_cnt[1:0]] <= rdata[94:60];
+            D_cache2[Dread_addr_lat[14:6], mem_done_cnt[1:0]] <= rdata[59:32];
+            D_cache3[Dread_addr_lat[14:6], mem_done_cnt[1:0]] <= rdata[31:0];
+
+            D_cache0[8]   <= Dread_addr_lat[31];
+            D_cache0[17]  <= Dread_addr_lat[30];
+            D_cache0[26]  <= Dread_addr_lat[29];
+            D_cache0[35]  <= Dread_addr_lat[28];
+
+            D_cache1[44]  <= Dread_addr_lat[27];
+            D_cache1[53]  <= Dread_addr_lat[26];
+            D_cache1[62]  <= Dread_addr_lat[25];
+            D_cache1[71]  <= Dread_addr_lat[24];
+ 
+            D_cache2[80]  <= Dread_addr_lat[23];
+            D_cache2[89]  <= Dread_addr_lat[22];
+            D_cache2[107] <= Dread_addr_lat[21];
+            D_cache2[116] <= Dread_addr_lat[20];
+
+            D_cache3[35] <= 1;
+        end
+    end : EMI_D1_read
 
     always_comb begin : data_out
         unique case (Dread_addr_lat[3:2])
@@ -86,4 +140,5 @@ module L1_D (
     //If mem_rdy would become active during read or write address will change
     //mid-access leading to corruption ofc
     assign mem_rdy = (!re && !we) || !miss;
+    assign Dreq = Dreq_EMI; //There would be other Dreqs causes here
 endmodule
