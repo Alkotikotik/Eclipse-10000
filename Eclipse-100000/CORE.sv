@@ -872,7 +872,7 @@ module CORE(
     logic [31:0] MEM_memTarget;
     logic MEM_memRead, MEM_memWrite;
     logic [31:0] MEM_ram_data_in;
-    logic [3:0]  MEM_ram_byte_enable;
+    logic [1:0]  MEM_mem_size;
 
     logic [7:0]  MEM_gpr_dest;
     logic        MEM_gpr_write;
@@ -930,8 +930,8 @@ module CORE(
             MEM_memTarget   <= memTarget;
             MEM_memRead     <= memRead;
             MEM_memWrite    <= memWrite;
-            MEM_ram_data_in <= ram_data_in_aligned;
-            MEM_ram_byte_enable <= ram_byte_enable;
+            MEM_ram_data_in <= store_val;
+            MEM_mem_size  <= mem_size;
 
             MEM_EPCWrite    <= EPCWrite;
             MEM_irq         <= irq_taken;
@@ -989,7 +989,7 @@ module CORE(
     assign MEM_fault = memFault || divFault;
 
     //MMIO cs but basically in MEM
-    logic MEM_mmio_cs;
+    logic  MEM_mmio_cs;
     assign MEM_mmio_cs = (MEM_memTarget[31:8] == 24'hFFFFFF);
     assign MEM_io_cs   = (MEM_memTarget[31:8] == 24'h101000);
 
@@ -999,16 +999,16 @@ module CORE(
     logic  mem_ready;
     logic  mem_stall;
 
-    logic mdsx_banked;
+    logic  mdsx_banked;
     assign mdsx_banked = (EX_IR_2[26:23] == 4'b0000);
 
-    logic mdsx_mem_hit, mdsx_kwb_hit;
+    logic  mdsx_mem_hit, mdsx_kwb_hit;
     assign mdsx_mem_hit = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == EX_IR_2[26:22]) &&
                           (!mdsx_banked || MEM_kernelMode == EX_kernel_mode);
     assign mdsx_kwb_hit = isWB_valid && WB_gpr_write && mdsx_banked && WB_kernelMode && EX_kernel_mode &&
                           (WB_gpr_dest[7:3] == EX_IR_2[26:22]);
 
-    logic [31:0] mdsx_reg;
+    logic  [31:0] mdsx_reg;
     assign mdsx_reg = (mdsx_banked && EX_kernel_mode) ? (EX_IR_2[22] ? KGPR1 : KGPR0) : ID_rx2_val;
 
     logic [31:0] mdsx_full;
@@ -1016,9 +1016,9 @@ module CORE(
     always_comb begin
         for (int lane = 0; lane < 4; lane++) begin
             mdsx_rel = 2'(lane) - MEM_base;
-            if (mdsx_mem_hit && MEM_lanes[lane])      mdsx_full[8*lane +: 8] = MEM_result[8*mdsx_rel +: 8];
-            else if (mdsx_kwb_hit && WB_lanes[lane])  mdsx_full[8*lane +: 8] = WB_val_aligned[8*lane +: 8];
-            else                                      mdsx_full[8*lane +: 8] = mdsx_reg[8*lane +: 8];
+            if (mdsx_mem_hit && MEM_lanes[lane]) mdsx_full[8*lane +: 8] = MEM_result[8*mdsx_rel +: 8];
+            else if (mdsx_kwb_hit && WB_lanes[lane]) mdsx_full[8*lane +: 8] = WB_val_aligned[8*lane +: 8];
+            else mdsx_full[8*lane +: 8] = mdsx_reg[8*lane +: 8];
         end
     end
 
@@ -1035,8 +1035,8 @@ module CORE(
     logic  store_load_overlap;
     assign store_load_overlap = isMEM_valid && MEM_memRead && isWB_valid && WB_memWrite &&
                                 ((MEM_memTarget[31:2] == WB_word) ||
-                                 (MEM_memTarget[31:2] == WB_word_plus1) ||
-                                 (MEM_memTarget[31:2] == WB_word_minus1));
+                                (MEM_memTarget[31:2] == WB_word_plus1) ||
+                                (MEM_memTarget[31:2] == WB_word_minus1));
 
     logic  MEM_reread;
     always_ff @(posedge clk or posedge reset) begin
@@ -1054,16 +1054,16 @@ module CORE(
     //Big endian
     logic [31:0] ram_data_sized, vram_data_sized;
     always_comb begin
-        unique case (MEM_ram_byte_enable)
-            4'b0001: begin
+        unique case (MEM_mem_size)
+            2'b00: begin
                 ram_data_sized  = {24'h0, ram_data_out[31:24]};
                 vram_data_sized = {24'h0, vram_data_read[31:24]};
             end
-            4'b0011: begin
+            2'b01: begin
                 ram_data_sized  = {16'h0, ram_data_out[31:16]};
                 vram_data_sized = {16'h0, vram_data_read[31:16]};
             end
-            default: begin
+            default: begin //2'b10
                 ram_data_sized  = ram_data_out;
                 vram_data_sized = vram_data_read;
             end
@@ -1431,8 +1431,7 @@ module CORE(
 
     logic PCWrite, GPRsWrite;
 
-    logic [3:0] ram_byte_enable;
-    logic [31:0] ram_data_in_aligned;
+    logic [1:0] mem_size;
 
     assign gpr_rw0_sel = isEX_mdx ? EX_IR_2[26:19] :
                 //3 register ALU type
@@ -1456,8 +1455,8 @@ module CORE(
     logic [31:0] other_addr;
     always_comb begin
         unique case (opcode)
-            6'b100100: other_addr = SelectedSPR - {29'd0, (EX_kernel_mode ? push_pop_bytes : 3'd0)}; // PUSH
-            6'b100101: other_addr = SelectedSPR - {29'd0, (EX_kernel_mode ? 3'd0 : push_pop_bytes)}; // POP
+            6'b100100: other_addr = SelectedSPR; // PUSH
+            6'b100101: other_addr = SelectedSPR - {29'd0, push_pop_bytes}; // POP
             //6'b100100: other_addr = SelectedSPR + push_pop_bytes; // PUSH
             //6'b100101: other_addr = SelectedSPR - push_pop_bytes; // POP
             6'b101000,
@@ -1490,10 +1489,9 @@ module CORE(
     logic [31:0] spr_other;
     always_comb begin
         unique case (SPRSrc)
-            //So stack finally grows upwards, lets go, but KSP grows downwards
-            //which is pretty nice imo
-            3'b100:  spr_other = SelectedSPR + (EX_kernel_mode ? -{29'd0, push_pop_bytes} : {29'd0, push_pop_bytes}); // PUSH
-            3'b101:  spr_other = SelectedSPR + (EX_kernel_mode ? {29'd0, push_pop_bytes} : -{29'd0, push_pop_bytes}); // POP
+            //SP and KSP grows upward
+            3'b100:  spr_other = SelectedSPR + {29'd0, push_pop_bytes}; // PUSH
+            3'b101:  spr_other = SelectedSPR - {29'd0, push_pop_bytes}; // POP
 
             //3'b100:  spr_other = SelectedSPR + push_pop_bytes; // PUSH
             //3'b100:  spr_other = SelectedSPR - push_pop_bytes; // PUSH
@@ -1539,7 +1537,7 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin : SPR_ffs
         if (reset) begin
             SP <= 32'h00001FFF; //Jic itll be reset anyway
-            KSP <= 32'h00001000; //4KB for Kernel operations
+            KSP <= 32'h00000080; //4KB for Kernel operations
             LR  <= 32'd0;
             KScratch <= 32'd0;
             GP  <= 32'd0;
@@ -1633,24 +1631,23 @@ module CORE(
     logic [2:0] store_frag;
     logic [31:0] store_val;
     assign store_frag = isEX_mdx ? EX_IR_2[21:19] : rx0[2:0];
-    assign store_val  = isEX_mdsx ? mdsx_data      : FWD_rx0;
+    assign store_val  = isEX_mdsx ? mdsx_data     : FWD_rx0;
 
-    always_comb begin
+    always_comb begin : ram_d_in
         unique case (store_frag)
+            //ram_data_in_aligned is obsolete bc L1 applies mask and zero
+            //padding is effectively useless. mem_size is still fine tho.
             3'b011, 3'b100, 3'b101, 3'b110: begin // 8-bit
-                ram_byte_enable = 4'b0001;
-                ram_data_in_aligned = {24'h0, store_val[7:0]};
+                mem_size = 2'b00;
             end
             3'b001, 3'b010: begin // 16-bit
-                ram_byte_enable = 4'b0011;
-                ram_data_in_aligned = {16'h0, store_val[15:0]};
+                mem_size = 2'b01;
             end
             default: begin // 32-bit
-                ram_byte_enable = 4'b1111;
-                ram_data_in_aligned = store_val;
+                mem_size = 2'b10;
             end
         endcase
-    end
+    end : ram_d_in
 
     logic [31:0] io_data_out;
     always_comb begin
@@ -1771,7 +1768,7 @@ module CORE(
         .addrRead(mem_stall ? MEM_memTarget : memTarget), //If mem_stall it reads MEM's instruction not EX's
         .addrWrite(MEM_memTarget), //Writes happen in MEM
         .data_in(MEM_ram_data_in),
-        .byte_enable(MEM_ram_byte_enable),
+        .mem_size(MEM_mem_size),
         .mem_write(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid), //memWrite dgaf if mem is ready or not
         .mem_read(mem_stall ? MEM_memRead : memRead), //Same thing
         .data_out(ram_data_out),
@@ -1785,7 +1782,7 @@ module CORE(
         .addrRead(mem_stall ? MEM_vram_addr : ({12'b0, memTarget[19:0]})), //memTarget - 0x04000000 but much faster
         .addrWrite(vram_addr),
         .data_in(vram_data_out),
-        .byte_enable(MEM_ram_byte_enable),
+        .mem_size(MEM_mem_size),
         .mem_write(vram_write),
         .mem_read(mem_stall ? MEM_memRead : memRead),
         .data_out(vram_data_read)

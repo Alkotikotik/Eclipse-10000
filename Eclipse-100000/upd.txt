@@ -1,1 +1,4 @@
 Ill try to keep track of everything here
+
+EMI-1200
+EMI uses 2 FSMs first one is init FSM: The main goal here is to initialize ddr3 chip based on my configuration, which is mostly default

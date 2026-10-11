@@ -10,7 +10,7 @@ module L1_D (
     input logic re, //read enable
 
     input logic [31:0] D_data_in,
-    input logic [3:0] byte_enable,
+    input logic [1:0]  mem_size,
 
     output logic [31:0] D_data_out,
     output logic mem_rdy,
@@ -60,7 +60,6 @@ module L1_D (
             if (advance) begin //latch em bc BRAM req starts at EX and arrives at the start of MEM
                 Dread_addr_lat <= Dread_addr;
             end
-
             //On miss req 4reads from EMI, 4 because im fetching 4 at ones.
             //basically thats kinda like cache works, if I want this data
             //chances are I might want data near it.
@@ -114,6 +113,7 @@ module L1_D (
             2'd3: D_data_out = {D_data_read[115:108], D_data_read[124:117], D_data_read[133:126], D_data_read[142:135]};
         endcase
     end : data_out
+
 
     assign Dreq_we = 1'b0;
     //24bits of addr. read 4conseq 128bit chunks so 512bit of

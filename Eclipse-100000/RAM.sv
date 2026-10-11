@@ -4,7 +4,7 @@ module RAM(
     input logic [31:0] addrRead,
     input logic [31:0] addrWrite,
     input logic [31:0] data_in,
-    input logic [3:0] byte_enable,
+    input logic [1:0]  mem_size,
     input logic mem_write,
     input logic mem_read,
     output logic [31:0] data_out,
@@ -44,12 +44,12 @@ module RAM(
 
     always_ff @(posedge clk) begin
         if (mem_write) begin
-            if (byte_enable == 4'b1111) begin
+            if (mem_size == 2'b10) begin
                 ramm[addrWrite[27:0]    ] <= data_in[31:24];
                 ramm[addrWrite[27:0] + 1] <= data_in[23:16];
                 ramm[addrWrite[27:0] + 2] <= data_in[15:8];
                 ramm[addrWrite[27:0] + 3] <= data_in[7:0];
-            end else if (byte_enable == 4'b0011) begin
+            end else if (mem_size == 2'b01) begin
                 ramm[addrWrite[27:0]    ] <= data_in[15:8];
                 ramm[addrWrite[27:0] + 1] <= data_in[7:0];
             end else begin
