@@ -10,7 +10,7 @@ module L1_D (
     input logic re, //read enable
 
     input logic [31:0] D_data_in,
-    input logic [1:0] byte_enable,
+    input logic [3:0] byte_enable,
 
     output logic [31:0] D_data_out,
     output logic mem_rdy,
@@ -96,21 +96,22 @@ module L1_D (
 
     //Write to BRAM's respective address based on current beat and ofc addr.
     //Also im writing tag to the parity bits which is why it looks so evil.
-    always_ff @(posedge clk) begin : EMI_D1_write
+    always_ff @(posedge clk) begin : D1_write
         if (mem_done) begin
             D_cache0[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
             D_cache1[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
             D_cache2[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
             D_cache3[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {1'b1,               EMI_rdata[127:120], 1'b0,               EMI_rdata[119:112], 1'b0,               EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
-        end
-    end : EMI_D1_write
+        end else if (we && !miss) begin
+            D_cache0
+    end : D1_write
 
     always_comb begin : data_out
         unique case (Dread_addr_lat[3:2])
-            2'd0: D_data_out = {D_data_read[34:27], D_data_read[25:18], D_data_read[16:9], D_data_read[7:0]};
-            2'd1: D_data_out = {D_data_read[70:63], D_data_read[61:54], D_data_read[52:45], D_data_read[43:36]};
-            2'd2: D_data_out = {D_data_read[106:99], D_data_read[97:90], D_data_read[88:81], D_data_read[79:72]};
-            2'd3: D_data_out = {D_data_read[142:135], D_data_read[133:126], D_data_read[124:117], D_data_read[115:108]};
+            2'd0: D_data_out = {D_data_read[7:0], D_data_read[16:9], D_data_read[25:18], D_data_read[34:27]};
+            2'd1: D_data_out = {D_data_read[43:36], D_data_read[52:45], D_data_read[61:54], D_data_read[70:63]};
+            2'd2: D_data_out = {D_data_read[79:72], D_data_read[88:81], D_data_read[97:90], D_data_read[106:99]};
+            2'd3: D_data_out = {D_data_read[115:108], D_data_read[124:117], D_data_read[133:126], D_data_read[142:135]};
         endcase
     end : data_out
 

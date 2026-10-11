@@ -73,10 +73,10 @@ int main(int argc, char **argv) {
 
         // fake CPU
         if (top->mem_rdy) {
-            if (top->D_data_out != golden(cur)) {
+            if (top->D_data_out != __builtin_bswap32(golden(cur))) { // CPU is big-endian
                 if (errors++ < 10) {
                     printf("cyc %lu: addr 0x%05x got 0x%08x want 0x%08x\n", cyc, cur,
-                           top->D_data_out, golden(cur));
+                           top->D_data_out, __builtin_bswap32(golden(cur)));
                 }
             }
             if (stall) {
