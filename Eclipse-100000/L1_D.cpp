@@ -6,14 +6,24 @@
 #include <ctime>
 #include <deque>
 #include <memory>
+#include <unordered_map>
 
-constexpr int TAGS = 4; // 4 random tags x 32KB = 4x the cache, so tags fight over rows
-constexpr uint64_t LOADS = 1000000;
+constexpr int TAGS = 1; // 1 tag = exactly the cache, no evictions. 4 once write-back (2b) is in
+constexpr uint64_t OPS = 1000000;
 constexpr uint64_t HANG = 10000; // stalled this long = something's stuck
+constexpr int STORE_PCT = 30;
+constexpr int SAME_BOX_PCT = 25; // next op hits the same 16B box, stresses store->load back to back
 
 struct Beat {
     uint32_t addr; // 16byte units, same as Dreq_addr
     uint64_t ready;
+};
+
+struct Op {
+    uint32_t addr;
+    bool store;
+    uint8_t size;  // mem_size: 0 u8, 1 u16, 2 u32
+    uint32_t data; // right-aligned, like CORE's store_val
 };
 
 int main(int argc, char **argv) {
@@ -24,21 +34,54 @@ int main(int argc, char **argv) {
 
     // fake ddr3: each word is a hash of its address, so all 256MB exist without storing them
     uint32_t salt = rand();
-    auto golden = [&](uint32_t a) {
+    auto ddr3_word = [&](uint32_t a) {
         uint32_t x = (a >> 2) * 0x9E3779B1u ^ salt;
         x ^= x >> 15;
         x *= 0x85EBCA77u;
         return x ^ (x >> 13);
     };
+    // byte i of a word sits at [8i+7:8i], same as EMI_rdata
+    auto ddr3_byte = [&](uint32_t a) { return (uint8_t)(ddr3_word(a) >> 8 * (a & 3)); };
+
+    // what the CPU should see: ddr3 + every store done so far
+    std::unordered_map<uint32_t, uint8_t> stored;
+    auto cpu_byte = [&](uint32_t a) {
+        auto it = stored.find(a);
+        return it != stored.end() ? it->second : ddr3_byte(a);
+    };
+    auto cpu_word = [&](uint32_t a) { // big-endian: lowest address on top
+        return (uint32_t)cpu_byte(a) << 24 | cpu_byte(a + 1) << 16 | cpu_byte(a + 2) << 8 |
+               cpu_byte(a + 3);
+    };
+
     uint32_t tags[TAGS];
     for (auto &t : tags) {
         t = rand() % 8192; // all 13 tag bits get exercised
     }
-    auto rand_addr = [&] { return tags[rand() % TAGS] << 15 | (uint32_t)(rand() % 8192) * 4; };
+    auto rand_op = [&](uint32_t prev) {
+        Op op;
+        op.addr = rand() % 100 < SAME_BOX_PCT ? (prev & ~15u) | (rand() % 16)
+                                              : tags[rand() % TAGS] << 15 | (rand() % 32768);
+        op.store = rand() % 100 < STORE_PCT;
+        op.size =
+            op.store ? rand() % 3 : 2; // loads are u32 for now, the cache doesn't size-extract yet
+        op.addr &= ~((1u << op.size) - 1); // aligned only, misaligned is stage 4
+        op.data = rand();
+        return op;
+    };
 
     auto top = std::make_unique<VL1_D>();
-    top->re = 1;
-    top->we = 0;
+    auto set_mem = [&](const Op &op) { // MEM-stage inputs
+        top->re = !op.store;
+        top->we = op.store;
+        top->D_write_addr = op.addr;
+        top->mem_size = op.size;
+        top->D_data_in = op.data;
+    };
+
+    Op cur = {0, false, 2, 0}; // MEM, Dread_addr_lat resets to 0
+    Op nxt = rand_op(0);       // EX
+    set_mem(cur);
     top->advance = 1;
     top->Dread_addr = 0;
     top->rst = 1;
@@ -54,17 +97,16 @@ int main(int argc, char **argv) {
     std::deque<Beat> emi; // requests EMI accepted, waiting for their beat
     uint64_t last_ready = 0;
 
-    uint32_t cur = 0;           // MEM's address
-    uint32_t nxt = rand_addr(); // EX's address
-    uint64_t cyc = 0, loads = 0, stall = 0, stalled_loads = 0, reqs = 0, errors = 0;
+    uint64_t cyc = 0, ops = 0, loads = 0, stores = 0, stall = 0, stalled_ops = 0, reqs = 0,
+             errors = 0;
 
-    while (loads < LOADS && !Verilated::gotFinish()) {
+    while (ops < OPS && !Verilated::gotFinish()) {
         // fake EMI: one beat per cycle max, in order
         top->mem_done = !emi.empty() && emi.front().ready <= cyc;
         if (top->mem_done) {
             uint32_t base = emi.front().addr * 16;
             for (int w = 0; w < 4; w++) {
-                top->EMI_rdata[w] = golden(base + w * 4);
+                top->EMI_rdata[w] = ddr3_word(base + w * 4);
             }
             emi.pop_front();
         }
@@ -73,28 +115,36 @@ int main(int argc, char **argv) {
 
         // fake CPU
         if (top->mem_rdy) {
-            if (top->D_data_out != __builtin_bswap32(golden(cur))) { // CPU is big-endian
-                if (errors++ < 10) {
-                    printf("cyc %lu: addr 0x%05x got 0x%08x want 0x%08x\n", cyc, cur,
-                           top->D_data_out, __builtin_bswap32(golden(cur)));
+            if (cur.store) {
+                for (int b = 0; b < (1 << cur.size); b++) { // store commits on this edge
+                    stored[cur.addr + b] = cur.data >> 8 * ((1 << cur.size) - 1 - b);
                 }
+                stores++;
+            } else {
+                if (top->D_data_out != cpu_word(cur.addr)) {
+                    if (errors++ < 10) {
+                        printf("cyc %lu: load 0x%07x got 0x%08x want 0x%08x\n", cyc, cur.addr,
+                               top->D_data_out, cpu_word(cur.addr));
+                    }
+                }
+                loads++;
             }
             if (stall) {
-                stalled_loads++;
+                stalled_ops++;
             }
-            loads++;
+            ops++;
             stall = 0;
             top->advance = 1;
-            top->Dread_addr = nxt; // EX moves into MEM
+            top->Dread_addr = nxt.addr; // EX moves into MEM
             cur = nxt;
-            nxt = rand_addr();
+            nxt = rand_op(cur.addr);
         } else {
             if (++stall > HANG) {
-                printf("cyc %lu: hung on addr 0x%05x\n", cyc, cur);
+                printf("cyc %lu: hung on addr 0x%07x\n", cyc, cur.addr);
                 return 1;
             }
             top->advance = 0;
-            top->Dread_addr = cur; // CORE's mem_stall ? MEM_memTarget : memTarget
+            top->Dread_addr = cur.addr; // CORE's mem_stall ? MEM_memTarget : memTarget
         }
         top->eval();
 
@@ -109,10 +159,12 @@ int main(int argc, char **argv) {
         top->eval();
         top->clk = 0;
         top->eval();
+        set_mem(cur); // the new MEM op's inputs, for the next cycle
         cyc++;
     }
 
-    printf("%lu loads, %lu cycles, %lu refills (%lu requests), %lu stalled loads, %lu errors\n",
-           loads, cyc, reqs / 4, reqs, stalled_loads, errors);
+    printf("%lu ops (%lu loads, %lu stores), %lu cycles, %lu refills (%lu requests), %lu stalled "
+           "ops, %lu errors\n",
+           ops, loads, stores, cyc, reqs / 4, reqs, stalled_ops, errors);
     return errors != 0;
 }

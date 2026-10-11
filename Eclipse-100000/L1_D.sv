@@ -43,7 +43,10 @@ module L1_D (
     (* ram_style = "block" *) logic [35:0] D_cache3 [0:2047];
 
     logic [27:0]  Dread_addr_lat;
+    logic [31:0]  store_bytes;
+    logic [3:0]   store_msk, lane3_meta;
     logic [12:0]  cur_tag;
+    logic [15:0]  wen; //write enable for n
     logic [143:0] D_data_read;
     logic miss;
     logic Dreq_EMI;
@@ -93,25 +96,52 @@ module L1_D (
         D_data_read[143:108] <= D_cache3[Dread_addr[14:4]];
     end : D1_read
 
-    //Write to BRAM's respective address based on current beat and ofc addr.
+    //EMI write to BRAM's respective address based on current beat and ofc addr.
     //Also im writing tag to the parity bits which is why it looks so evil.
+    //CPU write to BRAM 36bit of data and just, and mask the meta. As well as
+    //everything I don't want to write based on fragmented registers, stores
+    //and etc, just read the code bruh.
     always_ff @(posedge clk) begin : D1_write
         if (mem_done) begin
             D_cache0[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
             D_cache1[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
             D_cache2[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
             D_cache3[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {1'b1,               EMI_rdata[127:120], 1'b0,               EMI_rdata[119:112], 1'b0,               EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
-        end else if (we && !miss) begin
-            D_cache0
+        end else if (we && mem_rdy) begin
+            for (integer i = 0; i < 4; i++) begin
+                if (wen[i + 0])  D_cache0[D_write_addr[14:4]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*0 - i], store_bytes[31 - 8*i -: 8]};
+                if (wen[i + 4])  D_cache1[D_write_addr[14:4]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*1 - i], store_bytes[31 - 8*i -: 8]};
+                if (wen[i + 8])  D_cache2[D_write_addr[14:4]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*2 - i], store_bytes[31 - 8*i -: 8]};
+                if (wen[i + 12]) D_cache3[D_write_addr[14:4]][9 * i +: 9] <= {lane3_meta[i],                (D_write_addr[3:2] == 3 && store_msk[i]) ? store_bytes[31 - 8*i -: 8] : D_data_read[108 + 9*i +: 8]}; //If you are physically seeing this then: this is for dirty bits, if CPU actually writes there I jsut set dirty flag and put data there, if it doesn't I just set the dirty flag
+            end
+        end
     end : D1_write
 
     always_comb begin : data_out
         unique case (Dread_addr_lat[3:2])
-            2'd0: D_data_out = {D_data_read[7:0], D_data_read[16:9], D_data_read[25:18], D_data_read[34:27]};
-            2'd1: D_data_out = {D_data_read[43:36], D_data_read[52:45], D_data_read[61:54], D_data_read[70:63]};
-            2'd2: D_data_out = {D_data_read[79:72], D_data_read[88:81], D_data_read[97:90], D_data_read[106:99]};
-            2'd3: D_data_out = {D_data_read[115:108], D_data_read[124:117], D_data_read[133:126], D_data_read[142:135]};
+            2'b00: D_data_out = {D_data_read[7:0], D_data_read[16:9], D_data_read[25:18], D_data_read[34:27]};
+            2'b01: D_data_out = {D_data_read[43:36], D_data_read[52:45], D_data_read[61:54], D_data_read[70:63]};
+            2'b10: D_data_out = {D_data_read[79:72], D_data_read[88:81], D_data_read[97:90], D_data_read[106:99]};
+            2'b11: D_data_out = {D_data_read[115:108], D_data_read[124:117], D_data_read[133:126], D_data_read[142:135]};
         endcase
+        case (mem_size)
+            2'b10, 2'b11: begin
+                store_bytes = D_data_in;
+                store_msk = 4'b1111;
+            end
+            2'b01: begin
+                store_bytes = {D_data_in[15:0], D_data_in[15:0]}; //dupe and then mask
+                store_msk = 4'b0011;
+            end
+            2'b00: begin
+                store_bytes = {D_data_in[7:0], D_data_in[7:0], D_data_in[7:0], D_data_in[7:0]};
+                store_msk = 4'b0001;
+            end
+        endcase
+        store_msk = store_msk << D_write_addr[1:0]; //I love bit tricks
+        wen = {12'b0, store_msk} << {D_write_addr[3:2], 2'b00}; //shift it to the right lane
+        wen[13] = 1; //always dirty bit on writes from CPU
+        lane3_meta = {1'b1, 1'b0, 1'b1, Dread_addr_lat[15]};
     end : data_out
 
 
