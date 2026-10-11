@@ -48,8 +48,9 @@ module L1_D (
     logic [12:0]  cur_tag;
     logic [15:0]  wen; //write enable for n
     logic [143:0] D_data_read;
-    logic miss;
+    logic miss, last_was_store;
     logic Dreq_EMI;
+    logic [10:0] last_store_row;
 
     logic [2:0] req_cnt, mem_done_cnt;
 
@@ -81,6 +82,8 @@ module L1_D (
             end else if ((re | we) && miss) begin
                 Dreq_EMI <= 1'b1;
             end
+            last_was_store <= we && mem_rdy;
+            last_store_row <= D_write_addr[14:4];
         end
     end
 
@@ -160,7 +163,9 @@ module L1_D (
     //lower address bits) but in the wrong chunk of ddr3(wrong tag)
     assign miss = !D_data_read[143] || cur_tag != Dread_addr_lat[27:15];
     //If mem_rdy would become active during read or write address will change
-    //mid-access leading to corruption ofc
-    assign mem_rdy = (!re && !we) || (!miss && !Dreq_EMI);
+    //mid-access leading to corruption ofc. Also if read same address as just
+    //written to, just stall, its just so unlikely to happen like why tf would
+    //you read what you just wrote? Anyways ill test forwarding later
+    assign mem_rdy = (!re && !we) || (!miss && !Dreq_EMI && !(last_was_store && last_store_row == Dread_addr_lat[14:4]));
     assign Dreq = Dreq_EMI && req_cnt != 4; //There would be other Dreqs causes here
 endmodule
