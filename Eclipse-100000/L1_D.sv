@@ -51,6 +51,7 @@ module L1_D (
     logic miss, last_was_store;
     logic Dreq_EMI;
     logic [10:0] last_store_row;
+    logic [11:0] rst_clr;
 
     //Thats an actual name lmao
     logic [127:0] victim_data [0:3];
@@ -69,6 +70,7 @@ module L1_D (
             req_cnt <= 3'b00;
             mem_done_cnt <= 3'b00;
             Dreq_EMI <= 0;
+            rst_clr <= 12'd2048;
             capturing <= 1'b0;
             read_cnt <= 2'b0;
             victim_dirty <= 4'b0;
@@ -79,6 +81,9 @@ module L1_D (
         end else begin
             if (advance) begin //latch em bc BRAM req starts at EX and arrives at the start of MEM
                 Dread_addr_lat <= Dread_addr;
+            end
+            if (rst_clr != 0) begin
+                rst_clr <= rst_clr - 1;
             end
             //On miss req 4reads from EMI, 4 because im fetching 4 at ones.
             //basically thats kinda like cache works, if I want this data
@@ -95,7 +100,7 @@ module L1_D (
                     mem_done_cnt <= 3'd0;
                     Dreq_EMI <= 1'b0;
                 end
-            end else if ((re | we) && miss && !Dreq_EMI && victim_dirty == 0) begin
+            end else if ((re | we) && miss && !Dreq_EMI && victim_dirty == 0 && rst_clr == 0) begin
                 Dreq_EMI  <= 1'b1;
                 capturing <= 1'b1;
                 read_cnt  <= 2'b0;
@@ -149,7 +154,9 @@ module L1_D (
     //everything I don't want to write based on fragmented registers, stores
     //and etc, just read the code bruh.
     always_ff @(posedge clk) begin : D1_write
-        if (mem_done) begin //miss
+        if (rst_clr != 0) begin //just clean all flags on rst
+            D_cache3[rst_clr[10:0] - 11'd1] <= 36'b0;
+        end else if (mem_done) begin //miss
             D_cache0[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
             D_cache1[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
             D_cache2[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
@@ -214,6 +221,6 @@ module L1_D (
     //mid-access leading to corruption ofc. Also if read same address as just
     //written to, just stall, its just so unlikely to happen like why tf would
     //you read what you just wrote? Anyways ill test forwarding later
-    assign mem_rdy = (!re && !we) || (!miss && !Dreq_EMI && !(last_was_store && last_store_row == Dread_addr_lat[14:4])) ;
+    assign mem_rdy = (!re && !we) || (!miss && !Dreq_EMI && !(last_was_store && last_store_row == Dread_addr_lat[14:4])) && (rst_clr == 0);
     assign Dreq = refill_req || drain; //There would be other Dreqs causes here
 endmodule

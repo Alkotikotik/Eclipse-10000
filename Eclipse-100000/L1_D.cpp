@@ -7,8 +7,10 @@
 #include <deque>
 #include <memory>
 #include <unordered_map>
+// ngl i didn't fully write it myself bc idk verilator synta
 
-constexpr int TAGS = 4; // 4 random tags x 32KB = 4x the cache, so dirty lines get evicted and come back
+constexpr int TAGS =
+    4; // 4 random tags x 32KB = 4x the cache, so dirty lines get evicted and come back
 constexpr uint64_t OPS = 1000000;
 constexpr uint64_t HANG = 10000; // stalled this long = something's stuck
 constexpr int STORE_PCT = 30;
@@ -32,7 +34,8 @@ int main(int argc, char **argv) {
     srand(seed);
     printf("seed %u\n", seed);
 
-    // initial ddr3 contents: each word is a hash of its address, so all 256MB exist without storing them
+    // initial ddr3 contents: each word is a hash of its address, so all 256MB exist without storing
+    // them
     uint32_t salt = rand();
     auto init_word = [&](uint32_t a) {
         uint32_t x = (a >> 2) * 0x9E3779B1u ^ salt;
@@ -81,6 +84,10 @@ int main(int argc, char **argv) {
         return op;
     };
 
+    // start with garbage in every BRAM and flop, the reset sweep has to clean it up (needs
+    // --x-initial unique)
+    Verilated::randReset(2);
+    Verilated::randSeed(seed);
     auto top = std::make_unique<VL1_D>();
     auto set_mem = [&](const Op &op) { // MEM-stage inputs
         top->re = !op.store;
@@ -108,8 +115,8 @@ int main(int argc, char **argv) {
     std::deque<Beat> emi; // requests EMI accepted, waiting for their beat
     uint64_t last_ready = 0;
 
-    uint64_t cyc = 0, ops = 0, loads = 0, stores = 0, stall = 0, stalled_ops = 0, reqs = 0,
-             wbs = 0, errors = 0;
+    uint64_t cyc = 0, ops = 0, loads = 0, stores = 0, stall = 0, stalled_ops = 0, reqs = 0, wbs = 0,
+             errors = 0;
 
     while (ops < OPS && !Verilated::gotFinish()) {
         // fake EMI: one beat per cycle max, in order
