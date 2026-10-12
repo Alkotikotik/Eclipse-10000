@@ -5,7 +5,7 @@ module L1_D (
     input logic advance, //not stall state
 
     input logic [27:0] Dread_addr, //D read address
-    input logic [27:0] D_write_addr,
+    input logic [14:0] D_write_addr,
     input logic we, //EMI changed me - now im writing unreadable code...
     input logic re, //read enable
 
@@ -52,6 +52,15 @@ module L1_D (
     logic Dreq_EMI;
     logic [10:0] last_store_row;
 
+    //Thats an actual name lmao
+    logic [127:0] victim_data [0:3];
+    logic [12:0]  victim_tag;
+    logic [8:0]   victim_index;
+    logic [3:0]   victim_dirty;
+    logic [1:0] read_cnt, box;
+    logic [10:0] Dread_addr_real;
+    logic capturing, drain, refill_req;
+
     logic [2:0] req_cnt, mem_done_cnt;
 
     always_ff @(posedge clk or posedge rst) begin
@@ -60,6 +69,13 @@ module L1_D (
             req_cnt <= 3'b00;
             mem_done_cnt <= 3'b00;
             Dreq_EMI <= 0;
+            capturing <= 1'b0;
+            read_cnt <= 2'b0;
+            victim_dirty <= 4'b0;
+            victim_tag <= 13'h0;
+            victim_index <= 9'h0;
+            last_was_store <= 1'b0;
+            last_store_row <= 11'h0;
         end else begin
             if (advance) begin //latch em bc BRAM req starts at EX and arrives at the start of MEM
                 Dread_addr_lat <= Dread_addr;
@@ -68,7 +84,7 @@ module L1_D (
             //basically thats kinda like cache works, if I want this data
             //chances are I might want data near it.
             if (Dreq_EMI) begin
-                if (Dreq && req_awck) begin
+                if (refill_req && req_awck) begin
                     req_cnt <= req_cnt + 1;
                 end
                 if (mem_done) begin
@@ -79,11 +95,38 @@ module L1_D (
                     mem_done_cnt <= 3'd0;
                     Dreq_EMI <= 1'b0;
                 end
-            end else if ((re | we) && miss) begin
-                Dreq_EMI <= 1'b1;
+            end else if ((re | we) && miss && !Dreq_EMI && victim_dirty == 0) begin
+                Dreq_EMI  <= 1'b1;
+                capturing <= 1'b1;
+                read_cnt  <= 2'b0;
+                victim_tag <= cur_tag;
+                victim_index <= Dread_addr_lat[14:6];
+            end
+            if (capturing) begin //checking if its dirty
+                //This happens at the same time as im writing data to cache,
+                //because while im writing well im not reading so might as well
+                read_cnt <= read_cnt + 1;
+                victim_dirty[Dread_addr_lat[5:4] + read_cnt] <= D_data_read[125];
+                if (read_cnt == 3) begin
+                    capturing <= 1'b0;
+                end
+            end
+            if (drain && req_awck) begin
+                victim_dirty[box] <= 1'b0;
             end
             last_was_store <= we && mem_rdy;
             last_store_row <= D_write_addr[14:4];
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (capturing) begin
+            victim_data[Dread_addr_lat[5:4] + read_cnt] <= {
+                D_data_read[142:135], D_data_read[133:126], D_data_read[124:117], D_data_read[115:108],
+                D_data_read[106:99],  D_data_read[97:90],   D_data_read[88:81],   D_data_read[79:72],
+                D_data_read[70:63],   D_data_read[61:54],   D_data_read[52:45],   D_data_read[43:36],
+                D_data_read[34:27],   D_data_read[25:18],   D_data_read[16:9],    D_data_read[7:0]
+            };
         end
     end
 
@@ -92,11 +135,12 @@ module L1_D (
     //also in separate always_ff without async reset, otherwise vivado
     //just wouldn't map it on actual bram bc it doesn't support async
     //rst, it supports sync tho, but idgaf.
+    assign Dread_addr_real = capturing ? {Dread_addr_lat[14:6], Dread_addr_lat[5:4] + read_cnt + 2'd1}: Dread_addr[14:4];
     always_ff @(posedge clk) begin : D1_read
-        D_data_read[35:0] <= D_cache0[Dread_addr[14:4]];
-        D_data_read[71:36] <= D_cache1[Dread_addr[14:4]];
-        D_data_read[107:72] <= D_cache2[Dread_addr[14:4]];
-        D_data_read[143:108] <= D_cache3[Dread_addr[14:4]];
+        D_data_read[35:0] <= D_cache0[Dread_addr_real];
+        D_data_read[71:36] <= D_cache1[Dread_addr_real];
+        D_data_read[107:72] <= D_cache2[Dread_addr_real];
+        D_data_read[143:108] <= D_cache3[Dread_addr_real];
     end : D1_read
 
     //EMI write to BRAM's respective address based on current beat and ofc addr.
@@ -105,7 +149,7 @@ module L1_D (
     //everything I don't want to write based on fragmented registers, stores
     //and etc, just read the code bruh.
     always_ff @(posedge clk) begin : D1_write
-        if (mem_done) begin
+        if (mem_done) begin //miss
             D_cache0[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
             D_cache1[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
             D_cache2[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
@@ -122,9 +166,9 @@ module L1_D (
 
     always_comb begin : data_out
         unique case (Dread_addr_lat[3:2])
-            2'b00: D_data_out = {D_data_read[7:0], D_data_read[16:9], D_data_read[25:18], D_data_read[34:27]};
+            2'b00: D_data_out = {D_data_read[7:0], D_data_read[16:9], D_data_read [25:18], D_data_read[34:27]};
             2'b01: D_data_out = {D_data_read[43:36], D_data_read[52:45], D_data_read[61:54], D_data_read[70:63]};
-            2'b10: D_data_out = {D_data_read[79:72], D_data_read[88:81], D_data_read[97:90], D_data_read[106:99]};
+            2'b10: D_data_out = {D_data_read[79:72], D_data_read [88:81], D_data_read[97:90], D_data_read[106:99]};
             2'b11: D_data_out = {D_data_read[115:108], D_data_read[124:117], D_data_read[133:126], D_data_read[142:135]};
         endcase
         case (mem_size)
@@ -147,12 +191,16 @@ module L1_D (
         lane3_meta = {1'b1, 1'b0, 1'b1, Dread_addr_lat[15]};
     end : data_out
 
-
-    assign Dreq_we = 1'b0;
+    assign refill_req = Dreq_EMI && req_cnt != 4;
+    assign drain = |victim_dirty && !capturing && !refill_req;
+    assign box = victim_dirty[0] ? 2'd0 : victim_dirty[1] ? 2'd1 : victim_dirty[2] ? 2'd2 : 2'd3;
+    assign Dreq_we = drain;
+    assign Dreq_wd_data = victim_data[box];
+    assign Dreq_msk = 16'h0;
     //24bits of addr. read 4conseq 128bit chunks so 512bit of
     //total data. the [5:4] bits requests the data CPU needs the
     //most first and then the rest
-    assign Dreq_addr = Dreq ? {Dread_addr_lat[27:6], Dread_addr_lat[5:4] + req_cnt[1:0]} : 24'h0; //placeholder for later
+    assign Dreq_addr = refill_req ? {Dread_addr_lat[27:6], Dread_addr_lat[5:4] + req_cnt[1:0]} : {victim_tag, victim_index, box}; //refill : victim
 
     assign cur_tag = {D_data_read[8], D_data_read[17], D_data_read[26], D_data_read[35], D_data_read[44], D_data_read[53], D_data_read[62], D_data_read[71], D_data_read[80], D_data_read[89], D_data_read[98], D_data_read[107], D_data_read[116]};
     //Miss on invalid bit[143]
@@ -166,6 +214,6 @@ module L1_D (
     //mid-access leading to corruption ofc. Also if read same address as just
     //written to, just stall, its just so unlikely to happen like why tf would
     //you read what you just wrote? Anyways ill test forwarding later
-    assign mem_rdy = (!re && !we) || (!miss && !Dreq_EMI && !(last_was_store && last_store_row == Dread_addr_lat[14:4]));
-    assign Dreq = Dreq_EMI && req_cnt != 4; //There would be other Dreqs causes here
+    assign mem_rdy = (!re && !we) || (!miss && !Dreq_EMI && !(last_was_store && last_store_row == Dread_addr_lat[14:4])) ;
+    assign Dreq = refill_req || drain; //There would be other Dreqs causes here
 endmodule
