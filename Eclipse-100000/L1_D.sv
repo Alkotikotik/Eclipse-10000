@@ -167,8 +167,9 @@ module L1_D (
 
         rd_par <= Dread_addr_real[0];
     end : D1_read
-    assign D_data_read = rd_par ? D_read_O : D_read_E;
-    assign refill_row  = {Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]};
+    assign D_data_read   = rd_par ? D_read_O : D_read_E;
+    assign D_data_read_n = rd_par ? D_read_E : D_read_O;
+    assign refill_row    = {Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]};
 
     //EMI write to BRAM's respective address based on current beat and ofc addr.
     //Also im writing tag to the parity bits which is why it looks so evil.
@@ -186,12 +187,12 @@ module L1_D (
                 D_cacheO0[refill_row[10:1]] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
                 D_cacheO1[refill_row[10:1]] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
                 D_cacheO2[refill_row[10:1]] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
-                D_cacheO3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,               EMI_rdata[119:112], 1'b0,               EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
+                D_cacheO3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,              EMI_rdata[119:112], 1'b0,              EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
             end else begin
                 D_cacheE0[refill_row[10:1]] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
                 D_cacheE1[refill_row[10:1]] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
                 D_cacheE2[refill_row[10:1]] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
-                D_cacheE3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,               EMI_rdata[119:112], 1'b0,               EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
+                D_cacheE3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,              EMI_rdata[119:112], 1'b0,              EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
             end
         end else if (we && mem_rdy) begin
             for (integer i = 0; i < 4; i++) begin
@@ -221,12 +222,19 @@ module L1_D (
     end : D1_write
 
     always_comb begin : data_out
-        unique case (Dread_addr_lat[3:2])
-            2'b00: D_data_out = {D_data_read[7:0], D_data_read[16:9], D_data_read [25:18], D_data_read[34:27]};
-            2'b01: D_data_out = {D_data_read[43:36], D_data_read[52:45], D_data_read[61:54], D_data_read[70:63]};
-            2'b10: D_data_out = {D_data_read[79:72], D_data_read [88:81], D_data_read[97:90], D_data_read[106:99]};
-            2'b11: D_data_out = {D_data_read[115:108], D_data_read[124:117], D_data_read[133:126], D_data_read[142:135]};
-        endcase
+        for (int i = 0; i < 4; i++) begin
+            if (Dread_addr_lat[3:0] > 4'h0F) begin
+                rd_data = rd_par ? D_read_E : D_read_0;
+            end else begin
+                rd_data = D_data_read;
+            end
+            unique case (Dread_addr_lat[3:2])
+                2'b00: D_data_out = {D_data_read[7:0],  D_data_read[16:9], D_data_read [25:18], D_data_read[34:27]};
+                2'b01: D_data_out = {D_data_read[43:36], D_data_read[52:45], D_data_read[61:54], D_data_read[70:63]};
+                2'b10: D_data_out = {D_data_read[79:72],  D_data_read [88:81], D_data_read[97:90], D_data_read[106:99]};
+                2'b11: D_data_out = {D_data_read[115:108], D_data_read[124:117], D_data_read[133:126], D_data_read[142:135]};
+            endcase
+        end
         case (mem_size)
             2'b10, 2'b11: begin
                 store_bytes = D_data_in;
