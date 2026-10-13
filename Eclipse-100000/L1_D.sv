@@ -37,17 +37,28 @@ module L1_D (
     //36*4=144bits, but actually 128bits for actual data, which is exactly
     //EMI's rdata btw, and rest 4bits per lane are parity bits which ill use
     //for flags
-    (* ram_style = "block" *) logic [35:0] D_cache0 [0:2047];
-    (* ram_style = "block" *) logic [35:0] D_cache1 [0:2047];
-    (* ram_style = "block" *) logic [35:0] D_cache2 [0:2047];
-    (* ram_style = "block" *) logic [35:0] D_cache3 [0:2047];
+    //Even and odd BRAMs for any unalignd accesses that crosses row start at even, they
+    //need two rows which 1 bram type physically cannot provide. By having
+    //even and odd each one can read its row independetely and we'll be good.
+    (* ram_style = "block" *) logic [35:0] D_cacheE0 [0:1023];
+    (* ram_style = "block" *) logic [35:0] D_cacheE1 [0:1023];
+    (* ram_style = "block" *) logic [35:0] D_cacheE2 [0:1023];
+    (* ram_style = "block" *) logic [35:0] D_cacheE3 [0:1023];
+
+    (* ram_style = "block" *) logic [35:0] D_cacheO0 [0:1023];
+    (* ram_style = "block" *) logic [35:0] D_cacheO1 [0:1023];
+    (* ram_style = "block" *) logic [35:0] D_cacheO2 [0:1023];
+    (* ram_style = "block" *) logic [35:0] D_cacheO3 [0:1023]; //-O3
 
     logic [27:0]  Dread_addr_lat;
     logic [31:0]  store_bytes;
     logic [3:0]   store_msk, lane3_meta;
     logic [12:0]  cur_tag;
     logic [15:0]  wen; //write enable for n
-    logic [143:0] D_data_read;
+    logic [143:0] D_data_read, D_read_E, D_read_O;
+    logic [9:0]   even_idx, odd_idx;
+    logic [10:0]  refill_row;
+    logic rd_par;
     logic miss, last_was_store;
     logic Dreq_EMI;
     logic [10:0] last_store_row;
@@ -141,12 +152,23 @@ module L1_D (
     //just wouldn't map it on actual bram bc it doesn't support async
     //rst, it supports sync tho, but idgaf.
     assign Dread_addr_real = capturing ? {Dread_addr_lat[14:6], Dread_addr_lat[5:4] + read_cnt + 2'd1}: Dread_addr[14:4];
+    assign odd_idx  = Dread_addr_real[10:1];
+    assign even_idx = Dread_addr_real[10:1] + {9'd0, Dread_addr_real[0]};
     always_ff @(posedge clk) begin : D1_read
-        D_data_read[35:0] <= D_cache0[Dread_addr_real];
-        D_data_read[71:36] <= D_cache1[Dread_addr_real];
-        D_data_read[107:72] <= D_cache2[Dread_addr_real];
-        D_data_read[143:108] <= D_cache3[Dread_addr_real];
+        D_read_E[35:0]    <= D_cacheE0[even_idx];
+        D_read_E[71:36]   <= D_cacheE1[even_idx];
+        D_read_E[107:72]  <= D_cacheE2[even_idx];
+        D_read_E[143:108] <= D_cacheE3[even_idx];
+
+        D_read_O[35:0]    <= D_cacheO0[odd_idx];
+        D_read_O[71:36]   <= D_cacheO1[odd_idx];
+        D_read_O[107:72]  <= D_cacheO2[odd_idx];
+        D_read_O[143:108] <= D_cacheO3[odd_idx];
+
+        rd_par <= Dread_addr_real[0];
     end : D1_read
+    assign D_data_read = rd_par ? D_read_O : D_read_E;
+    assign refill_row  = {Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]};
 
     //EMI write to BRAM's respective address based on current beat and ofc addr.
     //Also im writing tag to the parity bits which is why it looks so evil.
@@ -155,18 +177,45 @@ module L1_D (
     //and etc, just read the code bruh.
     always_ff @(posedge clk) begin : D1_write
         if (rst_clr != 0) begin //just clean all flags on rst
-            D_cache3[rst_clr[10:0] - 11'd1] <= 36'b0;
+            if (rst_clr[0])
+                D_cacheE3[rst_clr[10:1]] <= 36'b0;
+            else
+                D_cacheO3[rst_clr[10:1] - 10'd1] <= 36'b0;
         end else if (mem_done) begin //miss
-            D_cache0[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
-            D_cache1[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
-            D_cache2[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
-            D_cache3[{Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]}] <= {1'b1,               EMI_rdata[127:120], 1'b0,               EMI_rdata[119:112], 1'b0,               EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
+            if (refill_row[0]) begin
+                D_cacheO0[refill_row[10:1]] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
+                D_cacheO1[refill_row[10:1]] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
+                D_cacheO2[refill_row[10:1]] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
+                D_cacheO3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,               EMI_rdata[119:112], 1'b0,               EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
+            end else begin
+                D_cacheE0[refill_row[10:1]] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
+                D_cacheE1[refill_row[10:1]] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
+                D_cacheE2[refill_row[10:1]] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
+                D_cacheE3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,               EMI_rdata[119:112], 1'b0,               EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
+            end
         end else if (we && mem_rdy) begin
             for (integer i = 0; i < 4; i++) begin
-                if (wen[i + 0])  D_cache0[D_write_addr[14:4]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*0 - i], store_bytes[31 - 8*i -: 8]};
-                if (wen[i + 4])  D_cache1[D_write_addr[14:4]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*1 - i], store_bytes[31 - 8*i -: 8]};
-                if (wen[i + 8])  D_cache2[D_write_addr[14:4]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*2 - i], store_bytes[31 - 8*i -: 8]};
-                if (wen[i + 12]) D_cache3[D_write_addr[14:4]][9 * i +: 9] <= {lane3_meta[i],                (D_write_addr[3:2] == 3 && store_msk[i]) ? store_bytes[31 - 8*i -: 8] : D_data_read[108 + 9*i +: 8]}; //If you are physically seeing this then: this is for dirty bits, if CPU actually writes there I jsut set dirty flag and put data there, if it doesn't I just set the dirty flag
+                if (D_write_addr[4]) begin
+                    if (wen[i + 0]) begin
+                        D_cacheO0[D_write_addr[14:5]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*0 - i], store_bytes[31 - 8*i -: 8]};
+                    end if (wen[i + 4]) begin
+                        D_cacheO1[D_write_addr[14:5]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*1 - i], store_bytes[31 - 8*i -: 8]};
+                    end if (wen[i + 8]) begin
+                        D_cacheO2[D_write_addr[14:5]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*2 - i], store_bytes[31 - 8*i -: 8]};
+                    end if (wen[i + 12]) begin
+                        D_cacheO3[D_write_addr[14:5]][9 * i +: 9] <= {lane3_meta[i],(D_write_addr[3:2] == 3 && store_msk[i]) ? store_bytes[31 - 8*i -: 8] : D_data_read[108 + 9*i +: 8]}; //If you are physically seeing this then: this is for dirty bits, if CPU actually writes there I jsut set dirty flag and put data there, if it doesn't I just set the dirty flag
+                    end
+                end else begin
+                    if (wen[i + 0]) begin
+                        D_cacheE0[D_write_addr[14:5]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*0 - i], store_bytes[31 - 8*i -: 8]};
+                    end if (wen[i + 4]) begin
+                        D_cacheE1[D_write_addr[14:5]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*1 - i], store_bytes[31 - 8*i -: 8]};
+                    end if (wen[i + 8]) begin
+                        D_cacheE2[D_write_addr[14:5]][9 * i +: 9] <= {Dread_addr_lat[27 - 4*2 - i], store_bytes[31 - 8*i -: 8]};
+                    end if (wen[i + 12]) begin
+                        D_cacheE3[D_write_addr[14:5]][9 * i +: 9] <= {lane3_meta[i],(D_write_addr[3:2] == 3 && store_msk[i]) ? store_bytes[31 - 8*i -: 8] : D_data_read[108 + 9*i +: 8]};
+                    end
+                end
             end
         end
     end : D1_write
