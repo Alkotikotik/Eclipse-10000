@@ -77,9 +77,10 @@ int main(int argc, char **argv) {
         op.addr = rand() % 100 < SAME_BOX_PCT ? (prev & ~15u) | (rand() % 16)
                                               : tags[rand() % TAGS] << 15 | (rand() % 32768);
         op.store = rand() % 100 < STORE_PCT;
-        op.size =
-            op.store ? rand() % 3 : 2; // loads are u32 for now, the cache doesn't size-extract yet
-        op.addr &= ~((1u << op.size) - 1); // aligned only, misaligned is stage 4
+        op.size = rand() % 3;
+        if (op.store) {
+            op.addr &= ~((1u << op.size) - 1); // stores aligned until 4.3, loads go anywhere
+        }
         op.data = rand();
         return op;
     };
@@ -138,10 +139,13 @@ int main(int argc, char **argv) {
                 }
                 stores++;
             } else {
-                if (top->D_data_out != cpu_word(cur.addr)) {
+                // CORE keeps the top 1/2/4 bytes (ram_data_sized), so only those have to be right
+                uint32_t keep = cur.size == 2 ? 0xFFFFFFFF : cur.size == 1 ? 0xFFFF0000 : 0xFF000000;
+                if ((top->D_data_out & keep) != (cpu_word(cur.addr) & keep)) {
                     if (errors++ < 10) {
-                        printf("cyc %lu: load 0x%07x got 0x%08x want 0x%08x\n", cyc, cur.addr,
-                               top->D_data_out, cpu_word(cur.addr));
+                        printf("cyc %lu: load u%d 0x%07x got 0x%08x want 0x%08x\n", cyc,
+                               8 << cur.size, cur.addr, top->D_data_out & keep,
+                               cpu_word(cur.addr) & keep);
                     }
                 }
                 loads++;

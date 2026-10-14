@@ -21,9 +21,9 @@ module L1_D (
     output logic [127:0] Dreq_wd_data,
     output logic [15:0]  Dreq_msk,
 
-    input  logic [127:0] EMI_rdata,
-    input  logic req_awck,
-    input  logic mem_done
+    input logic [127:0] EMI_rdata,
+    input logic req_awck,
+    input logic mem_done
 );
     //32KB of D-cache, I settled on that number bc there is exactly 2 bits for
     //a lane, and 64KB just seems to much atm.
@@ -37,9 +37,6 @@ module L1_D (
     //36*4=144bits, but actually 128bits for actual data, which is exactly
     //EMI's rdata btw, and rest 4bits per lane are parity bits which ill use
     //for flags
-    //Even and odd BRAMs for any unalignd accesses that crosses row start at even, they
-    //need two rows which 1 bram type physically cannot provide. By having
-    //even and odd each one can read its row independetely and we'll be good.
     (* ram_style = "block" *) logic [35:0] D_cacheE0 [0:1023];
     (* ram_style = "block" *) logic [35:0] D_cacheE1 [0:1023];
     (* ram_style = "block" *) logic [35:0] D_cacheE2 [0:1023];
@@ -51,11 +48,20 @@ module L1_D (
     (* ram_style = "block" *) logic [35:0] D_cacheO3 [0:1023]; //-O3
 
     logic [27:0]  Dread_addr_lat;
+    logic [21:0]  Dread_addr_plus16_lat, Dread_box_plus1, refill_line;
+    logic [12:0]  hi_tag;
+    logic [1:0]   refill_first;
+    logic miss_lo, cap_lo;
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [143:0] cap_src;
+    /* verilator lint_on UNUSEDSIGNAL */
+    logic overlap, miss_hi;
     logic [31:0]  store_bytes;
     logic [3:0]   store_msk, lane3_meta;
     logic [12:0]  cur_tag;
     logic [15:0]  wen; //write enable for n
-    logic [143:0] D_data_read, D_read_E, D_read_O;
+    logic [143:0] D_data_read, D_data_read_n, D_read_E, D_read_O, rd_data;
+    logic [4:0]   pos;
     logic [9:0]   even_idx, odd_idx;
     logic [10:0]  refill_row;
     logic rd_par;
@@ -87,11 +93,15 @@ module L1_D (
             victim_dirty <= 4'b0;
             victim_tag <= 13'h0;
             victim_index <= 9'h0;
+            refill_line <= 22'h0;
+            refill_first <= 2'b0;
+            cap_lo <= 1'b1;
             last_was_store <= 1'b0;
             last_store_row <= 11'h0;
         end else begin
             if (advance) begin //latch em bc BRAM req starts at EX and arrives at the start of MEM
                 Dread_addr_lat <= Dread_addr;
+                Dread_addr_plus16_lat <= Dread_box_plus1;
             end
             if (rst_clr != 0) begin
                 rst_clr <= rst_clr - 1;
@@ -115,14 +125,17 @@ module L1_D (
                 Dreq_EMI  <= 1'b1;
                 capturing <= 1'b1;
                 read_cnt  <= 2'b0;
-                victim_tag <= cur_tag;
-                victim_index <= Dread_addr_lat[14:6];
+                victim_tag <= miss_lo ? cur_tag : hi_tag;
+                victim_index <= miss_lo ? Dread_addr_lat[14:6] : Dread_addr_plus16_lat[8:0];
+                refill_line <= miss_lo ? Dread_addr_lat[27:6] : Dread_addr_plus16_lat;
+                refill_first <= miss_lo ? Dread_addr_lat[5:4] : 2'b00;
+                cap_lo <= miss_lo;
             end
             if (capturing) begin //checking if its dirty
                 //This happens at the same time as im writing data to cache,
                 //because while im writing well im not reading so might as well
                 read_cnt <= read_cnt + 1;
-                victim_dirty[Dread_addr_lat[5:4] + read_cnt] <= D_data_read[125];
+                victim_dirty[refill_first + read_cnt] <= cap_src[125];
                 if (read_cnt == 3) begin
                     capturing <= 1'b0;
                 end
@@ -137,11 +150,11 @@ module L1_D (
 
     always_ff @(posedge clk) begin
         if (capturing) begin
-            victim_data[Dread_addr_lat[5:4] + read_cnt] <= {
-                D_data_read[142:135], D_data_read[133:126], D_data_read[124:117], D_data_read[115:108],
-                D_data_read[106:99],  D_data_read[97:90],   D_data_read[88:81],   D_data_read[79:72],
-                D_data_read[70:63],   D_data_read[61:54],   D_data_read[52:45],   D_data_read[43:36],
-                D_data_read[34:27],   D_data_read[25:18],   D_data_read[16:9],    D_data_read[7:0]
+            victim_data[refill_first + read_cnt] <= {
+                cap_src[142:135], cap_src[133:126], cap_src[124:117], cap_src[115:108],
+                cap_src[106:99],  cap_src[97:90],   cap_src[88:81],   cap_src[79:72],
+                cap_src[70:63],   cap_src[61:54],   cap_src[52:45],   cap_src[43:36],
+                cap_src[34:27],   cap_src[25:18],   cap_src[16:9],    cap_src[7:0]
             };
         end
     end
@@ -151,7 +164,8 @@ module L1_D (
     //also in separate always_ff without async reset, otherwise vivado
     //just wouldn't map it on actual bram bc it doesn't support async
     //rst, it supports sync tho, but idgaf.
-    assign Dread_addr_real = capturing ? {Dread_addr_lat[14:6], Dread_addr_lat[5:4] + read_cnt + 2'd1}: Dread_addr[14:4];
+    assign Dread_addr_real = capturing ? {refill_line[8:0], refill_first + read_cnt + 2'd1}: Dread_addr[14:4];
+    assign cap_src = (read_cnt == 0 && !cap_lo) ? D_data_read_n : D_data_read;
     assign odd_idx  = Dread_addr_real[10:1];
     assign even_idx = Dread_addr_real[10:1] + {9'd0, Dread_addr_real[0]};
     always_ff @(posedge clk) begin : D1_read
@@ -169,7 +183,7 @@ module L1_D (
     end : D1_read
     assign D_data_read   = rd_par ? D_read_O : D_read_E;
     assign D_data_read_n = rd_par ? D_read_E : D_read_O;
-    assign refill_row    = {Dread_addr_lat[14:6], Dread_addr_lat[5:4] + mem_done_cnt[1:0]};
+    assign refill_row    = {refill_line[8:0], refill_first + mem_done_cnt[1:0]};
 
     //EMI write to BRAM's respective address based on current beat and ofc addr.
     //Also im writing tag to the parity bits which is why it looks so evil.
@@ -184,15 +198,15 @@ module L1_D (
                 D_cacheO3[rst_clr[10:1] - 10'd1] <= 36'b0;
         end else if (mem_done) begin //miss
             if (refill_row[0]) begin
-                D_cacheO0[refill_row[10:1]] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
-                D_cacheO1[refill_row[10:1]] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
-                D_cacheO2[refill_row[10:1]] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
-                D_cacheO3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,              EMI_rdata[119:112], 1'b0,              EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
+                D_cacheO0[refill_row[10:1]] <= {refill_line[18], EMI_rdata[31:24],  refill_line[19], EMI_rdata[23:16],  refill_line[20], EMI_rdata[15:8],   refill_line[21], EMI_rdata[7:0]};
+                D_cacheO1[refill_row[10:1]] <= {refill_line[14], EMI_rdata[63:56],  refill_line[15], EMI_rdata[55:48],  refill_line[16], EMI_rdata[47:40],  refill_line[17], EMI_rdata[39:32]};
+                D_cacheO2[refill_row[10:1]] <= {refill_line[10], EMI_rdata[95:88],  refill_line[11], EMI_rdata[87:80],  refill_line[12], EMI_rdata[79:72],  refill_line[13], EMI_rdata[71:64]};
+                D_cacheO3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,              EMI_rdata[119:112], 1'b0,              EMI_rdata[111:104], refill_line[9], EMI_rdata[103:96]};
             end else begin
-                D_cacheE0[refill_row[10:1]] <= {Dread_addr_lat[24], EMI_rdata[31:24],  Dread_addr_lat[25], EMI_rdata[23:16],  Dread_addr_lat[26], EMI_rdata[15:8],   Dread_addr_lat[27], EMI_rdata[7:0]};
-                D_cacheE1[refill_row[10:1]] <= {Dread_addr_lat[20], EMI_rdata[63:56],  Dread_addr_lat[21], EMI_rdata[55:48],  Dread_addr_lat[22], EMI_rdata[47:40],  Dread_addr_lat[23], EMI_rdata[39:32]};
-                D_cacheE2[refill_row[10:1]] <= {Dread_addr_lat[16], EMI_rdata[95:88],  Dread_addr_lat[17], EMI_rdata[87:80],  Dread_addr_lat[18], EMI_rdata[79:72],  Dread_addr_lat[19], EMI_rdata[71:64]};
-                D_cacheE3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,              EMI_rdata[119:112], 1'b0,              EMI_rdata[111:104], Dread_addr_lat[15], EMI_rdata[103:96]};
+                D_cacheE0[refill_row[10:1]] <= {refill_line[18], EMI_rdata[31:24],  refill_line[19], EMI_rdata[23:16],  refill_line[20], EMI_rdata[15:8],   refill_line[21], EMI_rdata[7:0]};
+                D_cacheE1[refill_row[10:1]] <= {refill_line[14], EMI_rdata[63:56],  refill_line[15], EMI_rdata[55:48],  refill_line[16], EMI_rdata[47:40],  refill_line[17], EMI_rdata[39:32]};
+                D_cacheE2[refill_row[10:1]] <= {refill_line[10], EMI_rdata[95:88],  refill_line[11], EMI_rdata[87:80],  refill_line[12], EMI_rdata[79:72],  refill_line[13], EMI_rdata[71:64]};
+                D_cacheE3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,              EMI_rdata[119:112], 1'b0,              EMI_rdata[111:104], refill_line[9], EMI_rdata[103:96]};
             end
         end else if (we && mem_rdy) begin
             for (integer i = 0; i < 4; i++) begin
@@ -221,19 +235,27 @@ module L1_D (
         end
     end : D1_write
 
+    //Basically i gotta do some dancing with even and odd lanes, but why?
+    //The thing is - unaligned load can touch two bram rows at ones, eg u32 load at the
+    //edge, and bram physically cannot provide it. So one solution is to just
+    //stall and read in two cycles, but ofc im not doing that. The other
+    //solution is to split bram into even and odd rows and read both at ones
+    //every time, and then merge results. But to make it actually handle it
+    //I have to check if it overlaps with the next even/odd block and if it
+    //does read some bytes from it. The lower bytes block is called lo and higher
+    //is called hi and they always have opposite parity(any 2 conseq blocks do).
     always_comb begin : data_out
+        //btw for in always_comb unrolls to 4 parallel instances
+        //if it reaches into hi, I gotta check for hi miss too
+        overlap = {1'b0, Dread_addr_lat[3:0]} + (5'd1 << mem_size) > 16;
         for (int i = 0; i < 4; i++) begin
-            if (Dread_addr_lat[3:0] > 4'h0F) begin
-                rd_data = rd_par ? D_read_E : D_read_0;
+            pos = {1'b0, Dread_addr_lat[3:0]} + 5'(i);
+            if (pos[4]) begin //>0xF check, bc if it is, it overlaps and I gotta read from hi, which is opposite of lo
+                rd_data = D_data_read_n;
             end else begin
                 rd_data = D_data_read;
             end
-            unique case (Dread_addr_lat[3:2])
-                2'b00: D_data_out = {D_data_read[7:0],  D_data_read[16:9], D_data_read [25:18], D_data_read[34:27]};
-                2'b01: D_data_out = {D_data_read[43:36], D_data_read[52:45], D_data_read[61:54], D_data_read[70:63]};
-                2'b10: D_data_out = {D_data_read[79:72],  D_data_read [88:81], D_data_read[97:90], D_data_read[106:99]};
-                2'b11: D_data_out = {D_data_read[115:108], D_data_read[124:117], D_data_read[133:126], D_data_read[142:135]};
-            endcase
+            D_data_out[31 - 8*i -: 8] = rd_data[36*pos[3:2] + 9*pos[1:0] +: 8]; //-: 8bits before ofc, bc big endian
         end
         case (mem_size)
             2'b10, 2'b11: begin
@@ -264,16 +286,20 @@ module L1_D (
     //24bits of addr. read 4conseq 128bit chunks so 512bit of
     //total data. the [5:4] bits requests the data CPU needs the
     //most first and then the rest
-    assign Dreq_addr = refill_req ? {Dread_addr_lat[27:6], Dread_addr_lat[5:4] + req_cnt[1:0]} : {victim_tag, victim_index, box}; //refill : victim
+    assign Dreq_addr = refill_req ? {refill_line, refill_first + req_cnt[1:0]} : {victim_tag, victim_index, box}; //refill : victim
 
     assign cur_tag = {D_data_read[8], D_data_read[17], D_data_read[26], D_data_read[35], D_data_read[44], D_data_read[53], D_data_read[62], D_data_read[71], D_data_read[80], D_data_read[89], D_data_read[98], D_data_read[107], D_data_read[116]};
+    assign hi_tag = {D_data_read_n[8], D_data_read_n[17], D_data_read_n[26], D_data_read_n[35], D_data_read_n[44], D_data_read_n[53], D_data_read_n[62], D_data_read_n[71], D_data_read_n[80], D_data_read_n[89], D_data_read_n[98], D_data_read_n[107], D_data_read_n[116]};
+    assign Dread_box_plus1 = Dread_addr[27:6] + {21'd0, &Dread_addr[5:4]};
     //Miss on invalid bit[143]
     //Or of course wrong tag, actually lemme explain it. Each sector stores
     //tag along the data to indicate which chunk of ddr3 its holding, which is
     //basically upper 13bits of address. That way miss in when you access
     //right address(you can't access wrong one bc cache address is basically
     //lower address bits) but in the wrong chunk of ddr3(wrong tag)
-    assign miss = !D_data_read[143] || cur_tag != Dread_addr_lat[27:15];
+    assign miss_lo = !D_data_read[143] || cur_tag != Dread_addr_lat[27:15];
+    assign miss = miss_lo || (overlap && miss_hi);
+    assign miss_hi = !D_data_read_n[143] || hi_tag != Dread_addr_plus16_lat[21:9]; //plus16 bc hi and lo re 16bytes apart anf if they are 32KB they are basically cooked
     //If mem_rdy would become active during read or write address will change
     //mid-access leading to corruption ofc. Also if read same address as just
     //written to, just stall, its just so unlikely to happen like why tf would
