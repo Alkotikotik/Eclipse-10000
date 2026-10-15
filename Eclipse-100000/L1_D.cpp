@@ -15,6 +15,7 @@ constexpr uint64_t OPS = 1000000;
 constexpr uint64_t HANG = 10000; // stalled this long = something's stuck
 constexpr int STORE_PCT = 30;
 constexpr int SAME_BOX_PCT = 25; // next op hits the same 16B box, stresses store->load back to back
+constexpr int EDGE_PCT = 3; // last box of a 32KB chunk, so crossing accesses spill into the next tag
 
 struct Beat {
     uint32_t data[4]; // taken from ddr3 when EMI accepts the read, so it's in order with writes
@@ -74,13 +75,12 @@ int main(int argc, char **argv) {
     }
     auto rand_op = [&](uint32_t prev) {
         Op op;
-        op.addr = rand() % 100 < SAME_BOX_PCT ? (prev & ~15u) | (rand() % 16)
-                                              : tags[rand() % TAGS] << 15 | (rand() % 32768);
+        int r = rand() % 100;
+        op.addr = r < SAME_BOX_PCT              ? (prev & ~15u) | (rand() % 16)
+                  : r < SAME_BOX_PCT + EDGE_PCT ? tags[rand() % TAGS] << 15 | (0x7FF0 + rand() % 16)
+                                                : tags[rand() % TAGS] << 15 | (rand() % 32768);
         op.store = rand() % 100 < STORE_PCT;
-        op.size = rand() % 3;
-        if (op.store) {
-            op.addr &= ~((1u << op.size) - 1); // stores aligned until 4.3, loads go anywhere
-        }
+        op.size = rand() % 3; // any size at any byte address, loads and stores
         op.data = rand();
         return op;
     };
