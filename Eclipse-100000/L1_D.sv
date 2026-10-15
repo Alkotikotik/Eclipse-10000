@@ -131,7 +131,7 @@ module L1_D (
                     mem_done_cnt <= 3'd0;
                     Dreq_EMI <= 1'b0;
                 end
-            end else if ((re | we) && miss && !Dreq_EMI && victim_dirty == 0 && rst_clr == 0) begin
+            end else if ((re | we) && miss && victim_dirty == 0 && rst_clr == 0) begin
                 Dreq_EMI  <= 1'b1;
                 capturing <= 1'b1;
                 read_cnt  <= 2'b0;
