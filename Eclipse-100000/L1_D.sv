@@ -225,10 +225,10 @@ module L1_D (
             end
         end else if (we && mem_rdy) begin
             for (integer i = 0; i < 4; i++) begin
-                if (wen_O[i + 0])  D_cacheO0[odd_w][9 * i +: 9] <= {tag_O[12 - i], store_bytes[31 - 8*i -: 8]};
-                if (wen_O[i + 4])  D_cacheO1[odd_w][9 * i +: 9] <= {tag_O[8 - i],  store_bytes[31 - 8*i -: 8]};
-                if (wen_O[i + 8])  D_cacheO2[odd_w][9 * i +: 9] <= {tag_O[4 - i],  store_bytes[31 - 8*i -: 8]};
-                if (wen_O[i + 12]) D_cacheO3[odd_w][9 * i +: 9] <= {lane3_meta_O[i], cov_O[i + 12] ? store_bytes[31 - 8*i -: 8] : D_read_O[108 + 9*i +: 8]}; //If you are physically seeing this then: this is for dirty bits, if CPU actually writes there I jsut set dirty flag and put data there, if it doesn't I just set the dirty flag
+                if (wen_O[i + 0])  D_cacheO0[odd_w] [9 * i +: 9] <= {tag_O[12 - i], store_bytes[31 - 8*i -: 8]};
+                if (wen_O[i + 4])  D_cacheO1[odd_w] [9 * i +: 9] <= {tag_O[8 - i],  store_bytes[31 - 8*i -: 8]};
+                if (wen_O[i + 8])  D_cacheO2[odd_w] [9 * i +: 9] <= {tag_O[4 - i],  store_bytes[31 - 8*i -: 8]};
+                if (wen_O[i + 12]) D_cacheO3[odd_w] [9 * i +: 9] <= {lane3_meta_O[i], cov_O[i + 12] ? store_bytes[31 - 8*i -: 8] : D_read_O[108 + 9*i +: 8]}; //If you are physically seeing this then: this is for dirty bits, if CPU actually writes there I jsut set dirty flag and put data there, if it doesn't I just set the dirty flag
                 if (wen_E[i + 0])  D_cacheE0[even_w][9 * i +: 9] <= {tag_E[12 - i], store_bytes[31 - 8*i -: 8]};
                 if (wen_E[i + 4])  D_cacheE1[even_w][9 * i +: 9] <= {tag_E[8 - i],  store_bytes[31 - 8*i -: 8]};
                 if (wen_E[i + 8])  D_cacheE2[even_w][9 * i +: 9] <= {tag_E[4 - i],  store_bytes[31 - 8*i -: 8]};
