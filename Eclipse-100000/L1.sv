@@ -28,7 +28,10 @@ module L1 (
     input logic [127:0] EMI_rdata
 );
 
-    //FIFO of who made reqs, so we woudln't get lost
+    //FIFO of who made reqs, so we woudln't get lost, cool part is that ptrs
+    //are 3bits thus just cycle on overflow, so it never overflows bc max
+    //possibles reqs at ones is 8.
+    logic [2:0] front_ptr, back_ptr;
     logic [7:0] owner_queue;
 
     logic EMI_req, EMI_req_we, D_awck, I_awck;
@@ -44,14 +47,17 @@ module L1 (
 
     always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
-            owner_queue = 8'h0;
-
-        end
-        if (EMI_req_awck && !EMI_req_we) begin //mem_done doesn't active on writes so quining only reads
-            owner_queue <= {owner_queue[7:1], 1'b1}; // i just love this, 8 is max tho so its good
-        end
-        if (EMI_mem_done) begin
-            owner_queue <= {1'b0, owner_queue[6:0]};
+            front_ptr <= 3'b000;
+            back_ptr <= 3'b000;
+            owner_queue <= 8'h0;
+        end else begin
+            if (EMI_req_awck && !EMI_req_we) begin //mem_done doesn't active on writes so quining only reads
+                owner_queue[back_ptr] <= Dreq; //1 - D cache, 0 - I cache
+                back_ptr <= back_ptr + 1;
+            end
+            if (EMI_mem_done) begin
+                front_ptr <= front_ptr + 1;
+            end
         end
     end
 
@@ -69,7 +75,7 @@ module L1 (
 
         .EMI_rdata(EMI_rdata),
         .req_awck(req_awck),
-        .mem_done(mem_done),
+        .mem_done(EMI_mem_done && !owner_queue[fron_ptr]),
     );
 
     L1_D data_cache (
@@ -96,7 +102,7 @@ module L1 (
 
         .EMI_rdata(EMI_rdata),
         .req_awck(),
-        .mem_done()
+        .mem_done(EMI_mem_done && owner_queue[front_ptr])
 
     );
 
