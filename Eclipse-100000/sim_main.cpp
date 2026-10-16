@@ -1,5 +1,6 @@
 #include "VCORE.h"
 #include "VCORE___024root.h"
+#include "fake_emi.hpp"
 #include "verilated.h"
 #include <SDL2/SDL.h>
 #include <chrono>
@@ -34,6 +35,7 @@ static uint64_t g_branch_mispredicts = 0;
 static uint64_t g_lost_mem_stall = 0;
 static uint64_t g_lost_div_stall = 0;
 static uint64_t g_lost_bubble = 0;
+static uint64_t g_lost_imiss = 0;
 static uint64_t g_redirects = 0;
 static uint64_t g_faults = 0;
 static constexpr uint64_t FLUSH_PENALTY =
@@ -49,7 +51,8 @@ static void print_cpi_waterfall() {
     const double instrs =
         g_retired_instructions ? static_cast<double>(g_retired_instructions) : 1.0;
     const uint64_t flush = (g_redirects + g_faults) * FLUSH_PENALTY;
-    const uint64_t named = g_lost_mem_stall + g_lost_div_stall + g_lost_bubble + flush;
+    const uint64_t named =
+        g_lost_mem_stall + g_lost_div_stall + g_lost_bubble + g_lost_imiss + flush;
     const uint64_t lost =
         g_total_cycles > g_retired_instructions ? g_total_cycles - g_retired_instructions : 0;
 
@@ -60,8 +63,9 @@ static void print_cpi_waterfall() {
               << " mispredict/demolish, " << g_faults << " fault)" << std::endl;
     std::cout << "  " << g_lost_bubble / instrs << "  load-use / mul-use bubble" << std::endl;
     std::cout << "  " << g_lost_div_stall / instrs << "  div_stall" << std::endl;
-    std::cout << "  " << g_lost_mem_stall / instrs << "  mem_stall (store->load overlap)"
-              << std::endl;
+    std::cout << "  " << g_lost_imiss / instrs << "  I-cache miss (IF waiting)" << std::endl;
+    std::cout << "  " << g_lost_mem_stall / instrs
+              << "  mem_stall (D-cache miss/same-row store, VRAM store->load)" << std::endl;
     std::cout << "  " << (lost > named ? (lost - named) / instrs : 0.0)
               << "  residual (unattributed)" << std::endl;
     std::cout << "  ------" << std::endl;
@@ -97,6 +101,10 @@ int main(int argc, char **argv) {
 
     Verilated::commandArgs(argc, argv);
     auto top = std::make_unique<VCORE>();
+    auto emi = std::make_unique<FakeEMI>();
+    if (!emi->load("program.hex")) {
+        return -1;
+    }
 
     uint8_t *vram_buffer = &top->rootp->CORE__DOT__system_vram__DOT__vramm[0];
 
@@ -126,6 +134,7 @@ int main(int argc, char **argv) {
             top->eval();
 
             top->ENC_10K_ModArr = shift_held ? 1 : 0;
+            emi->before_edge(*top, g_total_cycles);
 
             top->clk = 1;
             top->eval();
@@ -145,6 +154,8 @@ int main(int argc, char **argv) {
                 g_lost_div_stall++;
             } else if (top->rootp->CORE__DOT__bubble) {
                 g_lost_bubble++;
+            } else if (!top->rootp->CORE__DOT__I_mem_rdy) {
+                g_lost_imiss++;
             }
             if (top->rootp->CORE__DOT__MEM_redirect) {
                 g_redirects++;
@@ -196,7 +207,8 @@ int main(int argc, char **argv) {
                 SDL_LockTexture(texture, NULL, &pixels, &pitch);
                 const uint16_t *src = reinterpret_cast<const uint16_t *>(vram_buffer);
                 uint16_t *dst = static_cast<uint16_t *>(pixels);
-                for (uint32_t i = 0; i < VRAM_SIZE / 2; i++) dst[i] = __builtin_bswap16(src[i]);
+                for (uint32_t i = 0; i < VRAM_SIZE / 2; i++)
+                    dst[i] = __builtin_bswap16(src[i]);
                 SDL_UnlockTexture(texture);
                 vram_dirty = false;
             }
@@ -241,8 +253,9 @@ int main(int argc, char **argv) {
     std::cout << "\n--- VRAM DUMP ---" << std::endl;
     for (uint32_t vram_offset = 0; vram_offset <= 0x200; vram_offset += 4) {
         uint32_t bus_addr = 0x10000000 + vram_offset;
-        uint32_t word = (vram_buffer[vram_offset + 0] << 24) | (vram_buffer[vram_offset + 1] << 16) |
-                        (vram_buffer[vram_offset + 2] << 8) | vram_buffer[vram_offset + 3];
+        uint32_t word = (vram_buffer[vram_offset + 0] << 24) |
+                        (vram_buffer[vram_offset + 1] << 16) | (vram_buffer[vram_offset + 2] << 8) |
+                        vram_buffer[vram_offset + 3];
 
         std::cout << "Address [0x" << std::hex << bus_addr << "]: 0x" << std::hex << word << " ("
                   << std::dec << word << ")" << std::endl;
@@ -250,10 +263,8 @@ int main(int argc, char **argv) {
 
     std::cout << "\n--- SYSTEM RAM DUMP HIGHER---" << std::endl;
     for (int addr = 0x03FFFFF0; addr >= 0x03FFFF00; addr -= 4) {
-        uint32_t word = (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr] << 24) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 16) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 2] << 8) |
-                        top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 3];
+        uint32_t word = (emi->peek(*top, addr) << 24) | (emi->peek(*top, addr + 1) << 16) |
+                        (emi->peek(*top, addr + 2) << 8) | emi->peek(*top, addr + 3);
 
         std::cout << "Address [0x" << std::hex << addr << "]: 0x" << std::hex << word << " ("
                   << std::dec << word << ")" << std::endl;
@@ -261,10 +272,8 @@ int main(int argc, char **argv) {
 
     std::cout << "\n--- SYSTEM RAM DUMP LOWER ---" << std::endl;
     for (int addr = 4096; addr >= 4000; addr -= 4) {
-        uint32_t word = (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr] << 24) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 16) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 2] << 8) |
-                        top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 3];
+        uint32_t word = (emi->peek(*top, addr) << 24) | (emi->peek(*top, addr + 1) << 16) |
+                        (emi->peek(*top, addr + 2) << 8) | emi->peek(*top, addr + 3);
 
         std::cout << "Address [" << std::dec << addr << "]: 0x" << std::hex << word << " ("
                   << std::dec << word << ")" << std::endl;
@@ -273,8 +282,9 @@ int main(int argc, char **argv) {
     std::cout << "\n--- MMIO DUMP ---" << std::endl;
     for (uint32_t vram_offset = 0; vram_offset <= 0x10; vram_offset += 4) {
         uint32_t bus_addr = 0x10100000 + vram_offset;
-        uint32_t word = (vram_buffer[vram_offset + 0] << 24) | (vram_buffer[vram_offset + 1] << 16) |
-                        (vram_buffer[vram_offset + 2] << 8) | vram_buffer[vram_offset + 3];
+        uint32_t word = (vram_buffer[vram_offset + 0] << 24) |
+                        (vram_buffer[vram_offset + 1] << 16) | (vram_buffer[vram_offset + 2] << 8) |
+                        vram_buffer[vram_offset + 3];
 
         std::cout << "Address [0x" << std::hex << bus_addr << "]: 0x" << word << " (" << std::dec
                   << word << ")" << std::endl;

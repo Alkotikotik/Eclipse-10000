@@ -1,6 +1,7 @@
 #include "VCORE.h"
 #include "VCORE___024root.h"
 #include "verilated.h"
+#include "fake_emi.h"
 #include "verilated_fst_c.h"
 #include <SDL2/SDL.h>
 #include <chrono>
@@ -49,6 +50,11 @@ int main(int argc, char **argv) {
     Verilated::traceEverOn(true);
 
     auto top = std::make_unique<VCORE>();
+    auto emi = std::make_unique<FakeEMI>();
+    if (!emi->load("program.hex")) {
+        return -1;
+    }
+    uint64_t cyc = 0;
 
     // VRAM lives in the RTL now, point straight at it instead of
     // mirroring writes, that way byte enables are honoured for free
@@ -89,6 +95,9 @@ int main(int argc, char **argv) {
     // --- Main Simulation Loop ---
     while (!g_stop && !Verilated::gotFinish()) {
         // Toggle clock state (Half Cycle)
+        if (!top->clk) {
+            emi->before_edge(*top, cyc++);
+        }
         sim_time++;
         top->clk = !top->clk;
         top->eval();
@@ -176,10 +185,10 @@ int main(int argc, char **argv) {
     // --- SYSTEM RAM DUMP HIGHER ---
     std::cout << "\n--- SYSTEM RAM DUMP HIGHER ---" << std::endl;
     for (int addr = 0x03FFFFF0; addr >= 0x03FFFF00; addr -= 4) {
-        uint32_t word = top->rootp->CORE__DOT__system_ram__DOT__ramm[addr] |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 8) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 2] << 16) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 3] << 24);
+        uint32_t word = emi->peek(*top, addr) |
+                        (emi->peek(*top, addr + 1) << 8) |
+                        (emi->peek(*top, addr + 2) << 16) |
+                        (emi->peek(*top, addr + 3) << 24);
 
         std::cout << "Address [0x" << std::hex << addr << "]: 0x" << word << " (" << std::dec
                   << word << ")" << std::endl;
@@ -188,10 +197,10 @@ int main(int argc, char **argv) {
     // --- SYSTEM RAM DUMP LOWER ---
     std::cout << "\n--- SYSTEM RAM DUMP LOWER ---" << std::endl;
     for (int addr = 4096; addr >= 4000; addr -= 4) {
-        uint32_t word = top->rootp->CORE__DOT__system_ram__DOT__ramm[addr] |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 1] << 8) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 2] << 16) |
-                        (top->rootp->CORE__DOT__system_ram__DOT__ramm[addr + 3] << 24);
+        uint32_t word = emi->peek(*top, addr) |
+                        (emi->peek(*top, addr + 1) << 8) |
+                        (emi->peek(*top, addr + 2) << 16) |
+                        (emi->peek(*top, addr + 3) << 24);
 
         std::cout << "Address [" << std::dec << addr << "]: 0x" << std::hex << word << " ("
                   << std::dec << word << ")" << std::endl;

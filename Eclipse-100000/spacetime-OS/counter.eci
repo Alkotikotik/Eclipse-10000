@@ -246,4 +246,3 @@ JMP ~init_0x00
 ~Lab_for_end_7:
 	RET
 ~this_is_the_end_0x00:
-

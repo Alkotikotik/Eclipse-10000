@@ -6,7 +6,16 @@ module CORE(
 
     output logic [31:0] vram_addr,
     output logic [31:0] vram_data_out,
-    output logic vram_write
+    output logic vram_write,
+
+    output logic EMI_req, EMI_req_we,
+    output logic [23:0] EMI_req_addr,
+    output logic [127:0] EMI_req_wd,
+    output logic [15:0] EMI_req_msk,
+
+    input logic EMI_req_awck, EMI_mem_done,
+    input logic [127:0] EMI_rdata
+
 );
     //====//
     //Pipilined 5 cycle CPU, I chose 5 cycles because its perfect balance
@@ -42,7 +51,9 @@ module CORE(
 
     //== IF(Instruction Fetch) ==//
     logic [31:0] IF_PC;
-    logic [31:0] IF_PC_plus4_or8, IF_PC_tofetch;
+    logic [31:0] IF_PC_plus4_or8;
+    logic [27:0] IF_PC_tofetch;
+    logic I_mem_rdy;
 
     //Just a neat little bit trick to get rid of IF_PC_plus(4/8)
     assign IF_PC_plus4_or8 = IF_PC + {28'd0, (IF_64 || IF_branch), !(IF_64 || IF_branch), 2'b00};
@@ -51,9 +62,9 @@ module CORE(
     assign IF_PC_next = (instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000 || instr_fetch_data[31:26] == 6'b010000 || instr_fetch_data[31:26] == 6'b111101 || IF_predicted_taken) ? IF_redirect_target : IF_PC_plus4_or8;
 
     //Change on memfaults, redirects, stalls etc
-    assign IF_PC_tofetch = MEM_fault ? (memFault ? 32'h70 : 32'h74)
-        : MEM_redirect ? MEM_redirect_target
-        : (!stall && !bubble) ? IF_PC_next : IF_PC;
+    assign IF_PC_tofetch = MEM_fault ? (memFault ? 28'h70 : 28'h74)
+        : MEM_redirect ? MEM_redirect_target[27:0]
+        : (!stall && !bubble && I_mem_rdy) ? IF_PC_next[27:0] : IF_PC[27:0];
 
     always_ff @(posedge clk or posedge reset) begin : IF_main
         if (reset) IF_PC <= 32'h0;
@@ -1048,7 +1059,7 @@ module CORE(
     end
 
 
-    assign mem_stall = isMEM_valid && (MEM_memRead || MEM_memWrite) && !D_mem_rdy; //Writes are gates by memViolation anyways
+    assign mem_stall = isMEM_valid && (MEM_memRead || MEM_memWrite) && !(D_mem_rdy && !(store_load_overlap && MEM_vram_cs && !MEM_reread)); //Writes are gates by memViolation anyways
 
     logic [31:0] mem_read_data;
     logic [31:0] vram_data_read;
@@ -1765,59 +1776,46 @@ module CORE(
         .KGPR1(KGPR1)
     );
 
-    RAM system_ram (
-        .clk(clk),
-        .addrRead(mem_stall ? MEM_memTarget : memTarget),
-        .addrWrite(MEM_memTarget), //Writes happen in MEM
-        .data_in(MEM_ram_data_in),
-        .mem_size(MEM_mem_size),
-        .mem_write(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid),
-        .mem_read(mem_stall ? MEM_memRead : memRead), //Same thing
-        .data_out(ram_data_out),
-
-        .instr_address(IF_PC),
-        .instr_data_out(instr_fetch_duo)
-    );
-
     L1 cache (
         .clk(clk),
-        .rst(rst),
-        .I_advance(!stall && !bubble && I_mem_rdy),
+        .rst(reset),
         .D_advance(!stall),
 
         .I_addr(IF_PC_tofetch), //takes 1cycle for BRAM so fetching next
         .I_data_out(instr_fetch_duo),
         .I_mem_rdy(I_mem_rdy),
 
-        .Dread_addr(mem_stall ? MEM_memTarget : memTarget),  //If mem_stall it reads MEM's instruction not EX's
-        .D_write_addr(MEM_target), //Writes happen in MEM
+        .Dread_addr(stall ? MEM_memTarget[27:0] : memTarget[27:0]),  //If mem_stall it reads MEM's instruction not EX's
+        .D_write_addr(MEM_memTarget[14:0]), //Writes happen in MEM
         .we(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid),  //memWrite dgaf if mem is ready or not
-        .re(stall ? MEM_memRead : memRead), //same thing
+        .re(MEM_memRead && !memViolation && MEM_ram_cs && isMEM_valid), //same thing
 
         .D_data_in(MEM_ram_data_in),
-        .mem_size(mem_size),
+        .mem_size(MEM_mem_size),
 
         .D_data_out(ram_data_out),
         .D_mem_rdy(D_mem_rdy),
 
         //From TOP that holds EMI
-        output logic EMI_req, EMI_req_we,
-        output logic [23:0] EMI_req_addr,
-        output logic [127:0] EMI_req_wd,
-        output logic [15:0] EMI_req_msk,
+        .EMI_req(EMI_req),
+        .EMI_req_we(EMI_req_we),
+        .EMI_req_addr(EMI_req_addr),
+        .EMI_req_wd(EMI_req_wd),
+        .EMI_req_msk(EMI_req_msk),
 
-        input logic EMI_req_awck, EMI_mem_done,
-        input logic [127:0] EMI_rdata
+        .EMI_req_awck(EMI_req_awck),
+        .EMI_mem_done(EMI_mem_done),
+        .EMI_rdata(EMI_rdata)
     );
 
     VRAM system_vram (
         .clk(clk),
-        .addrRead(mem_stall ? MEM_vram_addr : ({12'b0, memTarget[19:0]})), //memTarget - 0x04000000 but much faster
+        .addrRead(stall ? MEM_vram_addr : ({12'b0, memTarget[19:0]})), //memTarget - 0x04000000 but much faster
         .addrWrite(vram_addr),
         .data_in(vram_data_out),
         .mem_size(MEM_mem_size),
         .mem_write(vram_write),
-        .mem_read(mem_stall ? MEM_memRead : memRead),
+        .mem_read(stall ? MEM_memRead : memRead),
         .data_out(vram_data_read)
     );
 

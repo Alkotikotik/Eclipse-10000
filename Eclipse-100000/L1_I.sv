@@ -1,9 +1,8 @@
 module L1_I (
-    //I - instruction cache reads every advance cycle
-    //Refills on missess too
+    //I - instruction cache reads every cycle even if stalled
+    //Bc if it is stalled - it just fetches prev IF_PC. Refills on missess too
     input logic clk,
     input logic rst,
-    input logic advance,
 
     input logic [27:0] I_addr, //aka IF_PC_next
     output logic [63:0] I_data_out,
@@ -55,10 +54,8 @@ module L1_I (
             refill_first <= 2'b0;
             rst_clr <= 10'd512;
         end else begin
-            if (advance) begin
-                I_addr_lat <= I_addr;
-                I_hi_line_lat <= I_hi_line;
-            end
+            I_addr_lat <= I_addr;
+            I_hi_line_lat <= I_hi_line;
             if (rst_clr != 0) begin
                 rst_clr <= rst_clr - 1;
             end

@@ -132,7 +132,6 @@ int main(int argc, char **argv) {
     Op cur = {0, false, 2, 0}; // MEM
     Op nxt = rand_op(0);       // EX
     set_mem(cur);
-    top->I_advance = 1;
     top->D_advance = 1;
     top->I_addr = 0;
     top->Dread_addr = 0;
@@ -183,14 +182,12 @@ int main(int argc, char **argv) {
             fetches++;
             i_stall = 0;
             pc = next_pc(pc);
-            top->I_advance = 1;
             top->I_addr = pc; // IF_PC_next
         } else {
             if (++i_stall > HANG) {
                 printf("cyc %lu: I hung on pc 0x%07x\n", cyc, pc);
                 return 1;
             }
-            top->I_advance = 0;
             top->I_addr =
                 pc; // stalled: IF_PC_next holds IF_PC so the re-read after the refill hits
         }

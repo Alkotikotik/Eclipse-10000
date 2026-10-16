@@ -2,7 +2,6 @@ module L1 (
     //cache arbiter
     input logic clk,
     input logic rst,
-    input logic I_advance,
     input logic D_advance,
 
     input logic [27:0] I_addr, //aka IF_PC_next
@@ -69,7 +68,6 @@ module L1 (
     L1_I instruction_cache (
         .clk(clk),
         .rst(rst),
-        .advance(I_advance),
 
         .I_addr(I_addr),
         .I_data_out(I_data_out),
