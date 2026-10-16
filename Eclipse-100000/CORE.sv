@@ -42,19 +42,24 @@ module CORE(
 
     //== IF(Instruction Fetch) ==//
     logic [31:0] IF_PC;
-    logic [31:0] IF_PC_plus4_or8;
+    logic [31:0] IF_PC_plus4_or8, IF_PC_tofetch;
 
     //Just a neat little bit trick to get rid of IF_PC_plus(4/8)
     assign IF_PC_plus4_or8 = IF_PC + {28'd0, (IF_64 || IF_branch), !(IF_64 || IF_branch), 2'b00};
 
     logic [31:0] IF_PC_next;
-    assign IF_PC_next = (instr_fetch_data[31:26]==6'b111111 || instr_fetch_data[31:26]==6'b111000 || instr_fetch_data[31:26]==6'b010000 || instr_fetch_data[31:26]==6'b111101 || IF_predicted_taken) ? IF_redirect_target : IF_PC_plus4_or8;
+    assign IF_PC_next = (instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000 || instr_fetch_data[31:26] == 6'b010000 || instr_fetch_data[31:26] == 6'b111101 || IF_predicted_taken) ? IF_redirect_target : IF_PC_plus4_or8;
+
+    //Change on memfaults, redirects, stalls etc
+    assign IF_PC_tofetch = MEM_fault ? (memFault ? 32'h70 : 32'h74)
+        : MEM_redirect ? MEM_redirect_target
+        : (!stall && !bubble) ? IF_PC_next : IF_PC;
 
     always_ff @(posedge clk or posedge reset) begin : IF_main
         if (reset) IF_PC <= 32'h0;
         else if(MEM_fault) IF_PC <= memFault ? 32'h00000070 : 32'h00000074;
         else if(MEM_redirect) IF_PC <= MEM_redirect_target;
-        else if(!stall && !bubble) IF_PC <= IF_PC_next;
+        else if(!stall && !bubble && I_mem_rdy) IF_PC <= IF_PC_next;
         else IF_PC <= IF_PC; //I just can't omit it
     end : IF_main
 
@@ -195,7 +200,7 @@ module CORE(
         end else if (MEM_redirect || MEM_fault) begin
             isID_valid <= 0;
         end else if (!stall && !bubble) begin
-            isID_valid <= 1'b1;
+            isID_valid <= I_mem_rdy;
         end
     end : ID_rst
 
@@ -993,10 +998,8 @@ module CORE(
     assign MEM_mmio_cs = (MEM_memTarget[31:8] == 24'hFFFFFF);
     assign MEM_io_cs   = (MEM_memTarget[31:8] == 24'h101000);
 
-    //MEM stalls when waiting for memory, soon when FPGA will arrive ill make
-    //a MIG and SDRAM connection and that will govern mem_ready, however at
-    //the moment there is no mem waiting so its just 1 atm.
-    logic  mem_ready;
+    //Well well well its that time when D_mem_rdy is finally alive
+    logic  D_mem_rdy;
     logic  mem_stall;
 
     logic  mdsx_banked;
@@ -1044,9 +1047,8 @@ module CORE(
         else MEM_reread <= mem_stall;
     end
 
-    assign mem_ready = !(store_load_overlap && !MEM_reread);
 
-    assign mem_stall = isMEM_valid && (MEM_memRead || MEM_memWrite) && !mem_ready; //Writes are gates by memViolation anyways
+    assign mem_stall = isMEM_valid && (MEM_memRead || MEM_memWrite) && !D_mem_rdy; //Writes are gates by memViolation anyways
 
     logic [31:0] mem_read_data;
     logic [31:0] vram_data_read;
@@ -1765,16 +1767,47 @@ module CORE(
 
     RAM system_ram (
         .clk(clk),
-        .addrRead(mem_stall ? MEM_memTarget : memTarget), //If mem_stall it reads MEM's instruction not EX's
+        .addrRead(mem_stall ? MEM_memTarget : memTarget),
         .addrWrite(MEM_memTarget), //Writes happen in MEM
         .data_in(MEM_ram_data_in),
         .mem_size(MEM_mem_size),
-        .mem_write(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid), //memWrite dgaf if mem is ready or not
+        .mem_write(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid),
         .mem_read(mem_stall ? MEM_memRead : memRead), //Same thing
         .data_out(ram_data_out),
 
         .instr_address(IF_PC),
         .instr_data_out(instr_fetch_duo)
+    );
+
+    L1 cache (
+        .clk(clk),
+        .rst(rst),
+        .I_advance(!stall && !bubble && I_mem_rdy),
+        .D_advance(!stall),
+
+        .I_addr(IF_PC_tofetch), //takes 1cycle for BRAM so fetching next
+        .I_data_out(instr_fetch_duo),
+        .I_mem_rdy(I_mem_rdy),
+
+        .Dread_addr(mem_stall ? MEM_memTarget : memTarget),  //If mem_stall it reads MEM's instruction not EX's
+        .D_write_addr(MEM_target), //Writes happen in MEM
+        .we(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid),  //memWrite dgaf if mem is ready or not
+        .re(stall ? MEM_memRead : memRead), //same thing
+
+        .D_data_in(MEM_ram_data_in),
+        .mem_size(mem_size),
+
+        .D_data_out(ram_data_out),
+        .D_mem_rdy(D_mem_rdy),
+
+        //From TOP that holds EMI
+        output logic EMI_req, EMI_req_we,
+        output logic [23:0] EMI_req_addr,
+        output logic [127:0] EMI_req_wd,
+        output logic [15:0] EMI_req_msk,
+
+        input logic EMI_req_awck, EMI_mem_done,
+        input logic [127:0] EMI_rdata
     );
 
     VRAM system_vram (
