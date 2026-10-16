@@ -893,7 +893,7 @@ module CORE(
     logic [7:0]  MEM_gpr_dest;
     logic        MEM_gpr_write;
     logic        MEM_kernelMode;
-    logic        isMEM_valid;
+    logic        isMEM_valid, isMEM_valid_ff, isWB_valid, isWB_valid_ff, D_miss_ff;
 
     logic        MEM_EPCWrite;
     logic        MEM_irq;
@@ -930,11 +930,18 @@ module CORE(
 
     always_ff @(posedge clk or posedge reset) begin : MEM_rst
         if (reset) begin
-            isMEM_valid <= 0;
+            isMEM_valid_ff <= 0;
         end else if (!mem_stall) begin
-            isMEM_valid     <= isEX_valid & !stall & !MEM_fault & !MEM_redirect;
+            isMEM_valid_ff <= isEX_valid & !stall & !MEM_fault & !MEM_redirect;
         end
     end : MEM_rst
+
+    //So I treat cache miss kinda like branch mispredict, by default CPU
+    //assumes cache hits, but if it doesn't, which is indicated by D_miss_ff,
+    //It immediately kills WB and MEM instruction. That way there wouldn't be
+    //a massive miss path with fanout and other nasty stuff
+    assign isMEM_valid = isMEM_valid_ff && !D_miss_ff;
+    assign isWB_valid  = isWB_valid_ff  && !D_miss_ff;
 
     always_ff @(posedge clk) begin : MEM_main
         if (!mem_stall) begin
@@ -1181,10 +1188,8 @@ module CORE(
     logic  MEM_mispredict /*verilator public_flat_rd*/;
     logic  MEM_redirect;
     assign MEM_mispredict = isMEM_valid && MEM_branch && !MEM_irq && (branch_cond_met != MEM_predicted_taken);
-    assign MEM_redirect   = MEM_mispredict || (isMEM_valid && MEM_demolish);
-    assign MEM_redirect_target = MEM_demolish ? MEM_redirect_pc : (branch_cond_met ? MEM_early_target : MEM_PCNext);
-
-
+    assign MEM_redirect   = D_miss_ff || MEM_mispredict || (isMEM_valid && MEM_demolish);
+    assign MEM_redirect_target = D_miss_ff ? WB_PC : MEM_demolish ? MEM_redirect_pc : (branch_cond_met ? MEM_early_target : MEM_PCNext);
 
     //== WB(WriteBack) ==//
     logic [31:0] WB_result;
@@ -1192,7 +1197,6 @@ module CORE(
 
     logic WB_gpr_write;
     logic WB_kernelMode;
-    logic isWB_valid;
     logic WB_is_lomul, WB_is_himul;
 
     logic        WB_memWrite;
@@ -1201,16 +1205,19 @@ module CORE(
     logic [31:0] WB_aligned;
     logic [3:0]  WB_lanes;
 
+    logic [31:0] WB_PC; //never thought i'd need it
+
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
-            isWB_valid <= 0;
+            isWB_valid_ff <= 0;
         end else if (!mem_stall) begin
-            isWB_valid <= isMEM_valid & !MEM_fault;
+            isWB_valid_ff <= isMEM_valid & !MEM_fault;
         end
     end
 
     always_ff @(posedge clk) begin
         if (!mem_stall) begin
+            WB_PC <= MEM_PC;
             WB_result<= MEM_val;
             WB_gpr_dest <= MEM_gpr_dest;
             WB_gpr_write <= MEM_gpr_write;
@@ -1785,7 +1792,7 @@ module CORE(
         .I_data_out(instr_fetch_duo),
         .I_mem_rdy(I_mem_rdy),
 
-        .Dread_addr(stall ? MEM_memTarget[27:0] : memTarget[27:0]),  //If mem_stall it reads MEM's instruction not EX's
+        .Dread_addr(stall ? MEM_memTarget[27:0] : memTarget[27:0]),
         .D_write_addr(MEM_memTarget[14:0]), //Writes happen in MEM
         .we(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid),  //memWrite dgaf if mem is ready or not
         .re(MEM_memRead && !memViolation && MEM_ram_cs && isMEM_valid), //same thing
@@ -1795,6 +1802,7 @@ module CORE(
 
         .D_data_out(ram_data_out),
         .D_mem_rdy(D_mem_rdy),
+        .D_miss_ff(D_miss_ff),
 
         //From TOP that holds EMI
         .EMI_req(EMI_req),

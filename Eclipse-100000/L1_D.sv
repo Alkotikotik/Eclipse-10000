@@ -14,6 +14,7 @@ module L1_D (
 
     output logic [31:0] D_data_out,
     output logic mem_rdy,
+    output logic miss_ff,
 
     output logic Dreq,
     output logic Dreq_we,
@@ -51,10 +52,7 @@ module L1_D (
     logic [21:0]  Dread_addr_plus16_lat, Dread_box_plus1, refill_line;
     logic [12:0]  hi_tag;
     logic [1:0]   refill_first;
-    logic miss_lo, cap_lo;
-    /* verilator lint_off UNUSEDSIGNAL */
-    logic [143:0] cap_src;
-    /* verilator lint_on UNUSEDSIGNAL */
+    logic miss_lo;
     logic overlap, miss_hi;
     logic [31:0]  store_bytes;
     logic [3:0]   store_msk, lane3_meta_E, lane3_meta_O;
@@ -65,14 +63,24 @@ module L1_D (
     logic [9:0]   E_w_addr, O_w_addr;
     logic [31:0]  st_left, wen32;
     logic [12:0]  tag_E, tag_O;
+
     logic [9:0]   even_w, odd_w, even_idx_lat, odd_idx_lat, last_e_idx, last_o_idx;
     logic last_e_wr, last_o_wr;
+    logic st_v, st_e_wr, st_o_wr, hazard;
+    logic [9:0]   st_e_idx, st_o_idx;
+    logic [15:0]  st_E_en, st_O_en;
+    logic [143:0] st_E_data, st_O_data, s_E_data, s_O_data;
+    logic [27:4]  m_addr;
+    logic [21:0]  m_plus16;
+    logic [12:0]  m_cur_tag, m_hi_tag, tag_rE, tag_rO;
+    logic m_lo, pend, busy;
+    logic loE_eq, loO_eq, hiE_eq, hiO_eq; //that looks funny
     logic [143:0] D_data_read, D_data_read_n, D_read_E, D_read_O, rd_data;
     logic [4:0]   pos;
     logic [9:0]   even_idx, odd_idx;
     logic [10:0]  refill_row;
     logic rd_par;
-    logic miss, last_was_store;
+    logic miss;
     logic Dreq_EMI;
     logic [11:0] rst_clr;
 
@@ -101,8 +109,9 @@ module L1_D (
             victim_index <= 9'h0;
             refill_line <= 22'h0;
             refill_first <= 2'b0;
-            cap_lo <= 1'b1;
-            last_was_store <= 1'b0;
+            pend <= 1'b0;
+            miss_ff <= 1'b0;
+            st_v <= 1'b0;
             last_e_wr <= 1'b0;
             last_o_wr <= 1'b0;
             last_e_idx <= 10'h0;
@@ -112,8 +121,8 @@ module L1_D (
         end else begin
             if (advance) begin //latch em bc BRAM req starts at EX and arrives at the start of MEM
                 Dread_addr_lat <= Dread_addr;
-                even_idx_lat <= even_idx;
-                odd_idx_lat <= odd_idx;
+                even_idx_lat <= Dread_addr[14:5] + {9'd0, Dread_addr[4]};
+                odd_idx_lat <= Dread_addr[14:5];
                 Dread_addr_plus16_lat <= Dread_box_plus1;
             end
             if (rst_clr != 0) begin
@@ -134,21 +143,32 @@ module L1_D (
                     mem_done_cnt <= 3'd0;
                     Dreq_EMI <= 1'b0;
                 end
-            end else if ((re | we) && miss && victim_dirty == 0 && rst_clr == 0) begin
+            end else if (pend && victim_dirty == 0) begin
+                pend      <= 1'b0;
                 Dreq_EMI  <= 1'b1;
                 capturing <= 1'b1;
                 read_cnt  <= 2'b0;
-                victim_tag <= miss_lo ? cur_tag : hi_tag;
-                victim_index <= miss_lo ? Dread_addr_lat[14:6] : Dread_addr_plus16_lat[8:0];
-                refill_line <= miss_lo ? Dread_addr_lat[27:6] : Dread_addr_plus16_lat;
-                refill_first <= miss_lo ? Dread_addr_lat[5:4] : 2'b00;
-                cap_lo <= miss_lo;
+                victim_tag <= m_lo ? m_cur_tag : m_hi_tag;
+                victim_index <= m_lo ? m_addr[14:6] : m_plus16[8:0];
+                refill_line <= m_lo ? m_addr[27:6] : m_plus16;
+                refill_first <= m_lo ? m_addr[5:4] : 2'b00;
             end
+            if (!pend) begin
+                m_addr <= Dread_addr_lat[27:4];
+                m_plus16 <= Dread_addr_plus16_lat;
+                m_lo <= miss_lo;
+                m_cur_tag <= cur_tag;
+                m_hi_tag <= hi_tag;
+            end
+            if ((re || we) && mem_rdy && miss) begin
+                pend <= 1'b1;
+            end
+            miss_ff <= (re || we) && mem_rdy && miss;
             if (capturing) begin //checking if its dirty
                 //This happens at the same time as im writing data to cache,
                 //because while im writing well im not reading so might as well
                 read_cnt <= read_cnt + 1;
-                victim_dirty[refill_first + read_cnt] <= cap_src[125];
+                victim_dirty[refill_first + read_cnt] <= D_data_read[125];
                 if (read_cnt == 3) begin
                     capturing <= 1'b0;
                 end
@@ -156,23 +176,31 @@ module L1_D (
             if (drain && req_awck) begin
                 victim_dirty[box] <= 1'b0;
             end
-            last_was_store <= we && mem_rdy;
-            last_e_wr <= we && mem_rdy && cov_E != 0;
-            last_o_wr <= we && mem_rdy && cov_O != 0;
-            last_e_idx <= even_w;
-            last_o_idx <= odd_w;
+            st_v <= we && mem_rdy && !miss;
+            st_e_wr <= cov_E != 0;
+            st_o_wr <= cov_O != 0;
+            st_e_idx <= even_w;
+            st_o_idx <= odd_w;
+            last_e_wr <= st_v && st_e_wr;
+            last_o_wr <= st_v && st_o_wr;
+            last_e_idx <= st_e_idx;
+            last_o_idx <= st_o_idx;
         end
     end
 
     always_ff @(posedge clk) begin
         if (capturing) begin
             victim_data[refill_first + read_cnt] <= {
-                cap_src[142:135], cap_src[133:126], cap_src[124:117], cap_src[115:108],
-                cap_src[106:99],  cap_src[97:90],   cap_src[88:81],   cap_src[79:72],
-                cap_src[70:63],   cap_src[61:54],   cap_src[52:45],   cap_src[43:36],
-                cap_src[34:27],   cap_src[25:18],   cap_src[16:9],    cap_src[7:0]
+                D_data_read[142:135], D_data_read[133:126], D_data_read[124:117], D_data_read[115:108],
+                D_data_read[106:99],  D_data_read[97:90],   D_data_read[88:81],   D_data_read[79:72],
+                D_data_read[70:63],   D_data_read[61:54],   D_data_read[52:45],   D_data_read[43:36],
+                D_data_read[34:27],   D_data_read[25:18],   D_data_read[16:9],    D_data_read[7:0]
             };
         end
+        st_E_data <= s_E_data;
+        st_O_data <= s_O_data;
+        st_E_en <= wen_E;
+        st_O_en <= wen_O;
     end
 
     //reading every cycle, no matter whether its stall or not, address
@@ -180,8 +208,9 @@ module L1_D (
     //also in separate always_ff without async reset, otherwise vivado
     //just wouldn't map it on actual bram bc it doesn't support async
     //rst, it supports sync tho, but idgaf.
-    assign Dread_addr_real = capturing ? {refill_line[8:0], refill_first + read_cnt + 2'd1}: Dread_addr[14:4];
-    assign cap_src = (read_cnt == 0 && !cap_lo) ? D_data_read_n : D_data_read;
+    assign Dread_addr_real = capturing ? {refill_line[8:0], refill_first + read_cnt + 2'd1}
+                           : pend ? (m_lo ? m_addr[14:4] : {m_plus16[8:0], 2'b00})
+                           : Dread_addr[14:4];
     assign odd_idx  = Dread_addr_real[10:1];
     assign odd_w    = D_write_addr[14:5];
     assign even_w   = D_write_addr[14:5] + {9'd0, D_write_addr[4]};
@@ -208,24 +237,29 @@ module L1_D (
     //CPU write to BRAM 36bit of data and just, and mask the meta. As well as
     //everything I don't want to write based on fragmented registers, stores
     //and etc, just read the code bruh.
-    always_comb begin : D1_write_port
-        E_w_addr = even_w;
-        O_w_addr = odd_w;
-        E_w_en   = 16'h0;
-        O_w_en   = 16'h0;
+    always_comb begin : store_data
         for (integer i = 0; i < 4; i++) begin
             //yeah that doesn't look great but basically vivado can't put it
             //into BRAM if it has 2 or more write/read addresses. So fix is to
             //use byte_enables in BRAM.
-            O_w_data[9 * i +: 9]       = {tag_O[12 - i], store_bytes[31 - 8*i -: 8]};
-            O_w_data[36 + 9 * i +: 9]  = {tag_O[8 - i],  store_bytes[31 - 8*i -: 8]};
-            O_w_data[72 + 9 * i +: 9]  = {tag_O[4 - i],  store_bytes[31 - 8*i -: 8]};
-            O_w_data[108 + 9 * i +: 9] = {lane3_meta_O[i], cov_O[i + 12] ? store_bytes[31 - 8*i -: 8] : D_read_O[108 + 9*i +: 8]}; //If you are physically seeing this then: this is for dirty bits, if CPU actually writes there I jsut set dirty flag and put data there, if it doesn't I just set the dirty flag
-            E_w_data[9 * i +: 9]       = {tag_E[12 - i], store_bytes[31 - 8*i -: 8]};
-            E_w_data[36 + 9 * i +: 9]  = {tag_E[8 - i],  store_bytes[31 - 8*i -: 8]};
-            E_w_data[72 + 9 * i +: 9]  = {tag_E[4 - i],  store_bytes[31 - 8*i -: 8]};
-            E_w_data[108 + 9 * i +: 9] = {lane3_meta_E[i], cov_E[i + 12] ? store_bytes[31 - 8*i -: 8] : D_read_E[108 + 9*i +: 8]};
+            s_O_data[9 * i +: 9]       = {tag_O[12 - i], store_bytes[31 - 8*i -: 8]};
+            s_O_data[36 + 9 * i +: 9]  = {tag_O[8 - i],  store_bytes[31 - 8*i -: 8]};
+            s_O_data[72 + 9 * i +: 9]  = {tag_O[4 - i],  store_bytes[31 - 8*i -: 8]};
+            s_O_data[108 + 9 * i +: 9] = {lane3_meta_O[i], cov_O[i + 12] ? store_bytes[31 - 8*i -: 8] : D_read_O[108 + 9*i +: 8]}; //If you are physically seeing this then: this is for dirty bits, if CPU actually writes there I jsut set dirty flag and put data there, if it doesn't I just set the dirty flag
+            s_E_data[9 * i +: 9]       = {tag_E[12 - i], store_bytes[31 - 8*i -: 8]};
+            s_E_data[36 + 9 * i +: 9]  = {tag_E[8 - i],  store_bytes[31 - 8*i -: 8]};
+            s_E_data[72 + 9 * i +: 9]  = {tag_E[4 - i],  store_bytes[31 - 8*i -: 8]};
+            s_E_data[108 + 9 * i +: 9] = {lane3_meta_E[i], cov_E[i + 12] ? store_bytes[31 - 8*i -: 8] : D_read_E[108 + 9*i +: 8]};
         end
+    end : store_data
+
+    always_comb begin : D1_write_port
+        E_w_addr = st_e_idx;
+        O_w_addr = st_o_idx;
+        E_w_data = st_E_data;
+        O_w_data = st_O_data;
+        E_w_en   = 16'h0;
+        O_w_en   = 16'h0;
 
         if (rst_clr != 0) begin //just clean all flags on rst
             E_w_addr = rst_clr[10:1];
@@ -241,9 +275,9 @@ module L1_D (
             O_w_data = refill_data;
             E_w_en   = refill_row[0] ? 16'h0 : 16'hFFFF;
             O_w_en   = refill_row[0] ? 16'hFFFF : 16'h0;
-        end else if (we && mem_rdy) begin
-            E_w_en   = wen_E;
-            O_w_en   = wen_O;
+        end else if (st_v) begin
+            E_w_en   = st_E_en;
+            O_w_en   = st_O_en;
         end
     end : D1_write_port
 
@@ -335,13 +369,22 @@ module L1_D (
     //basically upper 13bits of address. That way miss in when you access
     //right address(you can't access wrong one bc cache address is basically
     //lower address bits) but in the wrong chunk of ddr3(wrong tag)
-    assign miss_lo = !D_data_read[143] || cur_tag != Dread_addr_lat[27:15];
+    assign tag_rE  = {D_read_E[8], D_read_E[17], D_read_E[26], D_read_E[35], D_read_E[44], D_read_E[53], D_read_E[62], D_read_E[71], D_read_E[80], D_read_E[89], D_read_E[98], D_read_E[107], D_read_E[116]};
+    assign tag_rO  = {D_read_O[8], D_read_O[17], D_read_O[26], D_read_O[35], D_read_O[44], D_read_O[53], D_read_O[62], D_read_O[71], D_read_O[80], D_read_O[89], D_read_O[98], D_read_O[107], D_read_O[116]};
+    assign loE_eq  = D_read_E[143] && tag_rE == Dread_addr_lat[27:15];
+    assign loO_eq  = D_read_O[143] && tag_rO == Dread_addr_lat[27:15];
+    assign hiE_eq  = D_read_E[143] && tag_rE == Dread_addr_plus16_lat[21:9];
+    assign hiO_eq  = D_read_O[143] && tag_rO == Dread_addr_plus16_lat[21:9];
+    assign miss_lo = rd_par ? !loO_eq : !loE_eq;
     assign miss = miss_lo || (overlap && miss_hi);
-    assign miss_hi = !D_data_read_n[143] || hi_tag != Dread_addr_plus16_lat[21:9]; //plus16 bc hi and lo re 16bytes apart anf if they are 32KB they are basically cooked
+    assign miss_hi = rd_par ? !hiE_eq : !hiO_eq; //plus16 bc hi and lo re 16bytes apart anf if they are 32KB they are basically cooked
     //If mem_rdy would become active during read or write address will change
     //mid-access leading to corruption ofc. Also if read same address as just
     //written to, just stall, its just so unlikely to happen like why tf would
     //you read what you just wrote? Anyways ill test forwarding later
-    assign mem_rdy = (!re && !we) || (!miss && !Dreq_EMI && !(last_was_store && ((last_e_wr && last_e_idx == even_idx_lat) || (last_o_wr && last_o_idx == odd_idx_lat)))) && (rst_clr == 0);
+    assign busy = Dreq_EMI || pend;
+    assign hazard = (st_v && ((st_e_wr && st_e_idx == even_idx_lat) || (st_o_wr && st_o_idx == odd_idx_lat)))
+                 || (last_e_wr && last_e_idx == even_idx_lat) || (last_o_wr && last_o_idx == odd_idx_lat);
+    assign mem_rdy = (!re && !we) || (!busy && !hazard && rst_clr == 0);
     assign Dreq = refill_req || drain; //There would be other Dreqs causes here
 endmodule

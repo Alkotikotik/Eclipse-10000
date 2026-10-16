@@ -20,6 +20,7 @@ constexpr int SAME_BOX_PCT =
     25; // D: next op hits the same 16B box, stresses store->load back to back
 constexpr int D_EDGE_PCT =
     3; // D: last box of a 32KB chunk, so crossing accesses spill into the next tag
+constexpr int REFETCH = 3; // D: bubbles after a replay while IF/ID/EX refill, like CORE's flush
 
 // code lives in the top half of the 256MB (addr bit 27 = 1), data in the bottom half, so D's
 // write-backs never land on something I fetches (no self-modifying code)
@@ -34,6 +35,7 @@ struct Op {
     bool store;
     uint8_t size;  // mem_size: 0 u8, 1 u16, 2 u32
     uint32_t data; // right-aligned, like CORE's store_val
+    bool valid;    // false = bubble
 };
 
 int main(int argc, char **argv) {
@@ -110,6 +112,7 @@ int main(int argc, char **argv) {
         op.store = rand() % 100 < STORE_PCT;
         op.size = rand() % 3; // any size at any byte address, loads and stores
         op.data = rand();
+        op.valid = true;
         return op;
     };
 
@@ -118,9 +121,9 @@ int main(int argc, char **argv) {
     Verilated::randReset(2);
     Verilated::randSeed(seed);
     auto top = std::make_unique<VL1>();
-    auto set_mem = [&](const Op &op) { // MEM-stage inputs
-        top->re = !op.store;
-        top->we = op.store;
+    auto set_mem = [&](const Op &op) { // MEM-stage inputs, killed like CORE's isMEM_valid on a replay
+        top->re = op.valid && !op.store && !top->D_miss_ff;
+        top->we = op.valid && op.store && !top->D_miss_ff;
         top->D_write_addr = op.addr;
         top->mem_size = op.size;
         top->D_data_in = op.data;
@@ -129,9 +132,32 @@ int main(int argc, char **argv) {
     // both latched addresses reset to 0, so the first fetch and the first D op are at 0. That's in
     // the data half, but it's done long before D's sweep ends and anything gets written back
     uint32_t pc = 0;           // PC in IF, its data should be on I_data_out
-    Op cur = {0, false, 2, 0}; // MEM
-    Op nxt = rand_op(0);       // EX
-    set_mem(cur);
+    const Op bubble = {0, false, 2, 0, false};
+    Op cur = {0, false, 2, 0, true}; // MEM
+    Op nxt = rand_op(0);             // EX
+    uint32_t last_addr = nxt.addr;   // what the next random op is generated near
+    std::deque<Op> prog;             // ops to go into EX again after a replay, in program order
+    int refetch = 0;
+    uint64_t last_progress = 0; // replaying forever never stalls, so watch for no ops finishing
+    struct {
+        Op op;
+        bool valid, bad, stalled;
+        uint32_t got;
+    } unconf = {bubble, false, false, false, 0}; // left MEM last cycle, real unless D_miss_ff says no
+    auto next_op = [&]() {
+        if (refetch) {
+            refetch--;
+            return bubble;
+        }
+        if (!prog.empty()) {
+            Op op = prog.front();
+            prog.pop_front();
+            return op;
+        }
+        Op op = rand_op(last_addr);
+        last_addr = op.addr;
+        return op;
+    };
     top->D_advance = 1;
     top->I_addr = 0;
     top->Dread_addr = 0;
@@ -145,13 +171,14 @@ int main(int argc, char **argv) {
         top->eval();
     }
     top->rst = 0;
+    set_mem(cur); // after reset, so D_miss_ff isn't power-up garbage
 
     std::deque<Beat> emi; // reads EMI accepted, waiting for their beat
     uint64_t last_ready = 0;
 
     uint64_t cyc = 0, fetches = 0, ops = 0, loads = 0, stores = 0;
     uint64_t i_stall = 0, d_stall = 0, i_stalled = 0, d_stalled = 0;
-    uint64_t i_reqs = 0, d_reqs = 0, wbs = 0, rw_switches = 0;
+    uint64_t i_reqs = 0, d_reqs = 0, wbs = 0, rw_switches = 0, replays = 0;
     uint64_t i_errors = 0, d_errors = 0, lock_errors = 0;
     int i_run = 0, d_run = 0; // reads accepted in the current 4-read run, mod 4
     bool last_we = false;
@@ -192,43 +219,68 @@ int main(int argc, char **argv) {
                 pc; // stalled: IF_PC_next holds IF_PC so the re-read after the refill hits
         }
 
-        // fake MEM
-        if (top->D_mem_rdy) {
-            if (cur.store) {
-                for (int b = 0; b < (1 << cur.size); b++) { // store commits on this edge
-                    stored[cur.addr + b] = cur.data >> 8 * ((1 << cur.size) - 1 - b);
+        // fake MEM: a miss doesn't stall, it shows up a cycle later as D_miss_ff and replays
+        if (top->D_miss_ff) {
+            // the op that left MEM last cycle didn't really, the one in MEM now is killed (re/we
+            // already dropped), and they go back into the pipeline in program order
+            if (nxt.valid) {
+                prog.push_front(nxt);
+            }
+            if (cur.valid) {
+                prog.push_front(cur);
+            }
+            prog.push_front(unconf.op);
+            unconf.valid = false;
+            cur = bubble;
+            nxt = bubble;
+            refetch = REFETCH;
+            replays++;
+        } else if (unconf.valid) { // it really happened
+            const Op &op = unconf.op;
+            if (op.store) {
+                for (int b = 0; b < (1 << op.size); b++) {
+                    stored[op.addr + b] = op.data >> 8 * ((1 << op.size) - 1 - b);
                 }
                 stores++;
             } else {
-                // CORE keeps the top 1/2/4 bytes (ram_data_sized), so only those have to be right
-                uint32_t keep = cur.size == 2   ? 0xFFFFFFFF
-                                : cur.size == 1 ? 0xFFFF0000
-                                                : 0xFF000000;
-                if ((top->D_data_out & keep) != (cpu_word(cur.addr) & keep)) {
-                    if (d_errors++ < 10) {
-                        printf("cyc %lu: load u%d 0x%07x got 0x%08x want 0x%08x\n", cyc,
-                               8 << cur.size, cur.addr, top->D_data_out & keep,
-                               cpu_word(cur.addr) & keep);
-                    }
+                if (unconf.bad && d_errors++ < 10) {
+                    uint32_t keep = op.size == 2 ? 0xFFFFFFFF : op.size == 1 ? 0xFFFF0000 : 0xFF000000;
+                    printf("cyc %lu: load u%d 0x%07x got 0x%08x want 0x%08x\n", cyc - 1, 8 << op.size,
+                           op.addr, unconf.got, cpu_word(op.addr) & keep);
                 }
                 loads++;
             }
-            if (d_stall) {
+            if (unconf.stalled) {
                 d_stalled++;
             }
             ops++;
+            last_progress = cyc;
+            unconf.valid = false;
+        }
+        if (cyc - last_progress > HANG) {
+            printf("cyc %lu: D stuck replaying addr 0x%07x\n", cyc, prog.empty() ? cur.addr : prog.front().addr);
+            return 1;
+        }
+
+        if (!cur.valid || top->D_mem_rdy) {
+            if (cur.valid) {
+                // CORE keeps the top 1/2/4 bytes (ram_data_sized), so only those have to be right
+                uint32_t keep = cur.size == 2 ? 0xFFFFFFFF : cur.size == 1 ? 0xFFFF0000 : 0xFF000000;
+                unconf = {cur, true, !cur.store && (top->D_data_out & keep) != (cpu_word(cur.addr) & keep),
+                          d_stall != 0, top->D_data_out & keep};
+            }
             d_stall = 0;
             top->D_advance = 1;
             top->Dread_addr = nxt.addr; // EX moves into MEM
             cur = nxt;
-            nxt = rand_op(cur.addr);
+            nxt = next_op();
         } else {
             if (++d_stall > HANG) {
                 printf("cyc %lu: D hung on addr 0x%07x\n", cyc, cur.addr);
                 return 1;
             }
             top->D_advance = 0;
-            top->Dread_addr = cur.addr; // CORE's mem_stall ? MEM_memTarget : memTarget
+            top->Dread_addr = cur.addr; // CORE's stall ? MEM_memTarget : memTarget
         }
         top->eval();
 
@@ -290,6 +342,7 @@ int main(int argc, char **argv) {
     printf("D: %lu ops (%lu loads, %lu stores), %lu refills, %lu box write-backs, %lu stalled, %lu "
            "errors\n",
            ops, loads, stores, d_reqs / 4, wbs, d_stalled, d_errors);
+    printf("D: %lu replays\n", replays);
     printf("EMI: %lu read/write switches, %lu lock errors\n", rw_switches, lock_errors);
     return i_errors || d_errors || lock_errors;
 }
