@@ -60,6 +60,9 @@ module L1_D (
     logic [3:0]   store_msk, lane3_meta_E, lane3_meta_O;
     logic [12:0]  cur_tag;
     logic [15:0]  wen_E, wen_O, cov_E, cov_O; //write enable for n
+    logic [15:0]  E_w_en, O_w_en;
+    logic [143:0] E_w_data, O_w_data, refill_data;
+    logic [9:0]   E_w_addr, O_w_addr;
     logic [31:0]  st_left, wen32;
     logic [12:0]  tag_E, tag_O;
     logic [9:0]   even_w, odd_w, even_idx_lat, odd_idx_lat, last_e_idx, last_o_idx;
@@ -205,35 +208,60 @@ module L1_D (
     //CPU write to BRAM 36bit of data and just, and mask the meta. As well as
     //everything I don't want to write based on fragmented registers, stores
     //and etc, just read the code bruh.
-    always_ff @(posedge clk) begin : D1_write
+    always_comb begin : D1_write_port
+        E_w_addr = even_w;
+        O_w_addr = odd_w;
+        E_w_en   = 16'h0;
+        O_w_en   = 16'h0;
+        for (integer i = 0; i < 4; i++) begin
+            //yeah that doesn't look great but basically vivado can't put it
+            //into BRAM if it has 2 or more write/read addresses. So fix is to
+            //use byte_enables in BRAM.
+            O_w_data[9 * i +: 9]       = {tag_O[12 - i], store_bytes[31 - 8*i -: 8]};
+            O_w_data[36 + 9 * i +: 9]  = {tag_O[8 - i],  store_bytes[31 - 8*i -: 8]};
+            O_w_data[72 + 9 * i +: 9]  = {tag_O[4 - i],  store_bytes[31 - 8*i -: 8]};
+            O_w_data[108 + 9 * i +: 9] = {lane3_meta_O[i], cov_O[i + 12] ? store_bytes[31 - 8*i -: 8] : D_read_O[108 + 9*i +: 8]}; //If you are physically seeing this then: this is for dirty bits, if CPU actually writes there I jsut set dirty flag and put data there, if it doesn't I just set the dirty flag
+            E_w_data[9 * i +: 9]       = {tag_E[12 - i], store_bytes[31 - 8*i -: 8]};
+            E_w_data[36 + 9 * i +: 9]  = {tag_E[8 - i],  store_bytes[31 - 8*i -: 8]};
+            E_w_data[72 + 9 * i +: 9]  = {tag_E[4 - i],  store_bytes[31 - 8*i -: 8]};
+            E_w_data[108 + 9 * i +: 9] = {lane3_meta_E[i], cov_E[i + 12] ? store_bytes[31 - 8*i -: 8] : D_read_E[108 + 9*i +: 8]};
+        end
+
         if (rst_clr != 0) begin //just clean all flags on rst
-            if (rst_clr[0])
-                D_cacheE3[rst_clr[10:1]] <= 36'b0;
-            else
-                D_cacheO3[rst_clr[10:1] - 10'd1] <= 36'b0;
+            E_w_addr = rst_clr[10:1];
+            O_w_addr = rst_clr[10:1] - 10'd1;
+            E_w_data = 144'b0;
+            O_w_data = 144'b0;
+            E_w_en   = {rst_clr[0] ? 4'hF : 4'h0, 12'h0};
+            O_w_en   = {rst_clr[0] ? 4'h0 : 4'hF, 12'h0};
         end else if (mem_done) begin //miss
-            if (refill_row[0]) begin
-                D_cacheO0[refill_row[10:1]] <= {refill_line[18], EMI_rdata[31:24],  refill_line[19], EMI_rdata[23:16],  refill_line[20], EMI_rdata[15:8],   refill_line[21], EMI_rdata[7:0]};
-                D_cacheO1[refill_row[10:1]] <= {refill_line[14], EMI_rdata[63:56],  refill_line[15], EMI_rdata[55:48],  refill_line[16], EMI_rdata[47:40],  refill_line[17], EMI_rdata[39:32]};
-                D_cacheO2[refill_row[10:1]] <= {refill_line[10], EMI_rdata[95:88],  refill_line[11], EMI_rdata[87:80],  refill_line[12], EMI_rdata[79:72],  refill_line[13], EMI_rdata[71:64]};
-                D_cacheO3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,              EMI_rdata[119:112], 1'b0,              EMI_rdata[111:104], refill_line[9], EMI_rdata[103:96]};
-            end else begin
-                D_cacheE0[refill_row[10:1]] <= {refill_line[18], EMI_rdata[31:24],  refill_line[19], EMI_rdata[23:16],  refill_line[20], EMI_rdata[15:8],   refill_line[21], EMI_rdata[7:0]};
-                D_cacheE1[refill_row[10:1]] <= {refill_line[14], EMI_rdata[63:56],  refill_line[15], EMI_rdata[55:48],  refill_line[16], EMI_rdata[47:40],  refill_line[17], EMI_rdata[39:32]};
-                D_cacheE2[refill_row[10:1]] <= {refill_line[10], EMI_rdata[95:88],  refill_line[11], EMI_rdata[87:80],  refill_line[12], EMI_rdata[79:72],  refill_line[13], EMI_rdata[71:64]};
-                D_cacheE3[refill_row[10:1]] <= {1'b1,               EMI_rdata[127:120], 1'b0,              EMI_rdata[119:112], 1'b0,              EMI_rdata[111:104], refill_line[9], EMI_rdata[103:96]};
-            end
+            E_w_addr = refill_row[10:1];
+            O_w_addr = refill_row[10:1];
+            E_w_data = refill_data;
+            O_w_data = refill_data;
+            E_w_en   = refill_row[0] ? 16'h0 : 16'hFFFF;
+            O_w_en   = refill_row[0] ? 16'hFFFF : 16'h0;
         end else if (we && mem_rdy) begin
-            for (integer i = 0; i < 4; i++) begin
-                if (wen_O[i + 0])  D_cacheO0[odd_w] [9 * i +: 9] <= {tag_O[12 - i], store_bytes[31 - 8*i -: 8]};
-                if (wen_O[i + 4])  D_cacheO1[odd_w] [9 * i +: 9] <= {tag_O[8 - i],  store_bytes[31 - 8*i -: 8]};
-                if (wen_O[i + 8])  D_cacheO2[odd_w] [9 * i +: 9] <= {tag_O[4 - i],  store_bytes[31 - 8*i -: 8]};
-                if (wen_O[i + 12]) D_cacheO3[odd_w] [9 * i +: 9] <= {lane3_meta_O[i], cov_O[i + 12] ? store_bytes[31 - 8*i -: 8] : D_read_O[108 + 9*i +: 8]}; //If you are physically seeing this then: this is for dirty bits, if CPU actually writes there I jsut set dirty flag and put data there, if it doesn't I just set the dirty flag
-                if (wen_E[i + 0])  D_cacheE0[even_w][9 * i +: 9] <= {tag_E[12 - i], store_bytes[31 - 8*i -: 8]};
-                if (wen_E[i + 4])  D_cacheE1[even_w][9 * i +: 9] <= {tag_E[8 - i],  store_bytes[31 - 8*i -: 8]};
-                if (wen_E[i + 8])  D_cacheE2[even_w][9 * i +: 9] <= {tag_E[4 - i],  store_bytes[31 - 8*i -: 8]};
-                if (wen_E[i + 12]) D_cacheE3[even_w][9 * i +: 9] <= {lane3_meta_E[i], cov_E[i + 12] ? store_bytes[31 - 8*i -: 8] : D_read_E[108 + 9*i +: 8]};
-            end
+            E_w_en   = wen_E;
+            O_w_en   = wen_O;
+        end
+    end : D1_write_port
+
+    assign refill_data = {1'b1,            EMI_rdata[127:120], 1'b0,            EMI_rdata[119:112], 1'b0,            EMI_rdata[111:104], refill_line[9],  EMI_rdata[103:96],
+                          refill_line[10], EMI_rdata[95:88],   refill_line[11], EMI_rdata[87:80],   refill_line[12], EMI_rdata[79:72],   refill_line[13], EMI_rdata[71:64],
+                          refill_line[14], EMI_rdata[63:56],   refill_line[15], EMI_rdata[55:48],   refill_line[16], EMI_rdata[47:40],   refill_line[17], EMI_rdata[39:32],
+                          refill_line[18], EMI_rdata[31:24],   refill_line[19], EMI_rdata[23:16],   refill_line[20], EMI_rdata[15:8],    refill_line[21], EMI_rdata[7:0]};
+
+    always_ff @(posedge clk) begin : D1_write
+        for (integer i = 0; i < 4; i++) begin
+            if (E_w_en[i + 0])  D_cacheE0[E_w_addr][9 * i +: 9] <= E_w_data[9 * i +: 9];
+            if (E_w_en[i + 4])  D_cacheE1[E_w_addr][9 * i +: 9] <= E_w_data[36 + 9 * i +: 9];
+            if (E_w_en[i + 8])  D_cacheE2[E_w_addr][9 * i +: 9] <= E_w_data[72 + 9 * i +: 9];
+            if (E_w_en[i + 12]) D_cacheE3[E_w_addr][9 * i +: 9] <= E_w_data[108 + 9 * i +: 9];
+            if (O_w_en[i + 0])  D_cacheO0[O_w_addr][9 * i +: 9] <= O_w_data[9 * i +: 9];
+            if (O_w_en[i + 4])  D_cacheO1[O_w_addr][9 * i +: 9] <= O_w_data[36 + 9 * i +: 9];
+            if (O_w_en[i + 8])  D_cacheO2[O_w_addr][9 * i +: 9] <= O_w_data[72 + 9 * i +: 9];
+            if (O_w_en[i + 12]) D_cacheO3[O_w_addr][9 * i +: 9] <= O_w_data[108 + 9 * i +: 9];
         end
     end : D1_write
 

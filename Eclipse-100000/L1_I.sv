@@ -41,6 +41,9 @@ module L1_I (
     logic [8:0]   even_idx, odd_idx;
     logic [2:0]   req_cnt, mem_done_cnt;
     logic [1:0]   refill_first;
+    logic [35:0]  I_w_lane3;
+    logic [8:0]   I_w_addr;
+    logic I_w_clr, I_w_E, I_w_O;
     logic refilling, rd_par, overlap, miss, miss_lo, miss_hi;
 
     always_ff @(posedge clk or posedge rst) begin
@@ -100,23 +103,25 @@ module L1_I (
     assign I_data_read_n = rd_par ? I_read_E : I_read_O;
     assign refill_row    = {refill_line[7:0], refill_first + mem_done_cnt[1:0]};
 
+    assign I_w_clr   = rst_clr != 0;
+    assign I_w_addr  = I_w_clr ? rst_clr[8:0] - 9'd1 : refill_row[9:1];
+    assign I_w_E     = !I_w_clr && mem_done && !refill_row[0];
+    assign I_w_O     = !I_w_clr && mem_done && refill_row[0];
+    assign I_w_lane3 = I_w_clr ? 36'b0 : {1'b1, EMI_rdata[127:120], 1'b0, EMI_rdata[119:112], refill_line[8], EMI_rdata[111:104], refill_line[9], EMI_rdata[103:96]};
+
     always_ff @(posedge clk) begin : I_EMI
-        if (rst_clr != 0) begin
-            I_cacheE3[rst_clr[8:0] - 9'd1] <= 36'b0;
-            I_cacheO3[rst_clr[8:0] - 9'd1] <= 36'b0;
-        end else if (mem_done) begin
-            if (refill_row[0]) begin
-                I_cacheO0[refill_row[9:1]] <= {refill_line[18], EMI_rdata[31:24],  refill_line[19], EMI_rdata[23:16],  refill_line[20], EMI_rdata[15:8],   refill_line[21], EMI_rdata[7:0]};
-                I_cacheO1[refill_row[9:1]] <= {refill_line[14], EMI_rdata[63:56],  refill_line[15], EMI_rdata[55:48],  refill_line[16], EMI_rdata[47:40],  refill_line[17], EMI_rdata[39:32]};
-                I_cacheO2[refill_row[9:1]] <= {refill_line[10], EMI_rdata[95:88],  refill_line[11], EMI_rdata[87:80],  refill_line[12], EMI_rdata[79:72],  refill_line[13], EMI_rdata[71:64]};
-                I_cacheO3[refill_row[9:1]] <= {1'b1,            EMI_rdata[127:120], 1'b0,           EMI_rdata[119:112], refill_line[8],  EMI_rdata[111:104], refill_line[9],  EMI_rdata[103:96]};
-            end else begin
-                I_cacheE0[refill_row[9:1]] <= {refill_line[18], EMI_rdata[31:24],  refill_line[19], EMI_rdata[23:16],  refill_line[20], EMI_rdata[15:8],   refill_line[21], EMI_rdata[7:0]};
-                I_cacheE1[refill_row[9:1]] <= {refill_line[14], EMI_rdata[63:56],  refill_line[15], EMI_rdata[55:48],  refill_line[16], EMI_rdata[47:40],  refill_line[17], EMI_rdata[39:32]};
-                I_cacheE2[refill_row[9:1]] <= {refill_line[10], EMI_rdata[95:88],  refill_line[11], EMI_rdata[87:80],  refill_line[12], EMI_rdata[79:72],  refill_line[13], EMI_rdata[71:64]};
-                I_cacheE3[refill_row[9:1]] <= {1'b1,            EMI_rdata[127:120], 1'b0,           EMI_rdata[119:112], refill_line[8],  EMI_rdata[111:104], refill_line[9],  EMI_rdata[103:96]};
-            end
+        if (I_w_O) begin
+            I_cacheO0[I_w_addr] <= {refill_line[18], EMI_rdata[31:24],  refill_line[19], EMI_rdata[23:16],  refill_line[20], EMI_rdata[15:8],   refill_line[21], EMI_rdata[7:0]};
+            I_cacheO1[I_w_addr] <= {refill_line[14], EMI_rdata[63:56],  refill_line[15], EMI_rdata[55:48],  refill_line[16], EMI_rdata[47:40],  refill_line[17], EMI_rdata[39:32]};
+            I_cacheO2[I_w_addr] <= {refill_line[10], EMI_rdata[95:88],  refill_line[11], EMI_rdata[87:80],  refill_line[12], EMI_rdata[79:72],  refill_line[13], EMI_rdata[71:64]};
         end
+        if (I_w_O || I_w_clr) I_cacheO3[I_w_addr] <= I_w_lane3;
+        if (I_w_E) begin
+            I_cacheE0[I_w_addr] <= {refill_line[18], EMI_rdata[31:24],  refill_line[19], EMI_rdata[23:16],  refill_line[20], EMI_rdata[15:8],   refill_line[21], EMI_rdata[7:0]};
+            I_cacheE1[I_w_addr] <= {refill_line[14], EMI_rdata[63:56],  refill_line[15], EMI_rdata[55:48],  refill_line[16], EMI_rdata[47:40],  refill_line[17], EMI_rdata[39:32]};
+            I_cacheE2[I_w_addr] <= {refill_line[10], EMI_rdata[95:88],  refill_line[11], EMI_rdata[87:80],  refill_line[12], EMI_rdata[79:72],  refill_line[13], EMI_rdata[71:64]};
+        end
+        if (I_w_E || I_w_clr) I_cacheE3[I_w_addr] <= I_w_lane3;
     end : I_EMI
 
     always_comb begin : data_out

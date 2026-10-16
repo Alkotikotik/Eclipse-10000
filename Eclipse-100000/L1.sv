@@ -1,5 +1,8 @@
 module L1 (
-    //cache arbiter
+    //Cache arbiter
+    //I skipped pre-fetch and other such optimizations for now, simply because
+    //my program aren't even close to being 48KB, so cache misses happen only
+    //on init.
     input logic clk,
     input logic rst,
     input logic D_advance,
