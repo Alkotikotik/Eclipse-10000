@@ -178,7 +178,13 @@ int main(int argc, char **argv) {
 
     uint64_t cyc = 0, fetches = 0, ops = 0, loads = 0, stores = 0;
     uint64_t i_stall = 0, d_stall = 0, i_stalled = 0, d_stalled = 0;
-    uint64_t i_reqs = 0, d_reqs = 0, wbs = 0, rw_switches = 0, replays = 0;
+    uint64_t i_reqs = 0, d_reqs = 0, wbs = 0, rw_switches = 0, replays = 0, i_replays = 0;
+    uint64_t i_progress = 0;
+    struct {
+        uint32_t pc;
+        bool valid, bad, stalled;
+        uint64_t got;
+    } iunconf = {0, false, false, false, 0}; // fetched last cycle, real unless I_miss_ff says no
     uint64_t i_errors = 0, d_errors = 0, lock_errors = 0;
     int i_run = 0, d_run = 0; // reads accepted in the current 4-read run, mod 4
     bool last_we = false;
@@ -195,29 +201,36 @@ int main(int argc, char **argv) {
         top->EMI_req_awck = 0;
         top->eval();
 
-        // fake IF
-        if (top->I_mem_rdy) {
-            if (top->I_data_out != fetch(pc)) {
-                if (i_errors++ < 10) {
-                    printf("cyc %lu: fetch 0x%07x got 0x%016lx want 0x%016lx\n", cyc, pc,
-                           (uint64_t)top->I_data_out, fetch(pc));
-                }
+        // fake IF: a miss doesn't hold IF, it shows up a cycle later as I_miss_ff and IF goes
+        // back to the PC it fetched (CORE's I_kill -> ID_PC)
+        if (top->I_miss_ff) {
+            pc = iunconf.pc;
+            iunconf.valid = false;
+            i_replays++;
+        } else if (iunconf.valid) { // it really happened
+            if (iunconf.bad && i_errors++ < 10) {
+                printf("cyc %lu: fetch 0x%07x got 0x%016lx want 0x%016lx\n", cyc - 1, iunconf.pc,
+                       iunconf.got, fetch(iunconf.pc));
             }
-            if (i_stall) {
+            if (iunconf.stalled) {
                 i_stalled++;
             }
             fetches++;
+            i_progress = cyc;
+            iunconf.valid = false;
+        }
+        if (cyc - i_progress > HANG) {
+            printf("cyc %lu: I stuck on pc 0x%07x\n", cyc, pc);
+            return 1;
+        }
+        if (!top->I_miss_ff && top->I_mem_rdy) {
+            iunconf = {pc, true, top->I_data_out != fetch(pc), i_stall != 0, (uint64_t)top->I_data_out};
             i_stall = 0;
             pc = next_pc(pc);
-            top->I_addr = pc; // IF_PC_next
         } else {
-            if (++i_stall > HANG) {
-                printf("cyc %lu: I hung on pc 0x%07x\n", cyc, pc);
-                return 1;
-            }
-            top->I_addr =
-                pc; // stalled: IF_PC_next holds IF_PC so the re-read after the refill hits
+            i_stall++;
         }
+        top->I_addr = pc; // IF_PC_tofetch: next PC, the same one while held, ID_PC after a miss
 
         // fake MEM: a miss doesn't stall, it shows up a cycle later as D_miss_ff and replays
         if (top->D_miss_ff) {
@@ -342,7 +355,7 @@ int main(int argc, char **argv) {
     printf("D: %lu ops (%lu loads, %lu stores), %lu refills, %lu box write-backs, %lu stalled, %lu "
            "errors\n",
            ops, loads, stores, d_reqs / 4, wbs, d_stalled, d_errors);
-    printf("D: %lu replays\n", replays);
+    printf("replays: I %lu, D %lu\n", i_replays, replays);
     printf("EMI: %lu read/write switches, %lu lock errors\n", rw_switches, lock_errors);
     return i_errors || d_errors || lock_errors;
 }

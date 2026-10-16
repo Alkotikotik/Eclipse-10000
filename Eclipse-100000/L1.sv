@@ -10,6 +10,7 @@ module L1 (
     input logic [27:0] I_addr, //aka IF_PC_next
     output logic [63:0] I_data_out,
     output logic I_mem_rdy,
+    output logic I_miss_ff,
 
     input logic [27:0] Dread_addr,
     input logic [14:0] D_write_addr,
@@ -79,6 +80,7 @@ module L1 (
         .I_req(I_req),
         .I_req_addr(I_req_addr),
         .mem_rdy(I_mem_rdy),
+        .miss_ff(I_miss_ff),
 
         .EMI_rdata(EMI_rdata),
         .req_awck(I_awck),

@@ -10,6 +10,7 @@ module L1_I (
     output logic I_req,
     output logic [23:0] I_req_addr,
     output logic mem_rdy,
+    output logic miss_ff,
 
     input logic [127:0] EMI_rdata,
     input logic req_awck,
@@ -36,7 +37,10 @@ module L1_I (
     logic [143:0] I_data_read_n;
     logic [35:0]  word0_lane, word1_lane;
     /* verilator lint_on UNUSEDSIGNAL */
-    logic [13:0]  cur_tag, hi_tag;
+    logic [13:0]  tag_rE, tag_rO;
+    logic [27:4]  m_addr;
+    logic [21:0]  m_hi;
+    logic m_lo, loE_eq, loO_eq, hiE_eq, hiO_eq;
     logic [9:0]   refill_row, rst_clr;
     logic [8:0]   even_idx, odd_idx;
     logic [2:0]   req_cnt, mem_done_cnt;
@@ -56,6 +60,7 @@ module L1_I (
             refill_line <= 22'h0;
             refill_first <= 2'b0;
             rst_clr <= 10'd512;
+            miss_ff <= 1'b0;
         end else begin
             I_addr_lat <= I_addr;
             I_hi_line_lat <= I_hi_line;
@@ -74,11 +79,15 @@ module L1_I (
                     mem_done_cnt <= 3'd0;
                     refilling <= 1'b0;
                 end
-            end else if (miss && rst_clr == 0) begin
+            end else if (miss_ff) begin
                 refilling <= 1'b1;
-                refill_line <=  miss_lo ? I_addr_lat[27:6] : I_hi_line_lat;
-                refill_first <= miss_lo ? I_addr_lat[5:4] : 2'b00;
+                refill_line <=  m_lo ? m_addr[27:6] : m_hi;
+                refill_first <= m_lo ? m_addr[5:4] : 2'b00;
             end
+            m_addr <= I_addr_lat[27:4];
+            m_hi <= I_hi_line_lat;
+            m_lo <= miss_lo;
+            miss_ff <= mem_rdy && miss;
         end
     end
 
@@ -133,14 +142,18 @@ module L1_I (
                       word0_lane[7:0], word0_lane[16:9], word0_lane[25:18], word0_lane[34:27]};
     end : data_out
 
-    assign cur_tag = {I_data_read[8], I_data_read[17], I_data_read[26], I_data_read[35], I_data_read[44], I_data_read[53], I_data_read[62], I_data_read[71], I_data_read[80], I_data_read[89], I_data_read[98], I_data_read[107], I_data_read[116], I_data_read[125]};
-    assign hi_tag  = {I_data_read_n[8], I_data_read_n[17], I_data_read_n[26], I_data_read_n[35], I_data_read_n[44], I_data_read_n[53], I_data_read_n[62], I_data_read_n[71], I_data_read_n[80], I_data_read_n[89], I_data_read_n[98], I_data_read_n[107], I_data_read_n[116], I_data_read_n[125]};
+    assign tag_rE = {I_read_E[8], I_read_E[17], I_read_E[26], I_read_E[35], I_read_E[44], I_read_E[53], I_read_E[62], I_read_E[71], I_read_E[80], I_read_E[89], I_read_E[98], I_read_E[107], I_read_E[116], I_read_E[125]};
+    assign tag_rO = {I_read_O[8], I_read_O[17], I_read_O[26], I_read_O[35], I_read_O[44], I_read_O[53], I_read_O[62], I_read_O[71], I_read_O[80], I_read_O[89], I_read_O[98], I_read_O[107], I_read_O[116], I_read_O[125]};
+    assign loE_eq = I_read_E[143] && tag_rE == I_addr_lat[27:14];
+    assign loO_eq = I_read_O[143] && tag_rO == I_addr_lat[27:14];
+    assign hiE_eq = I_read_E[143] && tag_rE == I_hi_line_lat[21:8];
+    assign hiO_eq = I_read_O[143] && tag_rO == I_hi_line_lat[21:8];
 
-    assign miss_lo = !I_data_read[143] || cur_tag != I_addr_lat[27:14];
-    assign miss_hi = !I_data_read_n[143] || hi_tag != I_hi_line_lat[21:8];
+    assign miss_lo = rd_par ? !loO_eq : !loE_eq;
+    assign miss_hi = rd_par ? !hiE_eq : !hiO_eq;
     assign miss = miss_lo || (overlap && miss_hi);
 
-    assign mem_rdy = !miss && !refilling && rst_clr == 0; //yeah thats it
+    assign mem_rdy = !refilling && !miss_ff && rst_clr == 0; //yeah thats it
     assign I_req = refilling && req_cnt != 4;
     assign I_req_addr = {refill_line, refill_first + req_cnt[1:0]};
 

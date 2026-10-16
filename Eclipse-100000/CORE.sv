@@ -53,7 +53,7 @@ module CORE(
     logic [31:0] IF_PC;
     logic [31:0] IF_PC_plus4_or8;
     logic [27:0] IF_PC_tofetch;
-    logic I_mem_rdy;
+    logic I_mem_rdy, I_miss_ff, I_took_ff, I_kill;
 
     //Just a neat little bit trick to get rid of IF_PC_plus(4/8)
     assign IF_PC_plus4_or8 = IF_PC + {28'd0, (IF_64 || IF_branch), !(IF_64 || IF_branch), 2'b00};
@@ -64,12 +64,14 @@ module CORE(
     //Change on memfaults, redirects, stalls etc
     assign IF_PC_tofetch = MEM_fault ? (memFault ? 28'h70 : 28'h74)
         : MEM_redirect ? MEM_redirect_target[27:0]
+        : I_kill ? ID_PC[27:0]
         : (!stall && !bubble && I_mem_rdy) ? IF_PC_next[27:0] : IF_PC[27:0];
 
     always_ff @(posedge clk or posedge reset) begin : IF_main
         if (reset) IF_PC <= 32'h0;
         else if(MEM_fault) IF_PC <= memFault ? 32'h00000070 : 32'h00000074;
         else if(MEM_redirect) IF_PC <= MEM_redirect_target;
+        else if(I_kill) IF_PC <= ID_PC;
         else if(!stall && !bubble && I_mem_rdy) IF_PC <= IF_PC_next;
         else IF_PC <= IF_PC; //I just can't omit it
     end : IF_main
@@ -197,7 +199,7 @@ module CORE(
     logic [13:0] ID_pht_idx;
     logic [1:0]  ID_pht_val;
 
-    logic isID_valid;
+    logic isID_valid, isID_valid_ff;
     logic ID_branch;
     logic ID_predicted_taken;
     logic [31:0] ID_IR_2;
@@ -205,15 +207,22 @@ module CORE(
 
     always_ff @(posedge clk or posedge reset) begin : ID_rst
         if (reset) begin
-            isID_valid <= 0;
+            isID_valid_ff <= 0;
+            I_took_ff <= 0;
             //Vivado started to complain when I added memFault, but whatever
             //I can just split it into to if blocks
-        end else if (MEM_redirect || MEM_fault) begin
-            isID_valid <= 0;
-        end else if (!stall && !bubble) begin
-            isID_valid <= I_mem_rdy;
+        end else begin
+            I_took_ff <= !stall && !bubble && I_mem_rdy && !MEM_redirect && !MEM_fault;
+            if (MEM_redirect || MEM_fault || I_kill) begin
+                isID_valid_ff <= 0;
+            end else if (!stall && !bubble) begin
+                isID_valid_ff <= I_mem_rdy;
+            end
         end
     end : ID_rst
+
+    assign I_kill     = I_miss_ff && I_took_ff;
+    assign isID_valid = isID_valid_ff && !I_kill;
 
     always_ff @(posedge clk) begin : ID_main
         if (!stall && !bubble) begin
@@ -939,9 +948,12 @@ module CORE(
     //So I treat cache miss kinda like branch mispredict, by default CPU
     //assumes cache hits, but if it doesn't, which is indicated by D_miss_ff,
     //It immediately kills WB and MEM instruction. That way there wouldn't be
-    //a massive miss path with fanout and other nasty stuff
+    //a massive miss path with fanout and other nasty stuff.
+    //You might think.
     assign isMEM_valid = isMEM_valid_ff && !D_miss_ff;
     assign isWB_valid  = isWB_valid_ff  && !D_miss_ff;
+    //That it costs 5cycle, but yeah it does. But it doesn't matter bc refill
+    //takes 20+ cycle and they happen simoultaniosely so its fine.
 
     always_ff @(posedge clk) begin : MEM_main
         if (!mem_stall) begin
@@ -1791,6 +1803,7 @@ module CORE(
         .I_addr(IF_PC_tofetch), //takes 1cycle for BRAM so fetching next
         .I_data_out(instr_fetch_duo),
         .I_mem_rdy(I_mem_rdy),
+        .I_miss_ff(I_miss_ff),
 
         .Dread_addr(stall ? MEM_memTarget[27:0] : memTarget[27:0]),
         .D_write_addr(MEM_memTarget[14:0]), //Writes happen in MEM
