@@ -49,20 +49,27 @@ module ALULANE (
     assign sh_exp = {~a[30], a[29:24]} + {~b[30], b[29:24]} - {~c[30], c[29:24]};
 
     //I need to align C to 77bits then add lower bits in first DSP, and rest
-    //in fabric. I do it in 3stages parallel to first cycles of DSP so it
-    //arrives just in time. First stage is 5bits, last one is 2bits. I chose
-    //this split because its just gut feeling, nothing runs in DSAL0 that
-    //matters to it.
-    logic [4:0] STRT_shexp_lo;
-    logic [1:0] STRT_shexp_hi;
+    //in fabric. I do it in 4 stages across 2 cycles parallel to first cycles of DSP so it
+    //arrives just in time. The split is 2-2-2-1 bits per stage. I did it
+    //because it saves LUT since 2shift bits plus shift fits just in LUT6
+    //hence its the cheapest possible way to do it. And more bits before bc my
+    //gut feeling tells me that its safer to it in DSAL0.
+    logic [1:0] STRT_shexp_lo, STRT_shexp_lmid, STRT_shexp_hmid;
+    logic STRT_shexp_hi;
     always_ff @(posedge clk or negedge rst_n) begin : STRT_SH
         if (!rst_n) begin
             sh_exp <= 8'h0;
             STRT_shexp_lo <= 2'h0;
-            STRT_shexp_hi <= 2'h0;
+            STRT_shexp_lmid <= 2'h0;
+
+            STRT_shexp_hmid <= 2'h0;
+            STRT_shexp_hi <= 1'h0;
         end else begin
-            STRT_shexp_lo <= sh_exp[4:0];
-            STRT_shexp_hi <= sh_exp[6:5];
+            STRT_shexp_lo <= sh_exp[1:0];
+            STRT_shexp_lmid <= sh_exp[3:2];
+
+            STRT_shexp_hmid <= sh_exp[5:4];
+            STRT_shexp_hi <= sh_exp[6];
         end
     end : STRT_SH
 
@@ -81,12 +88,12 @@ module ALULANE (
         .SEL_PATTERN("PATTERN"),          // Select pattern value ("PATTERN" or "C")
         .USE_PATTERN_DETECT("NO_PATDET"), // Enable pattern detect ("PATDET" or "NO_PATDET")
         // Register Control Attributes: Pipeline Register Configuration
-        .ACASCREG(1),                     // Number of pipeline stages between A/ACIN and ACOUT (0, 1 or 2)
+        .ACASCREG(2),                     // Number of pipeline stages between A/ACIN and ACOUT (0, 1 or 2)
         .ADREG(1),                        // Number of pipeline stages for pre-adder (0 or 1)
         .ALUMODEREG(1),                   // Number of pipeline stages for ALUMODE (0 or 1)
-        .AREG(1),                         // Number of pipeline stages for A (0, 1 or 2)
+        .AREG(2),                         // Number of pipeline stages for A (0, 1 or 2)
         .BCASCREG(1),                     // Number of pipeline stages between B/BCIN and BCOUT (0, 1 or 2)
-        .BREG(1),                         // Number of pipeline stages for B (0, 1 or 2)
+        .BREG(2),                         // Number of pipeline stages for B (0, 1 or 2)
         .CARRYINREG(1),                   // Number of pipeline stages for CARRYIN (0 or 1)
         .CARRYINSELREG(1),                // Number of pipeline stages for CARRYINSEL (0 or 1)
         .CREG(1),                         // Number of pipeline stages for C (0 or 1)
@@ -96,7 +103,7 @@ module ALULANE (
         .OPMODEREG(1),                    // Number of pipeline stages for OPMODE (0 or 1)
         .PREG(1)                          // Number of pipeline stages for P (0 or 1)
     )
-    DSP48E1_inst (
+    SoItBegins (
         // Cascade: 30-bit (each) output: Cascade Ports
         .ACOUT(ACOUT),                   // 30-bit output: A port cascade output
         .BCOUT(BCOUT),                   // 18-bit output: B port cascade output
@@ -158,18 +165,32 @@ module ALULANE (
     //==DSAL0(Digital Signal Proccesing / Aligment)==//
     //The DSP is pipelined and will take total of 4cycles.
     //This is the second one. It also performs align stages 1+2
-    logic [1:0] DSAL0_shexp_hi;
-    logic [76:0] C_alig; // aligned C
+    logic [1:0] DSAL0_shexp_hmid;
+    logic DSAL0_shexp_hi;
+    logic [35:0] C_alig0;
+    logic [47:0] C_alig1; // aligned C
+    logic [31:0] DSAL0_c;
     always_ff @(posedge clk or negedge rst_n) begin : DSAL0
         if (!rst_n) begin
-            DSAL0_shexp_hi <= 2'h0;
+            DSAL0_shexp_hmid <= 2'h0;
+            DSAL0_shexp_hi <= 1'h0;
+            DSAL0_c <= 1'h0;
         end else begin
+            DSAL0_shexp_hmid <= STRT_shexp_hmid;
             DSAL0_shexp_hi <= STRT_shexp_hi;
-
-            //This is very expensive, but there's nothing we can do
-            C_alig <= STRT_c >> shexp_lo;
+            DSAL0_c <= STRT_c;
         end
     end : DSAL0
+
+    assign C_alig0 = {STRT_c, 4'h0} >> STRT_shexp_lo;
+    assign C_alig1 = {16'h0, C_alig0} >> {STRT_shexp_lmid, 2'h0};
+
+    //== DSAL1 (Digital Signal Proccesing / Aligment) ==//
+    //Finishing alignment and starting second DSP
+    logic [76:0] C_alig2, C_alig3;
+
+    assign C_alig2 = {20'h0, C_alig1} >> {DSAL0_shexp_hmid, 4'h0};
+    assign C_alig3 = C_alig2 >> {DSAL0_shexp_hi, 6'h0};
 
 
 
