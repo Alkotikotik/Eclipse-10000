@@ -31,22 +31,24 @@ module ALULANE (
     //Im planning to pipeline it like crazy, like 10-11 stages for alulane
     //which means i've got like 1-2 logic levels per stage
 
-    //== REG (register) ==//
+    //== STRT (start) ==//
+    //Register operands, calc sh, start ALIG and start DSPs
     logic [32:0] REG_a, REG_b, REG_c;
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            REG_a <= 33'h0;
-            REG_b <= 33'h0;
-            REG_c <= 33'h0;
-        end else begin
-            //unbias by inverting top bit, and put back hidden bit
-            REG_a <= {~a[31], a[30:24], a[23], ~a[23], a[22:0]};
-            REG_b <= {~b[31], b[30:24], b[23], ~b[23], b[22:0]};
-            REG_c <= {~c[31], c[30:24], c[23], ~c[23], c[22:0]};
-        end
+    logic [9:0]  sh_exp;
+    always_ff @(posedge clk or) begin
+        //unbias by inverting top bit, and put back hidden bit.
+        //No need for reset, otherwise DSP wouldn't accept them immediately
+        REG_a <= {a[31], ~a[30], a[29:24], |a[30:24], a[23:0]};
+        REG_b <= {b[31], ~b[30], b[29:24], |b[30:24], b[23:0]};
+        REG_c <= {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
     end
 
-   DSP48E1 #(
+    //So exp(a) + exp(b) is self explanatory - we are multiplying them, but
+    //what about - exp(c)? Well we aren't actually computing an exponent we
+    //are computing a shift, more on that later. Also, only lower bits rn
+    assign sh_exp_lo = {~a[30], a[29:24]} + {~b[30], b[29:24]} - {~c[30], c[29:24]};
+
+    DSP48E1 #(
       // Feature Control Attributes: Data Path Selection
       .A_INPUT("DIRECT"),               // Selects A input source, "DIRECT" (A port) or "CASCADE" (ACIN port)
       .B_INPUT("DIRECT"),               // Selects B input source, "DIRECT" (B port) or "CASCADE" (BCIN port)
@@ -134,6 +136,10 @@ module ALULANE (
       .RSTM(RSTM),                     // 1-bit input: Reset input for MREG
       .RSTP(RSTP)                      // 1-bit input: Reset input for PREG
    );
+
+   //==DSP1(Digital Signal Proccesing - 1)==//
+   //The DSP is pipelined and will take total of 4cycles.
+   //This is the second one. It also computes sh_exp_hi and finishes ALIG
 
 
 endmodule
