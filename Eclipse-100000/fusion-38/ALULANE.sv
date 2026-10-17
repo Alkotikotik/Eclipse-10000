@@ -130,10 +130,10 @@ module ALULANE (
         .CLK(CLK),                       // 1-bit input: Clock input
         .INMODE(INMODE),                 // 5-bit input: INMODE control input
         .OPMODE(OPMODE),                 // 7-bit input: Operation mode input
-        // Data: 30-bit (each) input: Data Ports
-        .A(A),                           // 30-bit input: A data input
-        .B(B),                           // 18-bit input: B data input
-        .C(C),                           // 48-bit input: C data input
+        //Its two's comlimetn so top bit gotta be 0
+        .A(1'b0, STRT_a[23:0]),                           // 30-bit input: A data input
+        .B(1'b0, STRT_b[16:0]),                           // 18-bit input: B data input
+        .C(C_alig3), //we're gonna need it at the third DSP cycle
         .CARRYIN(CARRYIN),               // 1-bit input: Carry input signal
         .D(D),                           // 25-bit input: D data input
         // Reset/Clock Enable: 1-bit (each) input: Reset/Clock Enable Inputs
@@ -182,7 +182,7 @@ module ALULANE (
         end
     end : DSAL0
 
-    assign C_alig0 = {STRT_c, 4'h0} >> STRT_shexp_lo;
+    assign C_alig0 = {STRT_c[24:0], 4'h0} >> STRT_shexp_lo;
     assign C_alig1 = {16'h0, C_alig0} >> {STRT_shexp_lmid, 2'h0};
 
     //== DSAL1 (Digital Signal Proccesing / Aligment) ==//
