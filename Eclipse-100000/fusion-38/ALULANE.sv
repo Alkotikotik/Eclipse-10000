@@ -6,7 +6,7 @@ module ALULANE (
     input logic clk,
     input logic rst_n,
 
-    input logic [31:0] a, b, c;
+    input logic [31:0] a, b, c,
 
     output logic [31:0] result
 );
@@ -58,7 +58,6 @@ module ALULANE (
     logic STRT_shexp_hi;
     always_ff @(posedge clk or negedge rst_n) begin : STRT_SH
         if (!rst_n) begin
-            sh_exp <= 8'h0;
             STRT_shexp_lo <= 2'h0;
             STRT_shexp_lmid <= 2'h0;
 
@@ -78,7 +77,7 @@ module ALULANE (
         .A_INPUT("DIRECT"),               // Selects A input source, "DIRECT" (A port) or "CASCADE" (ACIN port)
         .B_INPUT("DIRECT"),               // Selects B input source, "DIRECT" (B port) or "CASCADE" (BCIN port)
         .USE_DPORT("FALSE"),              // Select D port usage (TRUE or FALSE)
-        .USE_MULT("MULTIPLY"),            // Select multiplier usage ("MULTIPLY", "DYNAMIC", or "NONE")
+        .USE_MULT("DYNAMIC"), //For both floats and integer ops
         .USE_SIMD("ONE48"),               // SIMD selection ("ONE48", "TWO24", "FOUR12")
         // Pattern Detector Attributes: Pattern Detection Configuration
         .AUTORESET_PATDET("NO_RESET"),    // "NO_RESET", "RESET_MATCH", "RESET_NOT_MATCH" 
@@ -131,8 +130,8 @@ module ALULANE (
         .INMODE(INMODE),                 // 5-bit input: INMODE control input
         .OPMODE(OPMODE),                 // 7-bit input: Operation mode input
         //Its two's comlimetn so top bit gotta be 0
-        .A(1'b0, STRT_a[23:0]),                           // 30-bit input: A data input
-        .B(1'b0, STRT_b[16:0]),                           // 18-bit input: B data input
+        .A({6'b0, a[23:0]}),                           // 30-bit input: A data input
+        .B({1'b0, b[16:0]}),                           // 18-bit input: B data input
         .C(C_alig3), //we're gonna need it at the third DSP cycle
         .CARRYIN(CARRYIN),               // 1-bit input: Carry input signal
         .D(D),                           // 25-bit input: D data input
@@ -169,27 +168,27 @@ module ALULANE (
     logic DSAL0_shexp_hi;
     logic [35:0] C_alig0;
     logic [47:0] C_alig1; // aligned C
-    logic [31:0] DSAL0_c;
+    logic [31:0] C_alig1;
+
+    assign C_alig0 = {STRT_c[24:0], 4'h0} >> STRT_shexp_lo;
     always_ff @(posedge clk or negedge rst_n) begin : DSAL0
         if (!rst_n) begin
             DSAL0_shexp_hmid <= 2'h0;
             DSAL0_shexp_hi <= 1'h0;
-            DSAL0_c <= 1'h0;
+            DSAL0_c <= 32'h0;
         end else begin
             DSAL0_shexp_hmid <= STRT_shexp_hmid;
             DSAL0_shexp_hi <= STRT_shexp_hi;
-            DSAL0_c <= STRT_c;
+            C_alig0 = {C_alig0, 16'h0} >> {STRT_shexp_lmid, 2'h0};
         end
     end : DSAL0
 
-    assign C_alig0 = {STRT_c[24:0], 4'h0} >> STRT_shexp_lo;
-    assign C_alig1 = {16'h0, C_alig0} >> {STRT_shexp_lmid, 2'h0};
 
     //== DSAL1 (Digital Signal Proccesing / Aligment) ==//
     //Finishing alignment and starting second DSP
     logic [76:0] C_alig2, C_alig3;
 
-    assign C_alig2 = {20'h0, C_alig1} >> {DSAL0_shexp_hmid, 4'h0};
+    assign C_alig2 = {C_alig1, 20'h0} >> {DSAL0_shexp_hmid, 4'h0};
     assign C_alig3 = C_alig2 >> {DSAL0_shexp_hi, 6'h0};
 
 
