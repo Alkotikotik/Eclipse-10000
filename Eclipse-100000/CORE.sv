@@ -815,13 +815,11 @@ module CORE(
     assign seed_grab = (rng_state == WAIT) && xadc_drdy;
     assign finish_seed = seed_grab && (inject_counter == 127);
 
-
-
     always_ff @(posedge clk or posedge reset) begin : XADC_FSM
         if (reset) begin
             rng_state <= IDLE;
             xadc_addr <= 7'b01; //Would actually read 7'h02 on first time
-            //But honest the more chaos in this the better entropy is lol
+            //But honest the more chaos in this the better entropy is
             inject_counter <= 0;
             xadc_den <= 0;
         end else begin
@@ -870,18 +868,19 @@ module CORE(
     /* verilator lint_off PINCONNECTEMPTY */
     XADC #(
         .INIT_40(16'h0000), //default mode is fine
-        .INIT_41(16'h0000), //defalt one too
-        .INIT_42(16'h0800)
+        .INIT_41(16'h2000), //No averaging thus higher entropy
+        .INIT_42(16'h0800),
+        .INIT_48(16'h4600)
     ) xadc_rng (
-        .DCLK      (clk),
-        .RESET     (reset),
-        .DADDR     (xadc_addr), //Read specified register
-        .DEN       (xadc_den),
-        .DWE       (1'b0),
-        .DI        (16'h0),
-        .DO        (xadc_do), //Data Out(actually its not just a nice way to remember)
-        .DRDY      (xadc_drdy),
-        .EOS       (xadc_eos),
+        .DCLK(clk),
+        .RESET(reset),
+        .DADDR(xadc_addr), //Read specified register
+        .DEN(xadc_den),
+        .DWE(1'b0),
+        .DI(16'h0),
+        .DO(xadc_do), //Data Out(actually its not just a nice way to remember)
+        .DRDY(xadc_drdy),
+        .EOS(xadc_eos),
         //Some bs we don't care about
         .VP(1'b0), .VN(1'b0), .VAUXP(16'h0), .VAUXN(16'h0),
         .CONVST(1'b0), .CONVSTCLK(1'b0),
@@ -918,7 +917,7 @@ module CORE(
     //testings not that much, at most + 0.03CPI which is the price im willing
     //to pay.
     //Even more MEM FFs... shouldn't matter though bc im using only like 2k
-    //out of 100k or so
+    //out of 150k or so
     logic        MEM_demolish, MEM_branch, MEM_predicted_taken;
     logic [31:0] MEM_redirect_pc, MEM_early_target;
     logic [4:0]  MEM_branch_op;

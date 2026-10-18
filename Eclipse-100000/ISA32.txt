@@ -100,7 +100,7 @@ Privilege and Syscalls
 111101 : RETU           // Return to User Mode from Exception
 
 RNGs
-111100 : RNG rx0 //Generates random 32bit value into rx0
+111100 : RNG rx0    //Generates pseudo random 32bit value into rx0
 
 
 Format of 64-bit instructions
