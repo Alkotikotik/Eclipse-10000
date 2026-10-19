@@ -260,7 +260,7 @@ module CORE(
     //slice which is 18x25bits, unfornutely increasing it to 2 chained slices
     //leads to a critical path. Not a big deal tho im not gonna use arrays
     //past 16MB considering my whole memory is 256MB
-    logic mdx_mem_hit, mdx_wb_hit;
+    logic  mdx_mem_hit, mdx_wb_hit;
     assign mdx_mem_hit = isMEM_valid && MEM_gpr_write && !MEM_is_load && (MEM_gpr_dest[7:3] == ID_IR_2[31:27]) &&
                          (!ID_banked2 || MEM_kernelMode == EX_kernel_mode);
     assign mdx_wb_hit  = isWB_valid && WB_gpr_write && (WB_gpr_dest[7:3] == ID_IR_2[31:27]) &&
