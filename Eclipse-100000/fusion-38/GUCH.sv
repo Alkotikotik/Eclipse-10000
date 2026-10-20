@@ -1,10 +1,15 @@
-module ALULANE (
+module GUCH (
+    //GUCH - Graphical Unified Computing Heart
     //Well well finally starting the GPU im so excited for it.
-    //So first one is ofc ALULANE its the basic GPU contruct.
+    //So first one is ofc smallest core its the basic GPU contruct.
     //The heart is efp32 FMA that is done through 2DSPs, it also has integer mode,
     //16bit fma, float to int conversion and min/max/abs.
     input logic clk,
     input logic rst_n,
+
+    //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
+    input logic [1:0] op_mode,
+    input logic [5:0] sub_sel,
 
     input logic [31:0] a, b, c,
 
@@ -28,7 +33,7 @@ module ALULANE (
     //a[31]    = sign
     //a[30:24] = exp
     //a[23:0]  = mantissa without hidden bit
-    //Im planning to pipeline it like crazy, like 10-11 stages for alulane
+    //Im planning to pipeline it like crazy, like 10-11 stages for GUCH
     //which means i've got like 1-2 logic levels per stage
 
     //== STRT (start) ==//
@@ -42,6 +47,10 @@ module ALULANE (
         STRT_b <= {b[31], ~b[30], b[29:24], |b[30:24], b[23:0]};
         STRT_c <= {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
     end : STRT_EFP
+
+    //Basically sub_sel bits govern the sign of products and c, and whether to
+    //add or subtract.
+    logic product_sign, c_sign, sub_c;
 
     //So exp(a) + exp(b) is self explanatory - we are multiplying them, but
     //what about - exp(c)? Well we aren't actually computing an exponent we
@@ -128,7 +137,7 @@ module ALULANE (
         // Control: 4-bit (each) input: Control Inputs/Status Bits
         .ALUMODE(ALUMODE),               // 4-bit input: ALU control input
         .CARRYINSEL(CARRYINSEL),         // 3-bit input: Carry select input
-        .CLK(CLK),                       // 1-bit input: Clock input
+        .CLK(clk),                       // 1-bit input: Clock input
         .INMODE(INMODE),                 // 5-bit input: INMODE control input
         .OPMODE(OPMODE),                 // 7-bit input: Operation mode input
         //Its two's comlimetn so top bit gotta be 0
@@ -177,11 +186,11 @@ module ALULANE (
         if (!rst_n) begin
             DSAL0_shexp_hmid <= 2'h0;
             DSAL0_shexp_hi <= 1'h0;
-            DSAL0_c <= 32'h0;
+            C_alig1 <= 48'h0;
         end else begin
             DSAL0_shexp_hmid <= STRT_shexp_hmid;
             DSAL0_shexp_hi <= STRT_shexp_hi;
-            C_alig0 = {C_alig0, 16'h0} >> {STRT_shexp_lmid, 2'h0};
+            C_alig0 <= {C_alig0, 16'h0} >> {STRT_shexp_lmid, 2'h0};
         end
     end : DSAL0
 
