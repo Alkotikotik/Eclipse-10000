@@ -46,7 +46,9 @@ module ALULANE (
     //So exp(a) + exp(b) is self explanatory - we are multiplying them, but
     //what about - exp(c)? Well we aren't actually computing an exponent we
     //are computing a shift, more on that later. Also, only lower bits rn
-    assign sh_exp = {~a[30], a[29:24]} + {~b[30], b[29:24]} - {~c[30], c[29:24]};
+    //28 is constant offset for efp 32, it is calculated by 76 - 48 which is
+    //shifted C bit length minus bits of a*c product
+    assign sh_exp = {3{~a[30]}, a[29:24]} + {3{~b[30]}, b[29:24]} - {3{~c[30]}, c[29:24]} + 9'd28;
 
     //I need to align C to 77bits then add lower bits in first DSP, and rest
     //in fabric. I do it in 4 stages across 2 cycles parallel to first cycles of DSP so it
