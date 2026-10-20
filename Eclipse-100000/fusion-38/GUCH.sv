@@ -45,12 +45,24 @@ module GUCH (
         //No need for reset, otherwise DSP wouldn't accept them immediately
         STRT_a <= {a[31], ~a[30], a[29:24], |a[30:24], a[23:0]};
         STRT_b <= {b[31], ~b[30], b[29:24], |b[30:24], b[23:0]};
-        STRT_c <= {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
+        STRT_c <= sub_sel[3] ? 33'h0 : {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
     end : STRT_EFP
 
-    //Basically sub_sel bits govern the sign of products and c, and whether to
+    //Basically sub_sel bits govern the sign of products and c result
     //add or subtract.
-    logic product_sign, c_sign, sub_c;
+    logic product_sign, c_sign, sub_mags;
+
+    always_ff @(posedge clk or negedge rst_n) begin : signs
+        if (!rst_n) begin
+            product_sign <= 1'b0;
+            c_sign <= 1'b0;
+            sub_mags <= 1'b0;
+        end else begin
+            product_sign <= a[31] ^ b[31] ^ sub_sel[0]; //FNMA...
+            c_sign <= c[31] ^ sub_sel[1]; //FMS...
+            sub_mags <= a[31] ^ b[31] ^ c[31] ^ sel[0] ^ sel[1]; //Whether to add or sub magnitudes
+        end
+    end : signs
 
     //So exp(a) + exp(b) is self explanatory - we are multiplying them, but
     //what about - exp(c)? Well we aren't actually computing an exponent we
@@ -142,7 +154,7 @@ module GUCH (
         .OPMODE(OPMODE),                 // 7-bit input: Operation mode input
         //Its two's comlimetn so top bit gotta be 0
         .A({6'b0, a[23:0]}),                           // 30-bit input: A data input
-        .B({1'b0, b[16:0]}),                           // 18-bit input: B data input
+        .B(sub_sel[2] ? 18'h1 : {1'b0, b[16:0]}), //For fused or plain add, should be good level-wise
         .C(C_alig3), //we're gonna need it at the third DSP cycle
         .CARRYIN(CARRYIN),               // 1-bit input: Carry input signal
         .D(D),                           // 25-bit input: D data input
