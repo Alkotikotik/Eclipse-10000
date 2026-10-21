@@ -1,9 +1,12 @@
 > [!IMPORTANT]
-> The README and the paper are heavily outdated
-> I at least: pipelined CPU and optimized it for an actual FPGA reaching 7.5ns critical path.
-> Implemented Memory Interface from scratch that works at up to 1200MB/s and fits under 600LUTs
-> Implemented L1 cache and currently optimizing it
-> And refined/remade/optimized a lot of stuff
+> The README and the paper are heavily outdated. Since then, I have:
+>
+> - Completely rebuilt and optimized the CPU, and prepared it for a real FPGA with a 7.5 ns critical path
+> - Added variable-length instructions to the ISA
+> - Implemented a memory interface from scratch that runs at up to 1200 MB/s and fits in under 600 LUTs
+> - Implemented an L1 cache (currently optimizing it)
+> - Updated, rebuilt, or modified many other parts
+> - Added plenty of other cool stuff
 
 # Eclipse-10000 & 100000 Stack [WIP]
 A complete computer system built from the ground up: from raw logic gates CPU and custom 32-bit SystemVerilog CPUs to an assembler, compiler, and relatively high-level programming language.
@@ -23,8 +26,8 @@ Many of the CPU and Compiler files do not contain much of a comments, its becaus
 
 - [x] **16-Bit CPU:** Built in Logisim using logic gates (`ISA16.txt`)
 - [x] **32-Bit CPU:** Built in SystemVerilog with a custom ISA (`ISA32.txt`)
-- [/] **Compiler:** Custom programming language (FLARE-10K) compiling to assembler (In Progress(almost finished))
-- [-] **Secret next phase**
+- [x] **Compiler:** Custom programming language (FLARE-10K) compiling to assembler (In Progress(almost finished))
+- [/] **Secret next phase**
 
 ---
 
