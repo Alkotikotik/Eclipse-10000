@@ -53,26 +53,53 @@ module CORE(
     logic [31:0] IF_PC;
     logic [31:0] IF_PC_plus4_or8;
     logic [27:0] IF_PC_tofetch;
+    logic [31:0] IF_PC_plus4, IF_PC_plus8;
+    logic [8:0]  IF_even_tofetch;
+    logic IF_jump, IF_redir, IF_skip, IF_take;
+
+    function automatic [8:0] even_row(input [13:4] a);
+        even_row = a[13:5] + {8'd0, a[4]};
+    endfunction
     logic I_mem_rdy, I_miss_ff, I_took_ff, I_kill;
 
     //Just a neat little bit trick to get rid of IF_PC_plus(4/8)
-    assign IF_PC_plus4_or8 = IF_PC + {28'd0, (IF_64 || IF_branch), !(IF_64 || IF_branch), 2'b00};
+    assign IF_PC_plus4 = IF_PC + 32'd4;
+    assign IF_PC_plus8 = IF_PC + 32'd8;
+    assign IF_PC_plus4_or8 = (IF_64 || IF_branch) ? IF_PC_plus8 : IF_PC_plus4;
 
     logic [31:0] IF_PC_next;
-    assign IF_PC_next = (instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000 || instr_fetch_data[31:26] == 6'b010000 || instr_fetch_data[31:26] == 6'b111101 || IF_predicted_taken) ? IF_redirect_target : IF_PC_plus4_or8;
+    assign IF_jump = instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000 || instr_fetch_data[31:26] == 6'b010000 || instr_fetch_data[31:26] == 6'b111101 || IF_predicted_taken;
+    assign IF_PC_next = IF_jump ? IF_redirect_target : IF_PC_plus4_or8;
 
     //Change on memfaults, redirects, stalls etc
     assign IF_PC_tofetch = MEM_fault ? (memFault ? 28'h70 : 28'h74)
         : MEM_redirect ? MEM_redirect_target[27:0]
         : I_kill ? ID_PC[27:0]
-        : (!stall && !bubble && I_mem_rdy) ? IF_PC_next[27:0] : IF_PC[27:0];
+        : IF_take ? IF_PC_plus4[27:0] : IF_PC[27:0];
+
+    assign IF_even_tofetch = MEM_fault ? 9'd4
+        : MEM_redirect ? (D_miss_ff ? even_row(WB_PC[13:4]) : MEM_demolish ? even_row(MEM_redirect_pc[13:4]) : branch_cond_met ? even_row(MEM_early_target[13:4]) : even_row(MEM_PCNext[13:4]))
+        : I_kill ? even_row(ID_PC[13:4])
+        : IF_take ? even_row(IF_PC_plus4[13:4]) : even_row(IF_PC[13:4]);
+
+    assign IF_take = !stall && !bubble && I_mem_rdy && !IF_redir;
+
+    always_ff @(posedge clk or posedge reset) begin : IF_window
+        if (reset) begin
+            IF_redir <= 1'b0;
+            IF_skip  <= 1'b0;
+        end else begin
+            IF_redir <= IF_take && IF_jump && !MEM_fault && !MEM_redirect && !I_kill;
+            IF_skip  <= IF_take && (IF_64 || IF_branch) && !MEM_fault && !MEM_redirect && !I_kill;
+        end
+    end : IF_window
 
     always_ff @(posedge clk or posedge reset) begin : IF_main
         if (reset) IF_PC <= 32'h0;
         else if(MEM_fault) IF_PC <= memFault ? 32'h00000070 : 32'h00000074;
         else if(MEM_redirect) IF_PC <= MEM_redirect_target;
         else if(I_kill) IF_PC <= ID_PC;
-        else if(!stall && !bubble && I_mem_rdy) IF_PC <= IF_PC_next;
+        else if(IF_take) IF_PC <= IF_PC_next;
         else IF_PC <= IF_PC; //I just can't omit it
     end : IF_main
 
@@ -151,7 +178,7 @@ module CORE(
     logic [13:0] pht_read_idx;
     //Last 14 bits of imm26 13:2 because last two bits are always 0 since labels are 4 byte aligned
     //IF_PC_next because BRAM read happens on the next clock cycle to the request
-    assign pht_read_idx = IF_PC_next[16:3] ^ GHR[13:0] ^ {5'b0, GHR[15:14], 7'b0};
+    assign pht_read_idx = IF_PC_tofetch[16:3] ^ GHR[13:0] ^ {5'b0, GHR[15:14], 7'b0};
     /* verilator lint_off UNUSEDSIGNAL */
     logic [1:0] pht_out; //Actual counter for particular branch, only lowest bit isn't really read
     /* verilator lint_on UNUSEDSIGNAL */
@@ -212,11 +239,11 @@ module CORE(
             //Vivado started to complain when I added memFault, but whatever
             //I can just split it into to if blocks
         end else begin
-            I_took_ff <= !stall && !bubble && I_mem_rdy && !MEM_redirect && !MEM_fault;
+            I_took_ff <= IF_take && !MEM_redirect && !MEM_fault;
             if (MEM_redirect || MEM_fault || I_kill) begin
                 isID_valid_ff <= 0;
             end else if (!stall && !bubble) begin
-                isID_valid_ff <= I_mem_rdy;
+                isID_valid_ff <= I_mem_rdy && !IF_redir;
             end
         end
     end : ID_rst
@@ -1800,6 +1827,9 @@ module CORE(
         .D_advance(!stall),
 
         .I_addr(IF_PC_tofetch), //takes 1cycle for BRAM so fetching next
+        .I_even_idx(IF_even_tofetch),
+        .I_skip(IF_skip),
+        .I_discard(IF_redir),
         .I_data_out(instr_fetch_duo),
         .I_mem_rdy(I_mem_rdy),
         .I_miss_ff(I_miss_ff),

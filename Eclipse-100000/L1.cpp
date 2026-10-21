@@ -20,6 +20,8 @@ constexpr int SAME_BOX_PCT =
     25; // D: next op hits the same 16B box, stresses store->load back to back
 constexpr int D_EDGE_PCT =
     3; // D: last box of a 32KB chunk, so crossing accesses spill into the next tag
+constexpr int SKIP_PCT = 50;  // I: fetch from pc-4 and skip a word, like after a 64-bit instruction
+constexpr int JUMP_BUBBLE_PCT = 5; // I: a taken jump, the window after it is fetched and thrown away
 constexpr int REFETCH = 3; // D: bubbles after a replay while IF/ID/EX refill, like CORE's flush
 
 // code lives in the top half of the 256MB (addr bit 27 = 1), data in the bottom half, so D's
@@ -160,6 +162,10 @@ int main(int argc, char **argv) {
     };
     top->D_advance = 1;
     top->I_addr = 0;
+    top->I_even_idx = 0;
+    top->I_skip = 0;
+    top->I_discard = 0;
+    bool nskip = false, ndiscard = false, prev_discard = false; // CORE's IF_skip / IF_redir, they're flops
     top->Dread_addr = 0;
     top->EMI_req_awck = 0;
     top->EMI_mem_done = 0;
@@ -204,6 +210,9 @@ int main(int argc, char **argv) {
         // fake IF: a miss doesn't hold IF, it shows up a cycle later as I_miss_ff and IF goes
         // back to the PC it fetched (CORE's I_kill -> ID_PC)
         if (top->I_miss_ff) {
+            if (prev_discard && i_errors++ < 10) {
+                printf("cyc %lu: replay from a discarded fetch\n", cyc);
+            }
             pc = iunconf.pc;
             iunconf.valid = false;
             i_replays++;
@@ -223,14 +232,29 @@ int main(int argc, char **argv) {
             printf("cyc %lu: I stuck on pc 0x%07x\n", cyc, pc);
             return 1;
         }
-        if (!top->I_miss_ff && top->I_mem_rdy) {
+        prev_discard = top->I_discard;
+        bool take = !top->I_miss_ff && top->I_mem_rdy && !top->I_discard;
+        if (take) {
             iunconf = {pc, true, top->I_data_out != fetch(pc), i_stall != 0, (uint64_t)top->I_data_out};
             i_stall = 0;
             pc = next_pc(pc);
         } else {
             i_stall++;
         }
-        top->I_addr = pc; // IF_PC_tofetch: next PC, the same one while held, ID_PC after a miss
+        // the window CORE asks for next (IF_PC_tofetch), and what IF_skip / IF_redir will say about it
+        uint32_t fa = pc;
+        nskip = false;
+        ndiscard = false;
+        if (take && rand() % 100 < JUMP_BUBBLE_PCT) {
+            fa = (i_tags[rand() % TAGS] << 14 | (rand() % 16384)) & ~3u; // whatever followed the jump
+            nskip = rand() % 2;
+            ndiscard = true;
+        } else if (take && rand() % 100 < SKIP_PCT) {
+            fa = (pc - 4) & 0x0FFFFFFF;
+            nskip = true;
+        }
+        top->I_addr = fa;
+        top->I_even_idx = ((fa >> 5) + (fa >> 4 & 1)) & 0x1FF; // CORE's even_row
 
         // fake MEM: a miss doesn't stall, it shows up a cycle later as D_miss_ff and replays
         if (top->D_miss_ff) {
@@ -346,6 +370,8 @@ int main(int argc, char **argv) {
         top->clk = 0;
         top->eval();
         set_mem(cur); // the new MEM op's inputs, for the next cycle
+        top->I_skip = nskip;
+        top->I_discard = ndiscard;
         cyc++;
     }
 

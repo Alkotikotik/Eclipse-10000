@@ -1,5 +1,6 @@
 module GUCH (
     //GUCH - Graphical Unified Computing Heart
+    //Or CHUGE Computational Heart of Unified Graphics Engine
     //Well well finally starting the GPU im so excited for it.
     //So first one is ofc smallest core its the basic GPU contruct.
     //The heart is efp32 FMA that is done through 2DSPs, it also has integer mode,

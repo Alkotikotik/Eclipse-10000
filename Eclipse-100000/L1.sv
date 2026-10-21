@@ -8,6 +8,9 @@ module L1 (
     input logic D_advance,
 
     input logic [27:0] I_addr, //aka IF_PC_next
+    input logic [8:0]  I_even_idx,
+    input logic I_skip,
+    input logic I_discard,
     output logic [63:0] I_data_out,
     output logic I_mem_rdy,
     output logic I_miss_ff,
@@ -75,6 +78,9 @@ module L1 (
         .rst(rst),
 
         .I_addr(I_addr),
+        .I_even_idx(I_even_idx),
+        .I_skip(I_skip),
+        .I_discard(I_discard),
         .I_data_out(I_data_out),
 
         .I_req(I_req),

@@ -5,6 +5,9 @@ module L1_I (
     input logic rst,
 
     input logic [27:0] I_addr, //aka IF_PC_next
+    input logic [8:0]  I_even_idx,
+    input logic I_skip,
+    input logic I_discard,
     output logic [63:0] I_data_out,
 
     output logic I_req,
@@ -36,6 +39,7 @@ module L1_I (
     logic [27:0]  I_addr_lat;
     logic [143:0] I_data_read_n;
     logic [35:0]  word0_lane, word1_lane;
+    logic [287:0] I_window;
     /* verilator lint_on UNUSEDSIGNAL */
     logic [13:0]  tag_rE, tag_rO;
     logic [27:4]  m_addr;
@@ -48,7 +52,8 @@ module L1_I (
     logic [35:0]  I_w_lane3;
     logic [8:0]   I_w_addr;
     logic I_w_clr, I_w_E, I_w_O;
-    logic refilling, rd_par, overlap, miss, miss_lo, miss_hi;
+    logic [2:0]   i0;
+    logic refilling, rd_par, lo_used, hi_used, miss, miss_lo, miss_hi;
 
     always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -86,13 +91,13 @@ module L1_I (
             end
             m_addr <= I_addr_lat[27:4];
             m_hi <= I_hi_line_lat;
-            m_lo <= miss_lo;
-            miss_ff <= mem_rdy && miss;
+            m_lo <= lo_used && miss_lo;
+            miss_ff <= mem_rdy && miss && !I_discard;
         end
     end
 
     assign odd_idx   = I_addr[13:5];
-    assign even_idx  = I_addr[13:5] + {8'd0, I_addr[4]};
+    assign even_idx  = I_even_idx;
     assign I_hi_line = I_addr[27:6] + {21'd0, &I_addr[5:4]};
 
     always_ff @(posedge clk) begin : I_read
@@ -134,10 +139,13 @@ module L1_I (
     end : I_EMI
 
     always_comb begin : data_out
-        overlap    = I_addr_lat[3:2] == 2'b11;
+        i0         = {1'b0, I_addr_lat[3:2]} + {2'b0, I_skip};
+        lo_used    = i0 != 3'd4;
+        hi_used    = i0 >= 3'd3;
+        I_window   = {I_data_read_n, I_data_read};
         //two words as core asks, that fetch_duo or something
-        word0_lane = I_data_read[36*I_addr_lat[3:2] +: 36];
-        word1_lane = overlap ? I_data_read_n[35:0] : I_data_read[36*2'(I_addr_lat[3:2] + 2'd1) +: 36];
+        word0_lane = I_window[36*i0 +: 36];
+        word1_lane = I_window[36*3'(i0 + 3'd1) +: 36];
         I_data_out = {word1_lane[7:0], word1_lane[16:9], word1_lane[25:18], word1_lane[34:27],
                       word0_lane[7:0], word0_lane[16:9], word0_lane[25:18], word0_lane[34:27]};
     end : data_out
@@ -151,7 +159,7 @@ module L1_I (
 
     assign miss_lo = rd_par ? !loO_eq : !loE_eq;
     assign miss_hi = rd_par ? !hiE_eq : !hiO_eq;
-    assign miss = miss_lo || (overlap && miss_hi);
+    assign miss = (lo_used && miss_lo) || (hi_used && miss_hi);
 
     assign mem_rdy = !refilling && !miss_ff && rst_clr == 0; //yeah thats it
     assign I_req = refilling && req_cnt != 4;
