@@ -167,6 +167,7 @@ int main(int argc, char **argv) {
     top->I_discard = 0;
     bool nskip = false, ndiscard = false, prev_discard = false; // CORE's IF_skip / IF_redir, they're flops
     top->Dread_addr = 0;
+    top->Dread_even = 0;
     top->EMI_req_awck = 0;
     top->EMI_mem_done = 0;
     top->rst = 1;
@@ -309,6 +310,7 @@ int main(int argc, char **argv) {
             d_stall = 0;
             top->D_advance = 1;
             top->Dread_addr = nxt.addr; // EX moves into MEM
+            top->Dread_even = ((nxt.addr + 16) >> 5) & 0x3FF; // CORE's memTarget16
             cur = nxt;
             nxt = next_op();
         } else {

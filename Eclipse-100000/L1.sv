@@ -16,6 +16,7 @@ module L1 (
     output logic I_miss_ff,
 
     input logic [27:0] Dread_addr,
+    input logic [9:0]  Dread_even,
     input logic [14:0] D_write_addr,
     input logic we,
     input logic re,
@@ -99,6 +100,7 @@ module L1 (
         .advance(D_advance),
 
         .Dread_addr(Dread_addr),
+        .Dread_even(Dread_even),
         .D_write_addr(D_write_addr),
         .we(we),
         .re(re),

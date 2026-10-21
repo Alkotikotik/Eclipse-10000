@@ -5,6 +5,7 @@ module L1_D (
     input logic advance, //not stall state
 
     input logic [27:0] Dread_addr, //D read address
+    input logic [9:0]  Dread_even,
     input logic [14:0] D_write_addr,
     input logic we, //EMI changed me - now im writing unreadable code...
     input logic re, //read enable
@@ -90,7 +91,9 @@ module L1_D (
     logic [8:0]   victim_index;
     logic [3:0]   victim_dirty;
     logic [1:0] read_cnt, box;
-    logic [10:0] Dread_addr_real;
+    logic [10:0] alt_row;
+    logic [9:0]  alt_even;
+    logic sel_alt;
     logic capturing, drain, refill_req;
 
     logic [2:0] req_cnt, mem_done_cnt;
@@ -121,7 +124,7 @@ module L1_D (
         end else begin
             if (advance) begin //latch em bc BRAM req starts at EX and arrives at the start of MEM
                 Dread_addr_lat <= Dread_addr;
-                even_idx_lat <= Dread_addr[14:5] + {9'd0, Dread_addr[4]};
+                even_idx_lat <= Dread_even;
                 odd_idx_lat <= Dread_addr[14:5];
                 Dread_addr_plus16_lat <= Dread_box_plus1;
             end
@@ -208,13 +211,15 @@ module L1_D (
     //also in separate always_ff without async reset, otherwise vivado
     //just wouldn't map it on actual bram bc it doesn't support async
     //rst, it supports sync tho, but idgaf.
-    assign Dread_addr_real = capturing ? {refill_line[8:0], refill_first + read_cnt + 2'd1}
-                           : pend ? (m_lo ? m_addr[14:4] : {m_plus16[8:0], 2'b00})
-                           : Dread_addr[14:4];
-    assign odd_idx  = Dread_addr_real[10:1];
+    assign alt_row = capturing ? {refill_line[8:0], refill_first + read_cnt + 2'd1}
+                   : pend ? (m_lo ? m_addr[14:4] : {m_plus16[8:0], 2'b00})
+                   : Dread_addr_lat[14:4];
+    assign alt_even = alt_row[10:1] + {9'd0, alt_row[0]};
+    assign sel_alt  = capturing || pend || !advance;
+    assign odd_idx  = sel_alt ? alt_row[10:1] : Dread_addr[14:5];
     assign odd_w    = D_write_addr[14:5];
     assign even_w   = D_write_addr[14:5] + {9'd0, D_write_addr[4]};
-    assign even_idx = Dread_addr_real[10:1] + {9'd0, Dread_addr_real[0]};
+    assign even_idx = sel_alt ? alt_even : Dread_even;
     always_ff @(posedge clk) begin : D1_read
         D_read_E[35:0]    <= D_cacheE0[even_idx];
         D_read_E[71:36]   <= D_cacheE1[even_idx];
@@ -226,7 +231,7 @@ module L1_D (
         D_read_O[107:72]  <= D_cacheO2[odd_idx];
         D_read_O[143:108] <= D_cacheO3[odd_idx];
 
-        rd_par <= Dread_addr_real[0];
+        rd_par <= sel_alt ? alt_row[0] : Dread_addr[4];
     end : D1_read
     assign D_data_read   = rd_par ? D_read_O : D_read_E;
     assign D_data_read_n = rd_par ? D_read_E : D_read_O;

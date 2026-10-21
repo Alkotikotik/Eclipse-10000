@@ -2,11 +2,11 @@
 > The README and the paper are heavily outdated. Since then, I have:
 >
 > - Completely rebuilt and optimized the CPU, and prepared it for a real FPGA with a 7.5 ns critical path
-> - Added variable-length instructions to the ISA
+> - Added variable-length instructions to the ISA, and bunch of instructions
 > - Implemented a memory interface from scratch that runs at up to 1200 MB/s and fits in under 600 LUTs
 > - Implemented an L1 cache (currently optimizing it)
-> - Updated, rebuilt, or modified many other parts
-> - Added plenty of other cool stuff
+> - Fully updated compiler and thus assembler so they work flawlessly with updated ISA
+> - Plus updated, rebuilt, implemented or modified many other parts
 
 # Eclipse-10000 & 100000 Stack [WIP]
 A complete computer system built from the ground up: from raw logic gates CPU and custom 32-bit SystemVerilog CPUs to an assembler, compiler, and relatively high-level programming language.

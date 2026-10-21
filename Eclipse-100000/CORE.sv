@@ -72,14 +72,10 @@ module CORE(
     assign IF_PC_next = IF_jump ? IF_redirect_target : IF_PC_plus4_or8;
 
     //Change on memfaults, redirects, stalls etc
-    assign IF_PC_tofetch = MEM_fault ? (memFault ? 28'h70 : 28'h74)
-        : MEM_redirect ? MEM_redirect_target[27:0]
-        : I_kill ? ID_PC[27:0]
+    assign IF_PC_tofetch = I_kill ? ID_PC[27:0]
         : IF_take ? IF_PC_plus4[27:0] : IF_PC[27:0];
 
-    assign IF_even_tofetch = MEM_fault ? 9'd4
-        : MEM_redirect ? (D_miss_ff ? even_row(WB_PC[13:4]) : MEM_demolish ? even_row(MEM_redirect_pc[13:4]) : branch_cond_met ? even_row(MEM_early_target[13:4]) : even_row(MEM_PCNext[13:4]))
-        : I_kill ? even_row(ID_PC[13:4])
+    assign IF_even_tofetch = I_kill ? even_row(ID_PC[13:4])
         : IF_take ? even_row(IF_PC_plus4[13:4]) : even_row(IF_PC[13:4]);
 
     assign IF_take = !stall && !bubble && I_mem_rdy && !IF_redir;
@@ -89,7 +85,7 @@ module CORE(
             IF_redir <= 1'b0;
             IF_skip  <= 1'b0;
         end else begin
-            IF_redir <= IF_take && IF_jump && !MEM_fault && !MEM_redirect && !I_kill;
+            IF_redir <= (IF_take && IF_jump && !I_kill) || MEM_fault || MEM_redirect;
             IF_skip  <= IF_take && (IF_64 || IF_branch) && !MEM_fault && !MEM_redirect && !I_kill;
         end
     end : IF_window
@@ -1525,6 +1521,23 @@ module CORE(
         endcase
     end
     assign memTarget = (opcode == 6'b000000) ? idx_addr : other_addr; //STX/MDXs
+
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [14:0] idx16, oth16;
+    /* verilator lint_on UNUSEDSIGNAL */
+    logic [14:5] memTarget16;
+    assign idx16 = LDX_base[14:0] + ((isEX_mdx ? EX_mdx_product[14:0] : LDX_imm29[14:0]) + 15'd16) + LDX_idx[14:0];
+    always_comb begin
+        unique case (opcode)
+            6'b100100: oth16 = SelectedSPR[14:0] + 15'd16;
+            6'b100101: oth16 = SelectedSPR[14:0] + (15'd16 - {12'd0, push_pop_bytes});
+            6'b101000,
+            6'b101001,
+            6'b101101: oth16 = SelectedSPR[14:0] + (sign_ext_imm16[14:0] + 15'd16);
+            default: oth16 = FWD_rx1[14:0] + (EX_rx1_imm[14:0] + 15'd16);
+        endcase
+    end
+    assign memTarget16 = (opcode == 6'b000000) ? idx16[14:5] : oth16[14:5];
     assign memViolation =   (!MEM_kernelMode && (MEM_memRead || MEM_memWrite) &&
                             ((MEM_memTarget < memBase) ||
                             (33'(MEM_memTarget) >= memEnd)));
@@ -1834,7 +1847,8 @@ module CORE(
         .I_mem_rdy(I_mem_rdy),
         .I_miss_ff(I_miss_ff),
 
-        .Dread_addr(stall ? MEM_memTarget[27:0] : memTarget[27:0]),
+        .Dread_addr(memTarget[27:0]),
+        .Dread_even(memTarget16),
         .D_write_addr(MEM_memTarget[14:0]), //Writes happen in MEM
         .we(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid),  //memWrite dgaf if mem is ready or not
         .re(MEM_memRead && !memViolation && MEM_ram_cs && isMEM_valid), //same thing
