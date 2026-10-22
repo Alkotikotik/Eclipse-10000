@@ -32,9 +32,6 @@ module CORE(
 
     //Stages go as follows:
     //IF(Instruction Fetch) |=> GA(Gather) |=> EX(Execute) |=> VER(Verify) |=> WB(Write - back)
-    //
-
-
     //====//
 
     logic  demolish;   //Removes current instructions on the branch misprediction/branch
@@ -227,6 +224,23 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin
         if (reset) GHR <= 16'b0;
         else if (isVER_valid && VER_branch && !VER_irq && !mem_stall) GHR <= {GHR[14:0], branch_cond_met};
+    end
+
+    //BTB aka Branch Target Buffer.
+    //It stores the target address of any branch and gshare predicts taken it
+    //pulls address from here. It also pulls address from here on JMP/CALL/RET
+    //Which brings that back to 0cycles penalty in most of the cases, however
+    //when it misses the tag(similar to cache) it does pay a little.
+    //I implement it using BRAM36 with encoding as follows:
+    //2bits kind(very kind), 8bits tag(aka PC[18:11]), 26bits target.
+    //kind is: 00 - empty, 01 - JMP/CALL, 10 - RET, 11 - fused cond
+    //Regarding RETs i've got a really good idea, more on that later.
+
+    (* ram_style = "block" *) logic [1023:0] BTB [35:0]; //up to 1024branch instructions stored
+
+    logic [35:0] BTB_read;
+    always_ff @(posedge clk) begin
+        BTB_read <= BTB[IF_PC_tofetch[10:2]];
     end
 
 
