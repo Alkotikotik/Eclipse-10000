@@ -22,7 +22,7 @@ constexpr int D_EDGE_PCT =
     3; // D: last box of a 32KB chunk, so crossing accesses spill into the next tag
 constexpr int SKIP_PCT = 50;  // I: fetch from pc-4 and skip a word, like after a 64-bit instruction
 constexpr int JUMP_BUBBLE_PCT = 5; // I: a taken jump, the window after it is fetched and thrown away
-constexpr int REFETCH = 3; // D: bubbles after a replay while IF/ID/EX refill, like CORE's flush
+constexpr int REFETCH = 3; // D: bubbles after a replay while IF/GA/EX refill, like CORE's flush
 
 // code lives in the top half of the 256MB (addr bit 27 = 1), data in the bottom half, so D's
 // write-backs never land on something I fetches (no self-modifying code)
@@ -75,7 +75,7 @@ int main(int argc, char **argv) {
                __builtin_bswap32(ddr3_word(pc));
     };
 
-    // what MEM should see: initial contents + every store done so far
+    // what VER should see: initial contents + every store done so far
     std::unordered_map<uint32_t, uint8_t> stored;
     auto cpu_byte = [&](uint32_t a) {
         auto it = stored.find(a);
@@ -123,7 +123,7 @@ int main(int argc, char **argv) {
     Verilated::randReset(2);
     Verilated::randSeed(seed);
     auto top = std::make_unique<VL1>();
-    auto set_mem = [&](const Op &op) { // MEM-stage inputs, killed like CORE's isMEM_valid on a replay
+    auto set_mem = [&](const Op &op) { // VER-stage inputs, killed like CORE's isVER_valid on a replay
         top->re = op.valid && !op.store && !top->D_miss_ff;
         top->we = op.valid && op.store && !top->D_miss_ff;
         top->ram_op = op.valid && !top->D_miss_ff;
@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
     // the data half, but it's done long before D's sweep ends and anything gets written back
     uint32_t pc = 0;           // PC in IF, its data should be on I_data_out
     const Op bubble = {0, false, 2, 0, false};
-    Op cur = {0, false, 2, 0, true}; // MEM
+    Op cur = {0, false, 2, 0, true}; // VER
     Op nxt = rand_op(0);             // EX
     uint32_t last_addr = nxt.addr;   // what the next random op is generated near
     std::deque<Op> prog;             // ops to go into EX again after a replay, in program order
@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
         Op op;
         bool valid, bad, stalled;
         uint32_t got;
-    } unconf = {bubble, false, false, false, 0}; // left MEM last cycle, real unless D_miss_ff says no
+    } unconf = {bubble, false, false, false, 0}; // left VER last cycle, real unless D_miss_ff says no
     auto next_op = [&]() {
         if (refetch) {
             refetch--;
@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
         top->eval();
 
         // fake IF: a miss doesn't hold IF, it shows up a cycle later as I_miss_ff and IF goes
-        // back to the PC it fetched (CORE's I_kill -> ID_PC)
+        // back to the PC it fetched (CORE's I_kill -> GA_PC)
         if (top->I_miss_ff) {
             if (prev_discard && i_errors++ < 10) {
                 printf("cyc %lu: replay from a discarded fetch\n", cyc);
@@ -258,9 +258,9 @@ int main(int argc, char **argv) {
         top->I_addr = fa;
         top->I_even_idx = ((fa >> 5) + (fa >> 4 & 1)) & 0x1FF; // CORE's even_row
 
-        // fake MEM: a miss doesn't stall, it shows up a cycle later as D_miss_ff and replays
+        // fake VER: a miss doesn't stall, it shows up a cycle later as D_miss_ff and replays
         if (top->D_miss_ff) {
-            // the op that left MEM last cycle didn't really, the one in MEM now is killed (re/we
+            // the op that left VER last cycle didn't really, the one in VER now is killed (re/we
             // already dropped), and they go back into the pipeline in program order
             if (nxt.valid) {
                 prog.push_front(nxt);
@@ -309,7 +309,7 @@ int main(int argc, char **argv) {
             }
             d_stall = 0;
             top->D_advance = 1;
-            top->Dread_addr = nxt.addr; // EX moves into MEM
+            top->Dread_addr = nxt.addr; // EX moves into VER
             top->Dread_even = ((nxt.addr + 16) >> 5) & 0x3FF; // CORE's memTarget16
             cur = nxt;
             nxt = next_op();
@@ -319,7 +319,7 @@ int main(int argc, char **argv) {
                 return 1;
             }
             top->D_advance = 0;
-            top->Dread_addr = cur.addr; // CORE's stall ? MEM_memTarget : memTarget
+            top->Dread_addr = cur.addr; // CORE's stall ? VER_memTarget : memTarget
         }
         top->eval();
 
@@ -371,7 +371,7 @@ int main(int argc, char **argv) {
         top->eval();
         top->clk = 0;
         top->eval();
-        set_mem(cur); // the new MEM op's inputs, for the next cycle
+        set_mem(cur); // the new VER op's inputs, for the next cycle
         top->I_skip = nskip;
         top->I_discard = ndiscard;
         cyc++;

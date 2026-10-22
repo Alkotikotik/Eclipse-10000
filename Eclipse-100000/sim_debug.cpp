@@ -105,10 +105,10 @@ int main(int argc, char **argv) {
 
         // Active edge logging & VRAM update
         if (top->clk == 1) {
-            // Print ID stage PC / IR
+            // Print GA stage PC / IR
             std::cout << "[Cycle " << (sim_time / 2) << "] "
-                      << "ID_PC=0x" << std::hex << (uint32_t)top->rootp->CORE__DOT__ID_PC
-                      << " ID_IR=0x" << std::hex << (uint32_t)top->rootp->CORE__DOT__ID_IR
+                      << "GA_PC=0x" << std::hex << (uint32_t)top->rootp->CORE__DOT__GA_PC
+                      << " GA_IR=0x" << std::hex << (uint32_t)top->rootp->CORE__DOT__GA_IR
                       << std::dec << std::endl;
 
             // Capture VRAM writes

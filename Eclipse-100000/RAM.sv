@@ -24,7 +24,7 @@ module RAM(
 
     //Sync read, was async previosely which obviosely is impossible on the
     //actual FPGA, unless LUTRAM ofc but its either BRAM or ddr3
-    //Reads give the whole word, MEM picks the fragment, so as usual
+    //Reads give the whole word, VER picks the fragment, so as usual
     always_ff @(posedge clk) begin
         if (mem_read) begin
             data_out <= {ramm[addrRead[27:0]    ],

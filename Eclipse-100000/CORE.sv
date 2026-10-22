@@ -29,6 +29,12 @@ module CORE(
     //That is about 2.8 times faster than my multi-cycle design(~= 2.9CPI) as
     //well as higher estimated clock frequency due to shorter critical path
     //3 cycles per instruction to 5, we'll see about that I gotta optimze it.
+
+    //Stages go as follows:
+    //IF(Instruction Fetch) |=> GA(Gather) |=> EX(Execute) |=> VER(Verify) |=> WB(Write - back)
+    //
+
+
     //====//
 
     logic  demolish;   //Removes current instructions on the branch misprediction/branch
@@ -40,7 +46,7 @@ module CORE(
 
     //Basically thats a massive check for unexpected PC change, like branch
     //misprediction, interrupt and JR maybe other but I forgot
-    assign demolish  =  isEX_valid && !mem_stall && !MEM_redirect &&
+    assign demolish  =  isEX_valid && !mem_stall && !VER_redirect &&
                         (irq_taken ||
                         (PCWrite &&
                         !(opcode == 6'b111111 || opcode == 6'b111000) &&
@@ -72,11 +78,16 @@ module CORE(
     assign IF_PC_next = IF_jump ? IF_redirect_target : IF_PC_plus4_or8;
 
     //Change on memfaults, redirects, stalls etc
-    assign IF_PC_tofetch = I_kill ? ID_PC[27:0]
+    assign IF_PC_tofetch = I_kill ? GA_PC[27:0]
         : IF_take ? IF_PC_plus4[27:0] : IF_PC[27:0];
 
+    //Alright so to optimize critical path I had to basically fetch IF_PC
+    //+ 8 every cycle no matter what. That doesn't touch regular branches
+    //because they kill anyways, however it does add 1 stall cycle to every
+    //uncond branch like JMP/CALL/RET. And it is a little bit unfortunate,
+    //however a BTB or whatever its called should fix it.
     (* keep = "true" *) logic [8:0] IF_even_kill, IF_even_take, IF_even_hold;
-    assign IF_even_kill = even_row(ID_PC[13:4]);
+    assign IF_even_kill = even_row(GA_PC[13:4]);
     assign IF_even_take = even_row(IF_PC_plus4[13:4]);
     assign IF_even_hold = even_row(IF_PC[13:4]);
     assign IF_even_tofetch = I_kill ? IF_even_kill
@@ -89,16 +100,16 @@ module CORE(
             IF_redir <= 1'b0;
             IF_skip  <= 1'b0;
         end else begin
-            IF_redir <= (IF_take && IF_jump && !I_kill) || MEM_fault || MEM_redirect;
-            IF_skip  <= IF_take && (IF_64 || IF_branch) && !MEM_fault && !MEM_redirect && !I_kill;
+            IF_redir <= (IF_take && IF_jump && !I_kill) || VER_fault || VER_redirect;
+            IF_skip  <= IF_take && (IF_64 || IF_branch) && !VER_fault && !VER_redirect && !I_kill;
         end
     end : IF_window
 
     always_ff @(posedge clk or posedge reset) begin : IF_main
         if (reset) IF_PC <= 32'h0;
-        else if(MEM_fault) IF_PC <= memFault ? 32'h00000070 : 32'h00000074;
-        else if(MEM_redirect) IF_PC <= MEM_redirect_target;
-        else if(I_kill) IF_PC <= ID_PC;
+        else if(VER_fault) IF_PC <= memFault ? 32'h00000070 : 32'h00000074;
+        else if(VER_redirect) IF_PC <= VER_redirect_target;
+        else if(I_kill) IF_PC <= GA_PC;
         else if(IF_take) IF_PC <= IF_PC_next;
         else IF_PC <= IF_PC; //I just can't omit it
     end : IF_main
@@ -208,107 +219,107 @@ module CORE(
     //Only read EX_pht_idx rather than combinationally like previousely
     always_ff @(posedge clk) begin : predict_branch
         pht_out <= PHT[pht_read_idx];
-        if (isMEM_valid && MEM_branch && !MEM_irq && !mem_stall)
-            PHT[MEM_pht_idx] <= updated_pht(MEM_pht_val, branch_cond_met);
+        if (isVER_valid && VER_branch && !VER_irq && !mem_stall)
+            PHT[VER_pht_idx] <= updated_pht(VER_pht_val, branch_cond_met);
     end : predict_branch
 
     //GHR is still in flops though
     always_ff @(posedge clk or posedge reset) begin
         if (reset) GHR <= 16'b0;
-        else if (isMEM_valid && MEM_branch && !MEM_irq && !mem_stall) GHR <= {GHR[14:0], branch_cond_met};
+        else if (isVER_valid && VER_branch && !VER_irq && !mem_stall) GHR <= {GHR[14:0], branch_cond_met};
     end
 
 
     //== That looks nice ==//
-    //== Anyways ID(Instruction Decode) stage ==//
-    logic [31:0] ID_PC, ID_IR; //Each stage gets into own IR and PC
-    logic [31:0] ID_early_target;
-    logic [13:0] ID_pht_idx;
-    logic [1:0]  ID_pht_val;
+    //== Anyways GA(Gather) stage ==//
+    logic [31:0] GA_PC, GA_IR; //Each stage gets into own IR and PC
+    logic [31:0] GA_early_target;
+    logic [13:0] GA_pht_idx;
+    logic [1:0]  GA_pht_val;
 
-    logic isID_valid, isID_valid_ff;
-    logic ID_branch;
-    logic ID_predicted_taken;
-    logic [31:0] ID_IR_2;
-    logic ID_64;
+    logic isGA_valid, isGA_valid_ff;
+    logic GA_branch;
+    logic GA_predicted_taken;
+    logic [31:0] GA_IR_2;
+    logic GA_64;
 
-    always_ff @(posedge clk or posedge reset) begin : ID_rst
+    always_ff @(posedge clk or posedge reset) begin : GA_rst
         if (reset) begin
-            isID_valid_ff <= 0;
+            isGA_valid_ff <= 0;
             I_took_ff <= 0;
             //Vivado started to complain when I added memFault, but whatever
             //I can just split it into to if blocks
         end else begin
-            I_took_ff <= IF_take && !MEM_redirect && !MEM_fault;
-            if (MEM_redirect || MEM_fault || I_kill) begin
-                isID_valid_ff <= 0;
+            I_took_ff <= IF_take && !VER_redirect && !VER_fault;
+            if (VER_redirect || VER_fault || I_kill) begin
+                isGA_valid_ff <= 0;
             end else if (!stall && !bubble) begin
-                isID_valid_ff <= I_mem_rdy && !IF_redir;
+                isGA_valid_ff <= I_mem_rdy && !IF_redir;
             end
         end
-    end : ID_rst
+    end : GA_rst
 
     assign I_kill     = I_miss_ff && I_took_ff;
-    assign isID_valid = isID_valid_ff && !I_kill;
+    assign isGA_valid = isGA_valid_ff && !I_kill;
 
-    always_ff @(posedge clk) begin : ID_main
+    always_ff @(posedge clk) begin : GA_main
         if (!stall && !bubble) begin
-            ID_PC <= IF_PC;
-            ID_64 <= IF_64;
-            ID_IR_2 <= IF_IR_2;
-            ID_branch <= IF_branch;
-            ID_IR <= instr_fetch_data;
-            ID_early_target <= IF_redirect_target;
-            ID_pht_idx <= pht_idx_r;
-            ID_pht_val <= pht_out;
-            ID_predicted_taken <= IF_predicted_taken;
+            GA_PC <= IF_PC;
+            GA_64 <= IF_64;
+            GA_IR_2 <= IF_IR_2;
+            GA_branch <= IF_branch;
+            GA_IR <= instr_fetch_data;
+            GA_early_target <= IF_redirect_target;
+            GA_pht_idx <= pht_idx_r;
+            GA_pht_val <= pht_out;
+            GA_predicted_taken <= IF_predicted_taken;
         end
         //else: stall holds PC and IR as they are
-    end : ID_main
+    end : GA_main
 
     //==Multi-dimensional operations - sounds cool asf
-    logic isID_mdx;
-    assign isID_mdx = ID_64 && (ID_IR[9:4] == 6'b011110 || ID_IR[9:4] == 6'b011101 || ID_IR[9:4] == 6'b011100);
+    logic isGA_mdx;
+    assign isGA_mdx = GA_64 && (GA_IR[9:4] == 6'b011110 || GA_IR[9:4] == 6'b011101 || GA_IR[9:4] == 6'b011100);
 
-    logic isID_mdsx;
-    assign isID_mdsx = ID_64 && (ID_IR[9:4] == 6'b011100);
+    logic isGA_mdsx;
+    assign isGA_mdsx = GA_64 && (GA_IR[9:4] == 6'b011100);
 
-    logic ID_uses_rr2; //LDX, STX, MDLX, MDCX, MDSX
-    assign ID_uses_rr2 = ID_64 && (ID_IR[9:4] == 6'b011111 || ID_IR[9:4] == 6'b010000 || isID_mdx);
+    logic GA_uses_rr2; //LDX, STX, MDLX, MDCX, MDSX
+    assign GA_uses_rr2 = GA_64 && (GA_IR[9:4] == 6'b011111 || GA_IR[9:4] == 6'b010000 || isGA_mdx);
 
     //DSP accepts signed and signed only
-    logic signed [24:0] ID_mdx_ri;
-    logic signed [13:0] ID_stride;
-    logic signed [31:0] ID_imm13;
+    logic signed [24:0] GA_mdx_ri;
+    logic signed [13:0] GA_stride;
+    logic signed [31:0] GA_imm13;
     /* verilator lint_off UNUSEDSIGNAL */
-    logic [31:0] ID_mdx_idx;
+    logic [31:0] GA_mdx_idx;
     /* verilator lint_on UNUSEDSIGNAL */ 
     //ri can be only up to 2^24 signed because its the limitation of one DSP
     //slice which is 18x25bits, unfornutely increasing it to 2 chained slices
     //leads to a critical path. Not a big deal tho im not gonna use arrays
     //past 16MB considering my whole memory is 256MB
     logic  mdx_mem_hit, mdx_wb_hit;
-    assign mdx_mem_hit = isMEM_valid && MEM_gpr_write && !MEM_is_load && (MEM_gpr_dest[7:3] == ID_IR_2[31:27]) &&
-                         (!ID_banked2 || MEM_kernelMode == EX_kernel_mode);
-    assign mdx_wb_hit  = isWB_valid && WB_gpr_write && (WB_gpr_dest[7:3] == ID_IR_2[31:27]) &&
-                         (!ID_banked2 || WB_kernelMode == EX_kernel_mode);
+    assign mdx_mem_hit = isVER_valid && VER_gpr_write && !VER_is_load && (VER_gpr_dest[7:3] == GA_IR_2[31:27]) &&
+                         (!GA_banked2 || VER_kernelMode == EX_kernel_mode);
+    assign mdx_wb_hit  = isWB_valid && WB_gpr_write && (WB_gpr_dest[7:3] == GA_IR_2[31:27]) &&
+                         (!GA_banked2 || WB_kernelMode == EX_kernel_mode);
 
     logic [31:0] mdx_reg;
-    assign mdx_reg = (ID_banked2 && EX_kernel_mode) ? (ID_IR_2[27] ? KGPR1 : KGPR0) : GPRs_data_out2;
+    assign mdx_reg = (GA_banked2 && EX_kernel_mode) ? (GA_IR_2[27] ? KGPR1 : KGPR0) : GPRs_data_out2;
 
     //mdx forwarding really a same thing to a regular forwarding
     logic [1:0] mdx_rel;
     always_comb begin
         for (int lane = 0; lane < 4; lane++) begin
-            mdx_rel = 2'(lane) - MEM_base;
-            if (mdx_mem_hit && MEM_lanes[lane])     ID_mdx_idx[8*lane +: 8] = MEM_result[8*mdx_rel +: 8];
-            else if (mdx_wb_hit && WB_lanes[lane])  ID_mdx_idx[8*lane +: 8] = WB_aligned[8*lane +: 8];
-            else                                    ID_mdx_idx[8*lane +: 8] = mdx_reg[8*lane +: 8];
+            mdx_rel = 2'(lane) - VER_base;
+            if (mdx_mem_hit && VER_lanes[lane])     GA_mdx_idx[8*lane +: 8] = VER_result[8*mdx_rel +: 8];
+            else if (mdx_wb_hit && WB_lanes[lane])  GA_mdx_idx[8*lane +: 8] = WB_aligned[8*lane +: 8];
+            else                                    GA_mdx_idx[8*lane +: 8] = mdx_reg[8*lane +: 8];
         end
     end
-    assign ID_mdx_ri  = ID_mdx_idx[24:0];
-    assign ID_stride = {ID_IR[20:18], ID_IR[12:10], ID_IR[3:0], ID_IR_2[16:13]};
-    assign ID_imm13  = {{19{ID_IR_2[12]}}, ID_IR_2[12:0]};
+    assign GA_mdx_ri  = GA_mdx_idx[24:0];
+    assign GA_stride = {GA_IR[20:18], GA_IR[12:10], GA_IR[3:0], GA_IR_2[16:13]};
+    assign GA_imm13  = {{19{GA_IR_2[12]}}, GA_IR_2[12:0]};
 
     //Finishes at the start of EX
     //So thats a cool one: DSP supports fused add multiply and I really love
@@ -317,7 +328,7 @@ module CORE(
     //
     //Uhh there goes my nice looking dsp like I didn't do it myself, first of
     //all DSP48E1 has intermediate Pipilined M register which is A * B, so we
-    //save that register at the end of ID and when add C to it at the start of
+    //save that register at the end of GA and when add C to it at the start of
     //Otherwise its just dsp with a few modifications. Refer to UG479 if you
     //are interested, its pretty interesting ngl glad I got to use information
     //From there bc I initially read it for fun.
@@ -332,9 +343,9 @@ module CORE(
             .INMODEREG(0), .OPMODEREG(0), .USE_MULT("MULTIPLY"), .USE_DPORT("FALSE")
         ) mdx_dsp (
             .CLK(clk),
-            .A({{5{ID_mdx_ri[24]}}, ID_mdx_ri}),
-            .B({{4{ID_stride[13]}}, ID_stride}),
-            .C({{16{ID_imm13[31]}}, ID_imm13}),
+            .A({{5{GA_mdx_ri[24]}}, GA_mdx_ri}),
+            .B({{4{GA_stride[13]}}, GA_stride}),
+            .C({{16{GA_imm13[31]}}, GA_imm13}),
             .D(25'd0),
             .OPMODE(7'b0110101), //P(result) = M + C
             .ALUMODE(4'b0000), .INMODE(5'b00000), .CARRYINSEL(3'b000), .CARRYIN(1'b0),
@@ -353,8 +364,8 @@ module CORE(
         logic [31:0] EX_mdx_mul, EX_imm13;
         always_ff @(posedge clk) begin
             if (!stall) begin
-                EX_mdx_mul <= 32'(ID_mdx_ri * ID_stride);
-                EX_imm13   <= ID_imm13;
+                EX_mdx_mul <= 32'(GA_mdx_ri * GA_stride);
+                EX_imm13   <= GA_imm13;
             end
         end
         assign EX_mdx_product = EX_mdx_mul + EX_imm13;
@@ -362,38 +373,38 @@ module CORE(
 
     //We need to compare those registers to EX's ones it case they
     //overlap - stall
-    //So the regfile read is moved to the ID, saves up on critical path and ID
+    //So the regfile read is moved to the GA, saves up on critical path and GA
     //is almost empty anyways so I might as well fill it as much as possible
     /* verilator lint_off UNUSEDSIGNAL */
-    logic [7:0]  ID_rx0, ID_rx1; //Selector last 3bits are unused
+    logic [7:0]  GA_rx0, GA_rx1; //Selector last 3bits are unused
     /* verilator lint_on UNUSEDSIGNAL */
-    logic [31:0] ID_rx0_val, ID_rx1_val, ID_rx2_val;
+    logic [31:0] GA_rx0_val, GA_rx1_val, GA_rx2_val;
 
-    assign ID_rx0 = ID_IR[25:18];
-    assign ID_rx1 = ID_IR[17:10];
-    //No rx2 I just use ID_IR_2[something:something]
+    assign GA_rx0 = GA_IR[25:18];
+    assign GA_rx1 = GA_IR[17:10];
+    //No rx2 I just use GA_IR_2[something:something]
 
-    logic ID_wb_hit0, ID_wb_hit1, ID_wb_hit2;
-    logic ID_banked0, ID_banked1, ID_banked2;
-    assign ID_banked0 = (ID_rx0[7:3] <= 5'd1);
-    assign ID_banked1 = (ID_rx1[7:3] <= 5'd1);
-    assign ID_banked2 = (ID_IR_2[31:27] <= 5'd1);
+    logic GA_wb_hit0, GA_wb_hit1, GA_wb_hit2;
+    logic GA_banked0, GA_banked1, GA_banked2;
+    assign GA_banked0 = (GA_rx0[7:3] <= 5'd1);
+    assign GA_banked1 = (GA_rx1[7:3] <= 5'd1);
+    assign GA_banked2 = (GA_IR_2[31:27] <= 5'd1);
 
     //Basically MDXs shifter register overlap with LDX/STX rxi so they share
     //1 index operand, and we can kinda abuse that
-    logic [4:0]  ID_rxi_base;
-    logic        ID_rxi_banked;
-    logic [31:0] ID_rxi_val;
-    assign ID_rxi_base   = isID_mdx ? ID_rx0[7:3] : ID_IR_2[31:27];
-    assign ID_rxi_banked = isID_mdx ? ID_banked0  : ID_banked2;
-    assign ID_rxi_val    = isID_mdx ? ID_rx0_val  : ID_rx2_val;
+    logic [4:0]  GA_rxi_base;
+    logic        GA_rxi_banked;
+    logic [31:0] GA_rxi_val;
+    assign GA_rxi_base   = isGA_mdx ? GA_rx0[7:3] : GA_IR_2[31:27];
+    assign GA_rxi_banked = isGA_mdx ? GA_banked0  : GA_banked2;
+    assign GA_rxi_val    = isGA_mdx ? GA_rx0_val  : GA_rx2_val;
 
     //== FWD(Forwarding) ==//
-    //I moved forwarding into ID only now??
+    //I moved forwarding into GA only now??
 
     //So its a pretty interesting one, if instruction needs result(EX) that hasn't
     //been written to GPRs yet(end of WB), instead of stalling I check for this
-    //condition, if its true I just use MEM/WB result, otherwise read from registers
+    //condition, if its true I just use VER/WB result, otherwise read from registers
 
     //The problem is sub registers: a selector is {base_id[4:0], offset[2:0]} and the
     //offset picks which slice of the 32bit register you actually touch:
@@ -401,66 +412,66 @@ module CORE(
     //Two selectors that differ only in the offset still name the exact same physical
     //register, so comparing the whole 8bit selector breaks everything.
     //The fix is only match using base_id and apply offset only at the end
-    logic [7:0] ID_pick0, ID_pick1, ID_pick2;
-    logic [3:0] ID_keep0, ID_keep1, ID_keep2;
-    assign ID_pick0 = slice_pick(isID_mdx ? 3'b000 : ID_rx0[2:0]); //Which fragment value does instruction use
-    assign ID_pick1 = slice_pick(ID_uses_rr2 ? 3'b000 : ID_rx1[2:0]);
-    assign ID_pick2 = slice_pick(isID_mdx ? 3'b000 : ID_IR_2[26:24]);
-    assign ID_keep0 = slice_keep(isID_mdx ? 3'b000 : ID_rx0[2:0]); //Which output fragment value exists at all
-    assign ID_keep1 = (ID_uses_rr2 && ID_rx1[7:3] == 5'd31) ? 4'b0000 : slice_keep(ID_uses_rr2 ? 3'b000 : ID_rx1[2:0]);
-    assign ID_keep2 = slice_keep(isID_mdx ? 3'b000 : ID_IR_2[26:24]);
+    logic [7:0] GA_pick0, GA_pick1, GA_pick2;
+    logic [3:0] GA_keep0, GA_keep1, GA_keep2;
+    assign GA_pick0 = slice_pick(isGA_mdx ? 3'b000 : GA_rx0[2:0]); //Which fragment value does instruction use
+    assign GA_pick1 = slice_pick(GA_uses_rr2 ? 3'b000 : GA_rx1[2:0]);
+    assign GA_pick2 = slice_pick(isGA_mdx ? 3'b000 : GA_IR_2[26:24]);
+    assign GA_keep0 = slice_keep(isGA_mdx ? 3'b000 : GA_rx0[2:0]); //Which output fragment value exists at all
+    assign GA_keep1 = (GA_uses_rr2 && GA_rx1[7:3] == 5'd31) ? 4'b0000 : slice_keep(GA_uses_rr2 ? 3'b000 : GA_rx1[2:0]);
+    assign GA_keep2 = slice_keep(isGA_mdx ? 3'b000 : GA_IR_2[26:24]);
 
-    logic  mem_go0, mem_go1, mem_go2, wb_go0, wb_go1, wb_go2; //Will the instrction that would be in MEM on next cycle write to pick?
-    assign mem_go0 = isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx0[7:3]) && (!ID_banked0 || isKernelMode == EX_kernel_mode);
-    assign mem_go1 = isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rx1[7:3]) && (!ID_banked1 || isKernelMode == EX_kernel_mode);
-    assign mem_go2 = isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_rxi_base) && (!ID_rxi_banked || isKernelMode == EX_kernel_mode);
-    assign wb_go0  = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx0[7:3]) && (!ID_banked0 || MEM_kernelMode == kernel_mode_go);
-    assign wb_go1  = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rx1[7:3]) && (!ID_banked1 || MEM_kernelMode == kernel_mode_go);
-    assign wb_go2  = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == ID_rxi_base) && (!ID_rxi_banked || MEM_kernelMode == kernel_mode_go);
+    logic  mem_go0, mem_go1, mem_go2, wb_go0, wb_go1, wb_go2; //Will the instrction that would be in VER on next cycle write to pick?
+    assign mem_go0 = isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == GA_rx0[7:3]) && (!GA_banked0 || isKernelMode == EX_kernel_mode);
+    assign mem_go1 = isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == GA_rx1[7:3]) && (!GA_banked1 || isKernelMode == EX_kernel_mode);
+    assign mem_go2 = isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == GA_rxi_base) && (!GA_rxi_banked || isKernelMode == EX_kernel_mode);
+    assign wb_go0  = isVER_valid && VER_gpr_write && (VER_gpr_dest[7:3] == GA_rx0[7:3]) && (!GA_banked0 || VER_kernelMode == kernel_mode_go);
+    assign wb_go1  = isVER_valid && VER_gpr_write && (VER_gpr_dest[7:3] == GA_rx1[7:3]) && (!GA_banked1 || VER_kernelMode == kernel_mode_go);
+    assign wb_go2  = isVER_valid && VER_gpr_write && (VER_gpr_dest[7:3] == GA_rxi_base) && (!GA_rxi_banked || VER_kernelMode == kernel_mode_go);
 
-    logic [3:0] ID_from_mem0, ID_from_mem1, ID_from_mem2, ID_wsel0, ID_wsel1, ID_wsel2;
-    logic [7:0] ID_mem_byte0, ID_mem_byte1, ID_mem_byte2;
+    logic [3:0] GA_from_mem0, GA_from_mem1, GA_from_mem2, GA_wsel0, GA_wsel1, GA_wsel2;
+    logic [7:0] GA_mem_byte0, GA_mem_byte1, GA_mem_byte2;
     always_comb begin //Final select based on allat data, whether they actually collide or not
         for (int b = 0; b < 4; b++) begin
-            ID_from_mem0[b] = ID_keep0[b] && mem_go0 && EX_lanes[ID_pick0[2*b +: 2]];
-            ID_from_mem1[b] = ID_keep1[b] && mem_go1 && EX_lanes[ID_pick1[2*b +: 2]];
-            ID_from_mem2[b] = ID_keep2[b] && mem_go2 && EX_lanes[ID_pick2[2*b +: 2]];
-            ID_wsel0[b] = ID_keep0[b] && wb_go0  && MEM_lanes[ID_pick0[2*b +: 2]];
-            ID_wsel1[b] = ID_keep1[b] && wb_go1  && MEM_lanes[ID_pick1[2*b +: 2]];
-            ID_wsel2[b] = ID_keep2[b] && wb_go2  && MEM_lanes[ID_pick2[2*b +: 2]];
-            ID_mem_byte0[2*b +: 2] = ID_pick0[2*b +: 2] - EX_base;
-            ID_mem_byte1[2*b +: 2] = ID_pick1[2*b +: 2] - EX_base;
-            ID_mem_byte2[2*b +: 2] = ID_pick2[2*b +: 2] - EX_base;
+            GA_from_mem0[b] = GA_keep0[b] && mem_go0 && EX_lanes[GA_pick0[2*b +: 2]];
+            GA_from_mem1[b] = GA_keep1[b] && mem_go1 && EX_lanes[GA_pick1[2*b +: 2]];
+            GA_from_mem2[b] = GA_keep2[b] && mem_go2 && EX_lanes[GA_pick2[2*b +: 2]];
+            GA_wsel0[b] = GA_keep0[b] && wb_go0  && VER_lanes[GA_pick0[2*b +: 2]];
+            GA_wsel1[b] = GA_keep1[b] && wb_go1  && VER_lanes[GA_pick1[2*b +: 2]];
+            GA_wsel2[b] = GA_keep2[b] && wb_go2  && VER_lanes[GA_pick2[2*b +: 2]];
+            GA_mem_byte0[2*b +: 2] = GA_pick0[2*b +: 2] - EX_base;
+            GA_mem_byte1[2*b +: 2] = GA_pick1[2*b +: 2] - EX_base;
+            GA_mem_byte2[2*b +: 2] = GA_pick2[2*b +: 2] - EX_base;
         end
     end
 
     //WB arm and the register pick are done here now, the value that would sit in
-    //WB_aligned next cycle is MEM_aligned right now, so EX only keeps the MEM arm
-    logic [31:0] MEM_aligned;
-    assign MEM_aligned = fwd_align(MEM_gpr_dest[2:0], MEM_val);
+    //WB_aligned next cycle is VER_aligned right now, so EX only keeps the VER arm
+    logic [31:0] VER_aligned;
+    assign VER_aligned = fwd_align(VER_gpr_dest[2:0], VER_val);
 
-    logic [31:0] ID_raw0, ID_raw1, ID_raw2, ID_opnd0, ID_opnd1, ID_opnd2;
-    assign ID_raw0 = (ID_banked0 && kernel_mode_go) ? (ID_rx0[3]   ? KGPR1_next : KGPR0_next) : ID_rx0_val;
-    assign ID_raw1 = (ID_banked1 && kernel_mode_go) ? (ID_rx1[3]   ? KGPR1_next : KGPR0_next) : ID_rx1_val;
-    assign ID_raw2 = (ID_rxi_banked && kernel_mode_go) ? (ID_rxi_base[0] ? KGPR1_next : KGPR0_next) : ID_rxi_val;
+    logic [31:0] GA_raw0, GA_raw1, GA_raw2, GA_opnd0, GA_opnd1, GA_opnd2;
+    assign GA_raw0 = (GA_banked0 && kernel_mode_go) ? (GA_rx0[3]   ? KGPR1_next : KGPR0_next) : GA_rx0_val;
+    assign GA_raw1 = (GA_banked1 && kernel_mode_go) ? (GA_rx1[3]   ? KGPR1_next : KGPR0_next) : GA_rx1_val;
+    assign GA_raw2 = (GA_rxi_banked && kernel_mode_go) ? (GA_rxi_base[0] ? KGPR1_next : KGPR0_next) : GA_rxi_val;
 
     always_comb begin
         for (int b = 0; b < 4; b++) begin
-            if (ID_wsel0[b])       ID_opnd0[8*b +: 8] = MEM_aligned[8*ID_pick0[2*b +: 2] +: 8];
-            else if (ID_keep0[b])  ID_opnd0[8*b +: 8] = ID_raw0[8*ID_pick0[2*b +: 2] +: 8];
-            else                   ID_opnd0[8*b +: 8] = 8'h0;
+            if (GA_wsel0[b])       GA_opnd0[8*b +: 8] = VER_aligned[8*GA_pick0[2*b +: 2] +: 8];
+            else if (GA_keep0[b])  GA_opnd0[8*b +: 8] = GA_raw0[8*GA_pick0[2*b +: 2] +: 8];
+            else                   GA_opnd0[8*b +: 8] = 8'h0;
 
-            if (ID_wsel1[b])       ID_opnd1[8*b +: 8] = MEM_aligned[8*ID_pick1[2*b +: 2] +: 8];
-            else if (ID_keep1[b])  ID_opnd1[8*b +: 8] = ID_raw1[8*ID_pick1[2*b +: 2] +: 8];
-            else                   ID_opnd1[8*b +: 8] = 8'h0;
+            if (GA_wsel1[b])       GA_opnd1[8*b +: 8] = VER_aligned[8*GA_pick1[2*b +: 2] +: 8];
+            else if (GA_keep1[b])  GA_opnd1[8*b +: 8] = GA_raw1[8*GA_pick1[2*b +: 2] +: 8];
+            else                   GA_opnd1[8*b +: 8] = 8'h0;
 
-            if (ID_wsel2[b])       ID_opnd2[8*b +: 8] = MEM_aligned[8*ID_pick2[2*b +: 2] +: 8];
-            else if (ID_keep2[b])  ID_opnd2[8*b +: 8] = ID_raw2[8*ID_pick2[2*b +: 2] +: 8];
-            else                   ID_opnd2[8*b +: 8] = 8'h0;
+            if (GA_wsel2[b])       GA_opnd2[8*b +: 8] = VER_aligned[8*GA_pick2[2*b +: 2] +: 8];
+            else if (GA_keep2[b])  GA_opnd2[8*b +: 8] = GA_raw2[8*GA_pick2[2*b +: 2] +: 8];
+            else                   GA_opnd2[8*b +: 8] = 8'h0;
         end
     end
 
-    //Individdual bytes can only come out of MEM_result bytes
+    //Individdual bytes can only come out of VER_result bytes
     function automatic [1:0] fwd_code(input [1:0] lane, input [1:0] rel);
         unique case ({lane, rel})
             4'b11_11, 4'b10_10, 4'b01_01: fwd_code = 2'd1;
@@ -470,64 +481,64 @@ module CORE(
         endcase
     endfunction
 
-    logic [7:2] ID_fwd_src0, ID_fwd_src1, ID_fwd_src2;
+    logic [7:2] GA_fwd_src0, GA_fwd_src1, GA_fwd_src2;
     always_comb begin
         for (int b = 1; b < 4; b++) begin
-            ID_fwd_src0[2*b +: 2] = ID_from_mem0[b] ? fwd_code(2'(b), ID_mem_byte0[2*b +: 2]) : 2'd0;
-            ID_fwd_src1[2*b +: 2] = ID_from_mem1[b] ? fwd_code(2'(b), ID_mem_byte1[2*b +: 2]) : 2'd0;
-            ID_fwd_src2[2*b +: 2] = ID_from_mem2[b] ? fwd_code(2'(b), ID_mem_byte2[2*b +: 2]) : 2'd0;
+            GA_fwd_src0[2*b +: 2] = GA_from_mem0[b] ? fwd_code(2'(b), GA_mem_byte0[2*b +: 2]) : 2'd0;
+            GA_fwd_src1[2*b +: 2] = GA_from_mem1[b] ? fwd_code(2'(b), GA_mem_byte1[2*b +: 2]) : 2'd0;
+            GA_fwd_src2[2*b +: 2] = GA_from_mem2[b] ? fwd_code(2'(b), GA_mem_byte2[2*b +: 2]) : 2'd0;
         end
     end
 
-    logic ID_is3reg;
-    assign ID_is3reg = (ID_IR[31:26] == 6'b000001 || ID_IR[31:26] == 6'b000011 || ID_IR[31:26] == 6'b000111 ||
-                        ID_IR[31:26] == 6'b000101 || ID_IR[31:26] == 6'b001001 || ID_IR[31:26] == 6'b001011);
+    logic GA_is3reg;
+    assign GA_is3reg = (GA_IR[31:26] == 6'b000001 || GA_IR[31:26] == 6'b000011 || GA_IR[31:26] == 6'b000111 ||
+                        GA_IR[31:26] == 6'b000101 || GA_IR[31:26] == 6'b001001 || GA_IR[31:26] == 6'b001011);
 
-    logic [31:0] ID_rx1_imm;
+    logic [31:0] GA_rx1_imm;
     always_comb begin
-        if (ID_is3reg) begin
-            unique case (ID_IR[1:0])
-                2'b00: ID_rx1_imm = 32'd0;
-                2'b01: ID_rx1_imm = 32'd1;
-                2'b10: ID_rx1_imm = 32'd2;
-                2'b11: ID_rx1_imm = -32'sd1;
+        if (GA_is3reg) begin
+            unique case (GA_IR[1:0])
+                2'b00: GA_rx1_imm = 32'd0;
+                2'b01: GA_rx1_imm = 32'd1;
+                2'b10: GA_rx1_imm = 32'd2;
+                2'b11: GA_rx1_imm = -32'sd1;
             endcase
         end
-        else if (ID_IR[31:30] == 2'b10) ID_rx1_imm = {{22{ID_IR[9]}}, ID_IR[9:0]};
-        else                            ID_rx1_imm = {22'h0, ID_IR[9:0]};
+        else if (GA_IR[31:30] == 2'b10) GA_rx1_imm = {{22{GA_IR[9]}}, GA_IR[9:0]};
+        else                            GA_rx1_imm = {22'h0, GA_IR[9:0]};
     end
 
-    //SPR bypassing into ID as well
-    logic [1:0] ID_spr_sel;
-    logic       ID_spr_hit;
-    assign ID_spr_sel =
-            (ID_IR[31:26] == 6'b101000 || ID_IR[31:26] == 6'b101001 || ID_IR[31:26] == 6'b101010 ||
-            ID_IR[31:26] == 6'b101011 || ID_IR[31:26] == 6'b101100 || ID_IR[31:26] == 6'b101101) ? ID_IR[17:16] : 2'b00;
-    assign ID_spr_hit = ((ID_spr_sel == 2'b00) && SPRWrite && (spr_target_sel == 2'b00) && (isKernelMode == EX_kernel_mode)) ||
-                        ((ID_spr_sel == 2'b01) && ((isCallState && opcode == 6'b111000) || (SPRWrite && spr_target_sel == 2'b01))) ||
-                        ((ID_spr_sel == 2'b10) && SPRWrite && (spr_target_sel == 2'b10) && (isKernelMode == EX_kernel_mode));
+    //SPR bypassing into GA as well
+    logic [1:0] GA_spr_sel;
+    logic       GA_spr_hit;
+    assign GA_spr_sel =
+            (GA_IR[31:26] == 6'b101000 || GA_IR[31:26] == 6'b101001 || GA_IR[31:26] == 6'b101010 ||
+            GA_IR[31:26] == 6'b101011 || GA_IR[31:26] == 6'b101100 || GA_IR[31:26] == 6'b101101) ? GA_IR[17:16] : 2'b00;
+    assign GA_spr_hit = ((GA_spr_sel == 2'b00) && SPRWrite && (spr_target_sel == 2'b00) && (isKernelMode == EX_kernel_mode)) ||
+                        ((GA_spr_sel == 2'b01) && ((isCallState && opcode == 6'b111000) || (SPRWrite && spr_target_sel == 2'b01))) ||
+                        ((GA_spr_sel == 2'b10) && SPRWrite && (spr_target_sel == 2'b10) && (isKernelMode == EX_kernel_mode));
 
-    //Ladies and gentlemen we are currentely wintessing a crime scene: EX steams ID's rr2!!!
+    //Ladies and gentlemen we are currentely wintessing a crime scene: EX steams GA's rr2!!!
     //In reality though: MDSX needs to read 4 registers and I don't feel like
     //adding 4th LUTRAM read port bc its gonna copy LUTRAM which i just don't
     //want to do. And because address only arrives at EX we can freely just
-    //steal this read from ID.
+    //steal this read from GA.
     logic [4:0] rr2_sel;
-    assign rr2_sel = (isEX_valid && isEX_mdsx) ? EX_IR_2[26:22] : ID_IR_2[31:27];
+    assign rr2_sel = (isEX_valid && isEX_mdsx) ? EX_IR_2[26:22] : GA_IR_2[31:27];
 
     //Not freely tho, if next instruction needs 3 read ports we gotta bubble.
     logic mdx_idx_hazard;
-    assign mdx_idx_hazard = isID_valid && isID_mdx &&
-                            ((isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == ID_IR_2[31:27])) ||
-                             (isMEM_valid && MEM_gpr_write && (MEM_is_load || MEM_is_lomul || MEM_is_himul) && (MEM_gpr_dest[7:3] == ID_IR_2[31:27])) ||
-                             (isWB_valid && WB_gpr_write && (WB_is_lomul || WB_is_himul) && (WB_gpr_dest[7:3] == ID_IR_2[31:27])));
+    assign mdx_idx_hazard = isGA_valid && isGA_mdx &&
+                            ((isEX_valid && GPRsWrite && (gpr_rw0_sel[7:3] == GA_IR_2[31:27])) ||
+                             (isVER_valid && VER_gpr_write && (VER_is_load || VER_is_lomul || VER_is_himul) && (VER_gpr_dest[7:3] == GA_IR_2[31:27])) ||
+                             (isWB_valid && WB_gpr_write && (WB_is_lomul || WB_is_himul) && (WB_gpr_dest[7:3] == GA_IR_2[31:27])));
 
     logic rr2_conflict;
-    assign rr2_conflict = isEX_valid && isEX_mdsx && isID_valid && ID_uses_rr2;
+    assign rr2_conflict = isEX_valid && isEX_mdsx && isGA_valid && GA_uses_rr2;
 
     //For later when memory would take actual clock cycles to reach
     //Well its later now
-    //The load use-hazard creates a 1 cycle bubble if ID_uses_EX_dest in MEM
+    //The load use-hazard creates a 1 cycle bubble if GA_uses_EX_dest in VER
     //when dest hasn't been written and gets read. Now I used a forwarding up
     //until that point, but that wouldn't work now because if we forward from
     //the middle of the cycle, like with the mem read, it adds this half
@@ -540,23 +551,23 @@ module CORE(
     logic  load_use_hazard;
     //MDSX will bubble if prev instruction was load into used register so not
     //a big deal
-    assign load_use_hazard = isID_valid && EX_is_load && (ID_uses_EX_dest || (isID_mdsx && (gpr_rw0_sel[7:3] == ID_IR_2[26:22])));
+    assign load_use_hazard = isGA_valid && EX_is_load && (GA_uses_EX_dest || (isGA_mdsx && (gpr_rw0_sel[7:3] == GA_IR_2[26:22])));
 
-    //the CPU will get mul result only at the end of MEM, hence it introduces
+    //the CPU will get mul result only at the end of VER, hence it introduces
     //mul-use hazard, if next instruction uses mul and we don't have the
     //result yet, we have to bubble, same as load use
-    logic  EX_is_mul, MEM_is_mul;
+    logic  EX_is_mul, VER_is_mul;
     assign EX_is_mul  = isEX_valid && (opcode == 6'b000111 || opcode == 6'b001101);
-    assign MEM_is_mul = isMEM_valid && (MEM_is_lomul || MEM_is_himul);
+    assign VER_is_mul = isVER_valid && (VER_is_lomul || VER_is_himul);
 
     //Alright I wrote this all for nothing bc the fix is literally just gate
-    //it by ID_64 ill leave it here anyways bc why not.
+    //it by GA_64 ill leave it here anyways bc why not.
     //Note: Sometimes by next instruction I mean next 2 instructions
-    //Checking if either EX and MEM use the same registers as mul used
+    //Checking if either EX and VER use the same registers as mul used
     //So I don't check for GPRsWrite is usual because that means it would have
-    //to wait for this whole mem safety thing, which im gonna move to the MEM soon,
+    //to wait for this whole mem safety thing, which im gonna move to the VER soon,
     //And hence keeps critical path short. However that does introduce
-    //a problem, since I unconditionally check for ID_IR_2[31:27], if first
+    //a problem, since I unconditionally check for GA_IR_2[31:27], if first
     //5 bits of opcode of next insruction perfectly align with the exact base
     //register used bits it would lead to uneccessery bubble. Now unfornutely
     //Its not as uncommon as it might seem, actually is is pretty damn uncommon:
@@ -569,13 +580,13 @@ module CORE(
     //or SPRLEA. And yeah afterall its not like it breaks anything it might
     //just increase overall CPI by 0.025 which is a random estimate I just came
     //up with.
-    logic  ID_uses_EX_dest, ID_uses_MEM_dest;
-    assign ID_uses_EX_dest  = (gpr_rw0_sel[7:3]  == ID_rx0[7:3]) || (gpr_rw0_sel[7:3]  == ID_rx1[7:3]) || (ID_64 && (gpr_rw0_sel[7:3]  == ID_IR_2[31:27]));
-    assign ID_uses_MEM_dest = (MEM_gpr_dest[7:3] == ID_rx0[7:3]) || (MEM_gpr_dest[7:3] == ID_rx1[7:3]) || (ID_64 && (MEM_gpr_dest[7:3] == ID_IR_2[31:27]));
+    logic  GA_uses_EX_dest, GA_uses_VER_dest;
+    assign GA_uses_EX_dest  = (gpr_rw0_sel[7:3]  == GA_rx0[7:3]) || (gpr_rw0_sel[7:3]  == GA_rx1[7:3]) || (GA_64 && (gpr_rw0_sel[7:3]  == GA_IR_2[31:27]));
+    assign GA_uses_VER_dest = (VER_gpr_dest[7:3] == GA_rx0[7:3]) || (VER_gpr_dest[7:3] == GA_rx1[7:3]) || (GA_64 && (VER_gpr_dest[7:3] == GA_IR_2[31:27]));
 
     logic  mul_use_hazard;
-    assign mul_use_hazard = isID_valid && ((EX_is_mul && ID_uses_EX_dest) || (MEM_is_mul && ID_uses_MEM_dest) ||
-                                           (EX_is_mul && isID_mdsx && (gpr_rw0_sel[7:3] == ID_IR_2[26:22])));
+    assign mul_use_hazard = isGA_valid && ((EX_is_mul && GA_uses_EX_dest) || (VER_is_mul && GA_uses_VER_dest) ||
+                                           (EX_is_mul && isGA_mdsx && (gpr_rw0_sel[7:3] == GA_IR_2[26:22])));
 
 
     //== EX(Execute) ==//
@@ -605,44 +616,44 @@ module CORE(
     always_ff @(posedge clk or posedge reset) begin : EX_rst
         if (reset) begin
             isEX_valid <= 0;
-        end else if (MEM_redirect || bubble || MEM_fault) begin
+        end else if (VER_redirect || bubble || VER_fault) begin
             isEX_valid <= 0;
         end else if (!stall) begin
-            isEX_valid <= isID_valid;
+            isEX_valid <= isGA_valid;
         end
     end : EX_rst
 
     always_ff @(posedge clk) begin : EX_main
         if (!stall) begin
-            EX_PC <= ID_PC; //Handing instruction to the EX
-            EX_IR <= ID_IR;
-            EX_64 <= ID_64;
-            EX_IR_2 <= ID_IR_2;
-            EX_rx0_val <= ID_opnd0;
-            EX_rx1_val <= ID_opnd1;
-            EX_rx2_val <= ID_opnd2;
-            EX_idx_sh  <= isID_mdx ? ID_IR_2[18:17] : ID_IR_2[23:22];
-            EX_rx1_imm <= ID_rx1_imm;
-            EX_branch <= ID_branch;
-            EX_early_target <= ID_early_target;
-            EX_pht_idx <= ID_pht_idx;
-            EX_pht_val <= ID_pht_val;
-            EX_predicted_taken <= ID_predicted_taken;
+            EX_PC <= GA_PC; //Handing instruction to the EX
+            EX_IR <= GA_IR;
+            EX_64 <= GA_64;
+            EX_IR_2 <= GA_IR_2;
+            EX_rx0_val <= GA_opnd0;
+            EX_rx1_val <= GA_opnd1;
+            EX_rx2_val <= GA_opnd2;
+            EX_idx_sh  <= isGA_mdx ? GA_IR_2[18:17] : GA_IR_2[23:22];
+            EX_rx1_imm <= GA_rx1_imm;
+            EX_branch <= GA_branch;
+            EX_early_target <= GA_early_target;
+            EX_pht_idx <= GA_pht_idx;
+            EX_pht_val <= GA_pht_val;
+            EX_predicted_taken <= GA_predicted_taken;
 
-            //Forwarding entirely in ID now yayyy
-            EX_from_mem0 <= ID_from_mem0[0];
-            EX_from_mem1 <= ID_from_mem1[0];
-            EX_from_mem2 <= ID_from_mem2[0];
-            EX_mem_byte0 <= ID_mem_byte0[1:0];
-            EX_mem_byte1 <= ID_mem_byte1[1:0];
-            EX_mem_byte2 <= ID_mem_byte2[1:0];
-            EX_fwd_src0   <= ID_fwd_src0;
-            EX_fwd_src1   <= ID_fwd_src1;
-            EX_fwd_src2   <= ID_fwd_src2;
-            EX_spr_hit <= ID_spr_hit;
+            //Forwarding entirely in GA now yayyy
+            EX_from_mem0 <= GA_from_mem0[0];
+            EX_from_mem1 <= GA_from_mem1[0];
+            EX_from_mem2 <= GA_from_mem2[0];
+            EX_mem_byte0 <= GA_mem_byte0[1:0];
+            EX_mem_byte1 <= GA_mem_byte1[1:0];
+            EX_mem_byte2 <= GA_mem_byte2[1:0];
+            EX_fwd_src0   <= GA_fwd_src0;
+            EX_fwd_src1   <= GA_fwd_src1;
+            EX_fwd_src2   <= GA_fwd_src2;
+            EX_spr_hit <= GA_spr_hit;
 
-            isEX_mdx <= isID_mdx;
-            isEX_mdsx <= isID_mdsx;
+            isEX_mdx <= isGA_mdx;
+            isEX_mdsx <= isGA_mdsx;
         end
     end : EX_main
 
@@ -734,10 +745,10 @@ module CORE(
     assign EX_PC_next = EX_PC + {28'd0, (EX_64 || EX_branch), !(EX_64 || EX_branch), 2'b00};
 
     //This is forwarding too, EX needs to know the new mode immediately after
-    //MEM made the change, becase kernel mode now changes in MEM
+    //VER made the change, becase kernel mode now changes in VER
     //In always_ff bc its a flop
     logic  EX_kernel_mode, kernel_mode_next;
-    assign kernel_mode_next = (!mem_stall && isEX_valid && !stall && !MEM_fault && !MEM_redirect) ? isKernelMode : (MEM_fault || EX_kernel_mode);
+    assign kernel_mode_next = (!mem_stall && isEX_valid && !stall && !VER_fault && !VER_redirect) ? isKernelMode : (VER_fault || EX_kernel_mode);
 
     logic  kernel_mode_go;
     //Kernel mode when nohgin stalls, faults or redirectrs, which is known earlier
@@ -916,143 +927,143 @@ module CORE(
     );
     /* verilator lint_on PINCONNECTEMPTY */
 
-    //== MEM(memory) ==//
+    //== VER(Verify) ==//
     //Work with memory - load, store
-    logic [31:0] MEM_result;
-    logic [31:0] MEM_PC;
-    logic [31:0] MEM_memTarget;
-    logic MEM_memRead, MEM_memWrite;
-    logic [31:0] MEM_ram_data_in;
-    logic [1:0]  MEM_mem_size;
+    logic [31:0] VER_result;
+    logic [31:0] VER_PC;
+    logic [31:0] VER_memTarget;
+    logic VER_memRead, VER_memWrite;
+    logic [31:0] VER_ram_data_in;
+    logic [1:0]  VER_mem_size;
 
-    logic [7:0]  MEM_gpr_dest;
-    logic        MEM_gpr_write;
-    logic        MEM_kernelMode;
-    logic        isMEM_valid, isMEM_valid_ff, isWB_valid, isWB_valid_ff, D_miss_ff;
+    logic [7:0]  VER_gpr_dest;
+    logic        VER_gpr_write;
+    logic        VER_kernelMode;
+    logic        isVER_valid, isVER_valid_ff, isWB_valid, isWB_valid_ff, D_miss_ff;
 
-    logic        MEM_EPCWrite;
-    logic        MEM_irq;
-    logic [31:0] MEM_PCNext;
+    logic        VER_EPCWrite;
+    logic        VER_irq;
+    logic [31:0] VER_PCNext;
 
-    logic MEM_is_lomul, MEM_is_himul;
-    logic MEM_is_load, MEM_ram_cs, MEM_io_cs, MEM_vram_cs;
+    logic VER_is_lomul, VER_is_himul;
+    logic VER_is_load, VER_ram_cs, VER_io_cs, VER_vram_cs;
 
-    logic MEM_zeroDiv;
+    logic VER_zeroDiv;
 
-    //I moved the decision on whether branch is taken or not to MEM in order
+    //I moved the decision on whether branch is taken or not to VER in order
     //to decrease critical path. This would increase the CPI but from my
     //testings not that much, at most + 0.03CPI which is the price im willing
     //to pay.
-    //Even more MEM FFs... shouldn't matter though bc im using only like 2k
+    //Even more VER FFs... shouldn't matter though bc im using only like 2k
     //out of 150k or so
-    logic        MEM_demolish, MEM_branch, MEM_predicted_taken;
-    logic [31:0] MEM_redirect_pc, MEM_early_target;
-    logic [4:0]  MEM_branch_op;
-    logic [31:0] MEM_branch_x, MEM_branch_y, MEM_branch_xs, MEM_branch_ys, MEM_branch_mask;
-    logic [13:0] MEM_pht_idx;
-    logic [1:0]  MEM_pht_val;
+    logic        VER_demolish, VER_branch, VER_predicted_taken;
+    logic [31:0] VER_redirect_pc, VER_early_target;
+    logic [4:0]  VER_branch_op;
+    logic [31:0] VER_branch_x, VER_branch_y, VER_branch_xs, VER_branch_ys, VER_branch_mask;
+    logic [13:0] VER_pht_idx;
+    logic [1:0]  VER_pht_val;
 
-    //Moving SPRs stuff into MEM
-    logic MEM_SPRWrite;
-    logic [31:0] MEM_rx0_val, MEM_activeSP;
-    logic [31:0] MEM_spr_result;
-    logic [2:0]  MEM_SPRSrc;
-    logic [1:0]  MEM_spr_target_sel;
-    logic MEM_is_call;
+    //Moving SPRs stuff into VER
+    logic VER_SPRWrite;
+    logic [31:0] VER_rx0_val, VER_activeSP;
+    logic [31:0] VER_spr_result;
+    logic [2:0]  VER_SPRSrc;
+    logic [1:0]  VER_spr_target_sel;
+    logic VER_is_call;
 
-    logic MEM_irq_timer;
-    logic MEM_irq_key;
+    logic VER_irq_timer;
+    logic VER_irq_key;
 
-    always_ff @(posedge clk or posedge reset) begin : MEM_rst
+    always_ff @(posedge clk or posedge reset) begin : VER_rst
         if (reset) begin
-            isMEM_valid_ff <= 0;
+            isVER_valid_ff <= 0;
         end else if (!mem_stall) begin
-            isMEM_valid_ff <= isEX_valid & !stall & !MEM_fault & !MEM_redirect;
+            isVER_valid_ff <= isEX_valid & !stall & !VER_fault & !VER_redirect;
         end
-    end : MEM_rst
+    end : VER_rst
 
     //So I treat cache miss kinda like branch mispredict, by default CPU
     //assumes cache hits, but if it doesn't, which is indicated by D_miss_ff,
-    //It immediately kills WB and MEM instruction. That way there wouldn't be
+    //It immediately kills WB and VER instruction. That way there wouldn't be
     //a massive miss path with fanout and other nasty stuff.
     //You might think.
-    assign isMEM_valid = isMEM_valid_ff && !D_miss_ff;
+    assign isVER_valid = isVER_valid_ff && !D_miss_ff;
     assign isWB_valid  = isWB_valid_ff  && !D_miss_ff;
     //That it costs 5cycle, but yeah it does. But it doesn't matter bc refill
     //takes 20+ cycle and they happen simoultaniosely so its fine.
 
-    always_ff @(posedge clk) begin : MEM_main
+    always_ff @(posedge clk) begin : VER_main
         if (!mem_stall) begin
             //That many variables are actually harmless, because they live in
             //FFs which are free, there are a lot of unused FFs in logic slices.
-            MEM_result      <= GPRs_data_in;
-            MEM_PC          <= EX_PC;
+            VER_result      <= GPRs_data_in;
+            VER_PC          <= EX_PC;
 
-            MEM_memTarget   <= memTarget;
-            MEM_memRead     <= memRead;
-            MEM_memWrite    <= memWrite;
-            MEM_ram_data_in <= store_val;
-            MEM_mem_size  <= mem_size;
+            VER_memTarget   <= memTarget;
+            VER_memRead     <= memRead;
+            VER_memWrite    <= memWrite;
+            VER_ram_data_in <= store_val;
+            VER_mem_size  <= mem_size;
 
-            MEM_EPCWrite    <= EPCWrite;
-            MEM_irq         <= irq_taken;
-            MEM_PCNext      <= EX_PC_next;
+            VER_EPCWrite    <= EPCWrite;
+            VER_irq         <= irq_taken;
+            VER_PCNext      <= EX_PC_next;
 
-            MEM_gpr_write   <= GPRsWrite;
-            MEM_gpr_dest    <= gpr_rw0_sel;
-            MEM_kernelMode  <= EX_kernel_mode;
-            MEM_is_lomul    <= (opcode == 6'b000111);
-            MEM_is_himul    <= (opcode == 6'b001101);
-            MEM_zeroDiv     <= ZeroDivException && !irq_taken;
+            VER_gpr_write   <= GPRsWrite;
+            VER_gpr_dest    <= gpr_rw0_sel;
+            VER_kernelMode  <= EX_kernel_mode;
+            VER_is_lomul    <= (opcode == 6'b000111);
+            VER_is_himul    <= (opcode == 6'b001101);
+            VER_zeroDiv     <= ZeroDivException && !irq_taken;
 
-            MEM_demolish        <= demolish;
-            MEM_redirect_pc     <= PCNext;
-            MEM_branch          <= EX_branch;
-            MEM_predicted_taken <= EX_predicted_taken;
-            MEM_early_target    <= EX_early_target;
-            MEM_branch_op       <= branch_op;
-            MEM_branch_x        <= branch_x;
-            MEM_branch_y        <= branch_y;
-            MEM_branch_xs       <= branch_xs;
-            MEM_branch_ys       <= branch_ys;
-            MEM_branch_mask     <= branch_mask;
-            MEM_pht_idx         <= EX_pht_idx;
-            MEM_pht_val         <= EX_pht_val;
+            VER_demolish        <= demolish;
+            VER_redirect_pc     <= PCNext;
+            VER_branch          <= EX_branch;
+            VER_predicted_taken <= EX_predicted_taken;
+            VER_early_target    <= EX_early_target;
+            VER_branch_op       <= branch_op;
+            VER_branch_x        <= branch_x;
+            VER_branch_y        <= branch_y;
+            VER_branch_xs       <= branch_xs;
+            VER_branch_ys       <= branch_ys;
+            VER_branch_mask     <= branch_mask;
+            VER_pht_idx         <= EX_pht_idx;
+            VER_pht_val         <= EX_pht_val;
 
-            MEM_is_load     <= (GPRsSrc == 3'b001);
+            VER_is_load     <= (GPRsSrc == 3'b001);
 
-            MEM_SPRWrite    <= SPRWrite;
-            MEM_SPRSrc      <= SPRSrc;
-            MEM_spr_target_sel <= spr_target_sel;
+            VER_SPRWrite    <= SPRWrite;
+            VER_SPRSrc      <= SPRSrc;
+            VER_spr_target_sel <= spr_target_sel;
             //Active is kinda a weird word, looks kinda strange
-            MEM_rx0_val     <= FWD_rx0;
-            MEM_spr_result  <= spr_result;
-            MEM_is_call     <= isCallState && (opcode ==6'b111000); //CALL
+            VER_rx0_val     <= FWD_rx0;
+            VER_spr_result  <= spr_result;
+            VER_is_call     <= isCallState && (opcode ==6'b111000); //CALL
 
-            MEM_irq_timer <= timer_interrupt_taken;
-            MEM_irq_key   <= key_interrupt_taken;
+            VER_irq_timer <= timer_interrupt_taken;
+            VER_irq_key   <= key_interrupt_taken;
 
-            MEM_lanes     <= EX_lanes;
-            MEM_base      <= EX_base;
+            VER_lanes     <= EX_lanes;
+            VER_base      <= EX_base;
         end
-    end : MEM_main
+    end : VER_main
 
-    logic [31:0] MEM_vram_addr;
-    assign MEM_vram_addr = {12'b0, MEM_memTarget[19:0]};
+    logic [31:0] VER_vram_addr;
+    assign VER_vram_addr = {12'b0, VER_memTarget[19:0]};
 
     //Moving the memFault from CU to here, because CU runs only in EX and
-    //since im moving mem stuff into MEM this is the only way
+    //since im moving mem stuff into VER this is the only way
     logic  memFault;
-    assign memFault = isMEM_valid && (MEM_memRead || MEM_memWrite) && memViolation;
+    assign memFault = isVER_valid && (VER_memRead || VER_memWrite) && memViolation;
 
-    logic  divFault, MEM_fault; //zeroDiv and memFault can never fire on the same cycle
-    assign divFault = isMEM_valid && MEM_zeroDiv;
-    assign MEM_fault = memFault || divFault;
+    logic  divFault, VER_fault; //zeroDiv and memFault can never fire on the same cycle
+    assign divFault = isVER_valid && VER_zeroDiv;
+    assign VER_fault = memFault || divFault;
 
-    //MMIO cs but basically in MEM
-    logic  MEM_mmio_cs;
-    assign MEM_mmio_cs = (MEM_memTarget[31:8] == 24'hFFFFFF);
-    assign MEM_io_cs   = (MEM_memTarget[31:8] == 24'h101000);
+    //MMIO cs but basically in VER
+    logic  VER_mmio_cs;
+    assign VER_mmio_cs = (VER_memTarget[31:8] == 24'hFFFFFF);
+    assign VER_io_cs   = (VER_memTarget[31:8] == 24'h101000);
 
     //Well well well its that time when D_mem_rdy is finally alive
     logic  D_mem_rdy;
@@ -1062,20 +1073,20 @@ module CORE(
     assign mdsx_banked = (EX_IR_2[26:23] == 4'b0000);
 
     logic  mdsx_mem_hit, mdsx_kwb_hit;
-    assign mdsx_mem_hit = isMEM_valid && MEM_gpr_write && (MEM_gpr_dest[7:3] == EX_IR_2[26:22]) &&
-                          (!mdsx_banked || MEM_kernelMode == EX_kernel_mode);
+    assign mdsx_mem_hit = isVER_valid && VER_gpr_write && (VER_gpr_dest[7:3] == EX_IR_2[26:22]) &&
+                          (!mdsx_banked || VER_kernelMode == EX_kernel_mode);
     assign mdsx_kwb_hit = isWB_valid && WB_gpr_write && mdsx_banked && WB_kernelMode && EX_kernel_mode &&
                           (WB_gpr_dest[7:3] == EX_IR_2[26:22]);
 
     logic  [31:0] mdsx_reg;
-    assign mdsx_reg = (mdsx_banked && EX_kernel_mode) ? (EX_IR_2[22] ? KGPR1 : KGPR0) : ID_rx2_val;
+    assign mdsx_reg = (mdsx_banked && EX_kernel_mode) ? (EX_IR_2[22] ? KGPR1 : KGPR0) : GA_rx2_val;
 
     logic [31:0] mdsx_full;
     logic [1:0]  mdsx_rel;
     always_comb begin
         for (int lane = 0; lane < 4; lane++) begin
-            mdsx_rel = 2'(lane) - MEM_base;
-            if (mdsx_mem_hit && MEM_lanes[lane]) mdsx_full[8*lane +: 8] = MEM_result[8*mdsx_rel +: 8];
+            mdsx_rel = 2'(lane) - VER_base;
+            if (mdsx_mem_hit && VER_lanes[lane]) mdsx_full[8*lane +: 8] = VER_result[8*mdsx_rel +: 8];
             else if (mdsx_kwb_hit && WB_lanes[lane]) mdsx_full[8*lane +: 8] = WB_val_aligned[8*lane +: 8];
             else mdsx_full[8*lane +: 8] = mdsx_reg[8*lane +: 8];
         end
@@ -1085,26 +1096,26 @@ module CORE(
     assign mdsx_data = fwd_slice(EX_IR_2[21:19], mdsx_full);
 
     //Alright so memRead is not quite 1 atm, we've got another hazard here,
-    //since new read at the start of MEM and write at the start of MEM happens
+    //since new read at the start of VER and write at the start of VER happens
     //at the same clock edge, the read seems the old memory, and that's no good.
     //To detect this I check the proximit between read and write if they are
     //not within 4bytes of each other(because of fragmented registers), well
     //nothing happens, but if they are we wait for it to write, and only then
     //read
     logic  store_load_overlap;
-    assign store_load_overlap = isMEM_valid && MEM_memRead && isWB_valid && WB_memWrite &&
-                                ((MEM_memTarget[31:2] == WB_word) ||
-                                (MEM_memTarget[31:2] == WB_word_plus1) ||
-                                (MEM_memTarget[31:2] == WB_word_minus1));
+    assign store_load_overlap = isVER_valid && VER_memRead && isWB_valid && WB_memWrite &&
+                                ((VER_memTarget[31:2] == WB_word) ||
+                                (VER_memTarget[31:2] == WB_word_plus1) ||
+                                (VER_memTarget[31:2] == WB_word_minus1));
 
-    logic  MEM_reread;
+    logic  VER_reread;
     always_ff @(posedge clk or posedge reset) begin
-        if (reset) MEM_reread <= 1'b0;
-        else MEM_reread <= mem_stall;
+        if (reset) VER_reread <= 1'b0;
+        else VER_reread <= mem_stall;
     end
 
 
-    assign mem_stall = isMEM_valid && (MEM_memRead || MEM_memWrite) && !(D_mem_rdy && !(store_load_overlap && MEM_vram_cs && !MEM_reread)); //Writes are gates by memViolation anyways
+    assign mem_stall = isVER_valid && (VER_memRead || VER_memWrite) && !(D_mem_rdy && !(store_load_overlap && VER_vram_cs && !VER_reread)); //Writes are gates by memViolation anyways
 
     logic [31:0] mem_read_data;
     logic [31:0] vram_data_read;
@@ -1112,7 +1123,7 @@ module CORE(
     //Big endian
     logic [31:0] vram_data_sized;
     always_comb begin
-        unique case (MEM_mem_size)
+        unique case (VER_mem_size)
             2'b00: begin
                 vram_data_sized = {24'h0, vram_data_read[31:24]};
             end
@@ -1126,35 +1137,35 @@ module CORE(
     end
 
     always_comb begin
-        if (MEM_ram_cs)
+        if (VER_ram_cs)
             mem_read_data = ram_data_out;
-        else if (MEM_io_cs)
+        else if (VER_io_cs)
             mem_read_data = io_data_out;
-        else if (MEM_vram_cs)
+        else if (VER_vram_cs)
             mem_read_data = vram_data_sized;
         else
             mem_read_data = 32'd0;
     end
 
-    logic [1:0]  MEM_base;
-    logic [3:0]  MEM_lanes;
+    logic [1:0]  VER_base;
+    logic [3:0]  VER_lanes;
     assign EX_lanes   = fwd_lanes(gpr_rw0_sel[2:0]);
     assign EX_base    = frag_base(gpr_rw0_sel[2:0]);
 
     //Specifically for mul, actually no - not anymore for loads too, actually
     //no not even for mul anymore, specifically for loads now
-    logic [31:0] MEM_val;
+    logic [31:0] VER_val;
     always_comb begin
-        if (MEM_is_load)
-            MEM_val = mem_read_data;
+        if (VER_is_load)
+            VER_val = mem_read_data;
         else
-            MEM_val = MEM_result;
+            VER_val = VER_result;
     end
 
     //== Comparator ==//
     //Moved the compare module from ALU to here, for 1) shorten critical path,
     //2) convinience
-    //Now I moved it from EX to MEM reason above
+    //Now I moved it from EX to VER reason above
     logic [31:0] branch_x, branch_y;
     logic        branch_eq, branch_less_unsigned, branch_less_signed;
 
@@ -1193,14 +1204,14 @@ module CORE(
     assign branch_xs = br_sext(rx0[2:0], branch_x);
     assign branch_ys = (branch_op[4]) ? branch_imm19 : br_sext(rx1[2:0], FWD_rx1);
 
-    assign branch_eq = (((MEM_branch_x ^ MEM_branch_y) & MEM_branch_mask) == 32'b0);
-    assign branch_less_unsigned = (MEM_branch_x < MEM_branch_y);
-    assign branch_less_signed = ($signed(MEM_branch_xs) < $signed(MEM_branch_ys));
+    assign branch_eq = (((VER_branch_x ^ VER_branch_y) & VER_branch_mask) == 32'b0);
+    assign branch_less_unsigned = (VER_branch_x < VER_branch_y);
+    assign branch_less_signed = ($signed(VER_branch_xs) < $signed(VER_branch_ys));
 
     logic branch_cond_met;
 
     always_comb begin : Comparator
-        case (MEM_branch_op)
+        case (VER_branch_op)
             5'b00001, 5'b10001: branch_cond_met = branch_eq;  //BEQ/IBEQ
             5'b00010, 5'b10010: branch_cond_met = !branch_eq; //BNE/IBNE
 
@@ -1218,13 +1229,13 @@ module CORE(
         endcase
     end : Comparator
 
-    logic  [31:0] MEM_redirect_target;
+    logic  [31:0] VER_redirect_target;
     //Veril***r compains fsr idk
-    logic  MEM_mispredict /*verilator public_flat_rd*/;
-    logic  MEM_redirect;
-    assign MEM_mispredict = isMEM_valid && MEM_branch && !MEM_irq && (branch_cond_met != MEM_predicted_taken);
-    assign MEM_redirect   = D_miss_ff || MEM_mispredict || (isMEM_valid && MEM_demolish);
-    assign MEM_redirect_target = D_miss_ff ? WB_PC : MEM_demolish ? MEM_redirect_pc : (branch_cond_met ? MEM_early_target : MEM_PCNext);
+    logic  VER_mispredict /*verilator public_flat_rd*/;
+    logic  VER_redirect;
+    assign VER_mispredict = isVER_valid && VER_branch && !VER_irq && (branch_cond_met != VER_predicted_taken);
+    assign VER_redirect   = D_miss_ff || VER_mispredict || (isVER_valid && VER_demolish);
+    assign VER_redirect_target = D_miss_ff ? WB_PC : VER_demolish ? VER_redirect_pc : (branch_cond_met ? VER_early_target : VER_PCNext);
 
     //== WB(WriteBack) ==//
     logic [31:0] WB_result;
@@ -1246,28 +1257,28 @@ module CORE(
         if (reset) begin
             isWB_valid_ff <= 0;
         end else if (!mem_stall) begin
-            isWB_valid_ff <= isMEM_valid & !MEM_fault;
+            isWB_valid_ff <= isVER_valid & !VER_fault;
         end
     end
 
     always_ff @(posedge clk) begin
         if (!mem_stall) begin
-            WB_PC <= MEM_PC;
-            WB_result<= MEM_val;
-            WB_gpr_dest <= MEM_gpr_dest;
-            WB_gpr_write <= MEM_gpr_write;
-            WB_kernelMode <= MEM_kernelMode;
+            WB_PC <= VER_PC;
+            WB_result<= VER_val;
+            WB_gpr_dest <= VER_gpr_dest;
+            WB_gpr_write <= VER_gpr_write;
+            WB_kernelMode <= VER_kernelMode;
 
-            WB_is_lomul <= MEM_is_lomul;
-            WB_is_himul <= MEM_is_himul;
+            WB_is_lomul <= VER_is_lomul;
+            WB_is_himul <= VER_is_himul;
 
-            WB_memWrite <= MEM_memWrite;
-            WB_word       <= MEM_memTarget[31:2];
-            WB_word_plus1 <= MEM_memTarget[31:2] + 30'd1;
-            WB_word_minus1<= MEM_memTarget[31:2] - 30'd1;
+            WB_memWrite <= VER_memWrite;
+            WB_word       <= VER_memTarget[31:2];
+            WB_word_plus1 <= VER_memTarget[31:2] + 30'd1;
+            WB_word_minus1<= VER_memTarget[31:2] - 30'd1;
 
-            WB_aligned  <= MEM_aligned;
-            WB_lanes    <= fwd_lanes(MEM_gpr_dest[2:0]);
+            WB_aligned  <= VER_aligned;
+            WB_lanes    <= fwd_lanes(VER_gpr_dest[2:0]);
         end
     end
 
@@ -1375,9 +1386,9 @@ module CORE(
     logic  wb_writes_array;
     assign wb_writes_array = isWB_valid && WB_gpr_write &&
                              !(WB_gpr_dest[7:3] <= 5'd1 && WB_kernelMode);
-    assign ID_wb_hit0 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx0[7:3]);
-    assign ID_wb_hit1 = wb_writes_array && (WB_gpr_dest[7:3] == ID_rx1[7:3]);
-    assign ID_wb_hit2 = wb_writes_array && (WB_gpr_dest[7:3] == rr2_sel);
+    assign GA_wb_hit0 = wb_writes_array && (WB_gpr_dest[7:3] == GA_rx0[7:3]);
+    assign GA_wb_hit1 = wb_writes_array && (WB_gpr_dest[7:3] == GA_rx1[7:3]);
+    assign GA_wb_hit2 = wb_writes_array && (WB_gpr_dest[7:3] == rr2_sel);
 
     //Do once
     logic [31:0] WB_val_aligned;
@@ -1386,9 +1397,9 @@ module CORE(
     //Apply several times
     always_comb begin
         for (integer lane = 0; lane < 4; lane++) begin
-            ID_rx0_val[8*lane +: 8] = (ID_wb_hit0 && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : GPRs_data_out0[8*lane +: 8];
-            ID_rx1_val[8*lane +: 8] = (ID_wb_hit1 && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : GPRs_data_out1[8*lane +: 8];
-            ID_rx2_val[8*lane +: 8] = (ID_wb_hit2 && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : GPRs_data_out2[8*lane +: 8];
+            GA_rx0_val[8*lane +: 8] = (GA_wb_hit0 && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : GPRs_data_out0[8*lane +: 8];
+            GA_rx1_val[8*lane +: 8] = (GA_wb_hit1 && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : GPRs_data_out1[8*lane +: 8];
+            GA_rx2_val[8*lane +: 8] = (GA_wb_hit2 && WB_lanes[lane]) ? WB_val_aligned[8*lane +: 8] : GPRs_data_out2[8*lane +: 8];
         end
     end
 
@@ -1424,21 +1435,21 @@ module CORE(
         endcase
     endfunction
 
-    assign FWD_rx0 = fwd_mux(EX_from_mem0, EX_mem_byte0, EX_fwd_src0, MEM_result, EX_gpr0);
-    assign FWD_rx1 = fwd_mux(EX_from_mem1, EX_mem_byte1, EX_fwd_src1, MEM_result, EX_gpr1);
-    assign FWD_rxi = fwd_mux(EX_from_mem2, EX_mem_byte2, EX_fwd_src2, MEM_result, EX_gpr2);
+    assign FWD_rx0 = fwd_mux(EX_from_mem0, EX_mem_byte0, EX_fwd_src0, VER_result, EX_gpr0);
+    assign FWD_rx1 = fwd_mux(EX_from_mem1, EX_mem_byte1, EX_fwd_src1, VER_result, EX_gpr1);
+    assign FWD_rxi = fwd_mux(EX_from_mem2, EX_mem_byte2, EX_fwd_src2, VER_result, EX_gpr2);
 
     //Declarations
     logic [31:0] EPC;
-    logic [31:0] EX_EPC, MEM_EPC_val;
-    logic        MEM_EPC_write;
-    assign MEM_EPC_write = isMEM_valid && MEM_EPCWrite;
-    assign MEM_EPC_val   = MEM_irq ? MEM_PC : MEM_PCNext;
-    assign EX_EPC        = MEM_EPC_write ? MEM_EPC_val : EPC;
+    logic [31:0] EX_EPC, VER_EPC_val;
+    logic        VER_EPC_write;
+    assign VER_EPC_write = isVER_valid && VER_EPCWrite;
+    assign VER_EPC_val   = VER_irq ? VER_PC : VER_PCNext;
+    assign EX_EPC        = VER_EPC_write ? VER_EPC_val : EPC;
 
     logic  [31:0] SP, GP, KGP, KSP, LR, KScratch;
     logic  [31:0] EX_LR;
-    assign EX_LR  = MEM_LR_write  ? MEM_LR_val : LR;
+    assign EX_LR  = VER_LR_write  ? VER_LR_val : LR;
 
     logic [31:0] PCNext;
     logic [31:0] SPRNext;
@@ -1539,9 +1550,9 @@ module CORE(
         endcase
     end
     assign memTarget16 = (opcode == 6'b000000) ? idx16[14:5] : oth16[14:5];
-    assign memViolation =   (!MEM_kernelMode && (MEM_memRead || MEM_memWrite) &&
-                            ((MEM_memTarget < memBase) ||
-                            (33'(MEM_memTarget) >= memEnd)));
+    assign memViolation =   (!VER_kernelMode && (VER_memRead || VER_memWrite) &&
+                            ((VER_memTarget < memBase) ||
+                            (33'(VER_memTarget) >= memEnd)));
 
     assign spr_target_sel =
         (opcode == 6'b101000 || opcode == 6'b101001 || opcode == 6'b101010 ||
@@ -1556,7 +1567,7 @@ module CORE(
             default: spr_reg = 32'd0; // reserved
         endcase
     end
-    assign SelectedSPR = (EX_spr_hit && isMEM_valid) ? MEM_LR_val : spr_reg;
+    assign SelectedSPR = (EX_spr_hit && isVER_valid) ? VER_LR_val : spr_reg;
 
     logic [31:0] spr_other;
     always_comb begin
@@ -1596,15 +1607,15 @@ module CORE(
         endcase
     end : PC_MUX
 
-    assign MEM_activeSP = MEM_kernelMode ? KSP : SP;
+    assign VER_activeSP = VER_kernelMode ? KSP : SP;
 
     //This literally can be a 2:1 mux im dumb
-    assign SPRNext = (MEM_SPRSrc == 3'b011) ? MEM_rx0_val : MEM_spr_result; //SPRSET, else PUSH/POP/SPRADD/SPRSUB
+    assign SPRNext = (VER_SPRSrc == 3'b011) ? VER_rx0_val : VER_spr_result; //SPRSET, else PUSH/POP/SPRADD/SPRSUB
 
-    logic  MEM_LR_write;
-    logic  [31:0] MEM_LR_val;
-    assign MEM_LR_write  = isMEM_valid && (MEM_is_call || (MEM_SPRWrite && (MEM_spr_target_sel == 2'b01)));
-    assign MEM_LR_val    = MEM_is_call ? MEM_PCNext : SPRNext;
+    logic  VER_LR_write;
+    logic  [31:0] VER_LR_val;
+    assign VER_LR_write  = isVER_valid && (VER_is_call || (VER_SPRWrite && (VER_spr_target_sel == 2'b01)));
+    assign VER_LR_val    = VER_is_call ? VER_PCNext : SPRNext;
 
     always_ff @(posedge clk or posedge reset) begin : SPR_ffs
         if (reset) begin
@@ -1623,25 +1634,25 @@ module CORE(
         end else begin
             mod_state <= ENC_10K_ModArr;
 
-            if (MEM_fault) begin
-                EPC <= MEM_PC;
+            if (VER_fault) begin
+                EPC <= VER_PC;
             end else begin
-                if (isMEM_valid && !mem_stall) begin //Its now MEM bounded because, again, mode switch happens in MEM
-                    if (MEM_EPCWrite) EPC <= MEM_irq ? MEM_PC : MEM_PCNext;
+                if (isVER_valid && !mem_stall) begin //Its now VER bounded because, again, mode switch happens in VER
+                    if (VER_EPCWrite) EPC <= VER_irq ? VER_PC : VER_PCNext;
 
-                    if (MEM_is_call) begin
-                        LR <= MEM_PCNext;
+                    if (VER_is_call) begin
+                        LR <= VER_PCNext;
                     end
 
-                    if (MEM_SPRWrite) begin
-                        unique case (MEM_spr_target_sel)
+                    if (VER_SPRWrite) begin
+                        unique case (VER_spr_target_sel)
                             2'b00: begin
-                                if (MEM_kernelMode) KSP <= SPRNext;
+                                if (VER_kernelMode) KSP <= SPRNext;
                                 else SP <= SPRNext;
                             end
                             2'b01: LR <= SPRNext;
                             2'b10: begin
-                                if (MEM_kernelMode) KGP <= SPRNext;
+                                if (VER_kernelMode) KGP <= SPRNext;
                                 else GP <= SPRNext;
                             end
                             default: ; // reserved for later
@@ -1649,16 +1660,16 @@ module CORE(
                     end
                 end
 
-                if (isMEM_valid && !mem_stall) begin //Moved to MEM from EX
-                    if (MEM_memWrite && MEM_mmio_cs && MEM_kernelMode) begin
-                        unique case (MEM_memTarget[7:0])
-                            8'h04: mmio_timer_reg <= MEM_rx0_val[15:0];
-                            8'h08: memBase        <= MEM_rx0_val;
-                            8'h0C: memLimit       <= MEM_rx0_val;
-                            8'h10: EPC            <= MEM_rx0_val;
-                            8'h14: SP             <= MEM_rx0_val;
-                            8'h18: KSP            <= MEM_rx0_val;
-                            8'h1C: KScratch       <= MEM_rx0_val;
+                if (isVER_valid && !mem_stall) begin //Moved to VER from EX
+                    if (VER_memWrite && VER_mmio_cs && VER_kernelMode) begin
+                        unique case (VER_memTarget[7:0])
+                            8'h04: mmio_timer_reg <= VER_rx0_val[15:0];
+                            8'h08: memBase        <= VER_rx0_val;
+                            8'h0C: memLimit       <= VER_rx0_val;
+                            8'h10: EPC            <= VER_rx0_val;
+                            8'h14: SP             <= VER_rx0_val;
+                            8'h18: KSP            <= VER_rx0_val;
+                            8'h1C: KScratch       <= VER_rx0_val;
                             default: ;
                         endcase
                     end
@@ -1682,18 +1693,18 @@ module CORE(
     // 1MB VRAM        : 0x04000000 - 0x040FFFFF
     // MMIO Registers  : I/O stuff
     always_comb begin
-        MEM_ram_cs  = 0;
-        MEM_vram_cs = 0;
+        VER_ram_cs  = 0;
+        VER_vram_cs = 0;
 
-        if (MEM_memTarget[31:28] == 4'b0) begin //A little optimizations
-            MEM_ram_cs = 1;
+        if (VER_memTarget[31:28] == 4'b0) begin //A little optimizations
+            VER_ram_cs = 1;
         end
-        else if (MEM_memTarget[31:20] == 12'h100) begin
-            MEM_vram_cs = 1;
+        else if (VER_memTarget[31:20] == 12'h100) begin
+            VER_vram_cs = 1;
         end
         //Else memFault, not really actually its either IO_cs or memFault,
-        //I moved IO_cs to MEM because it doesn't really gate anything earlier,
-        //so its fine in MEM, whilst its a lil more complicated for others,
+        //I moved IO_cs to VER because it doesn't really gate anything earlier,
+        //so its fine in VER, whilst its a lil more complicated for others,
         //and they aren't even in critical path so it doesn't matter anyway.
     end
 
@@ -1723,14 +1734,14 @@ module CORE(
 
     logic [31:0] io_data_out;
     always_comb begin
-        unique case (MEM_memTarget[7:0]) //Upper 24bits are checked by chip select, this is just LUT optimization
+        unique case (VER_memTarget[7:0]) //Upper 24bits are checked by chip select, this is just LUT optimization
             8'h00: io_data_out = {24'd0, ENC_10K_KeyIn};
             8'h04: io_data_out = {31'd0, mod_state};
             8'h08: io_data_out = {16'd0, mmio_timer_reg};
             8'h14: io_data_out = SP;
             8'h18: io_data_out = KSP;
             8'h1C: io_data_out = KScratch;
-            8'h20: io_data_out = MEM_activeSP;
+            8'h20: io_data_out = VER_activeSP;
             8'h24: io_data_out = LR;
             default:      io_data_out = 32'd0;
         endcase
@@ -1749,7 +1760,7 @@ module CORE(
         endcase
     end
 
-    //No 3'b001 arm anymore, MEM fixes the load in one cycle later
+    //No 3'b001 arm anymore, VER fixes the load in one cycle later
     always_comb begin : GPRsMUX //thats a good ass feature
         unique case (result_sel)
             3'b000: GPRs_data_in = add_result;
@@ -1771,8 +1782,8 @@ module CORE(
         .current_kernel_mode(EX_kernel_mode),
         .key_in(ENC_10K_KeyIn),
         .isEX_valid(isEX_valid), //Split the check in 2
-        .timer_interrupt_commit(isMEM_valid && MEM_irq_timer),
-        .key_interrupt_commit(isMEM_valid && MEM_irq_key),
+        .timer_interrupt_commit(isVER_valid && VER_irq_timer),
+        .key_interrupt_commit(isVER_valid && VER_irq_key),
         .PCWrite(PCWrite),
         .GPRsWrite(GPRsWrite),
         .EPCWrite(EPCWrite),
@@ -1822,9 +1833,9 @@ module CORE(
         .KernelModeWrite(WB_kernelMode),
         //offset forced to 000 so these come back as the raw 32bit register,
         //the forwarding block above does the slicing after it merges
-        //Again - read in ID
-        .rr0(ID_rx0[7:3]),
-        .rr1(ID_rx1[7:3]), //Natevily base
+        //Again - read in GA
+        .rr0(GA_rx0[7:3]),
+        .rr1(GA_rx1[7:3]), //Natevily base
         .rr2(rr2_sel), //Index selector
         .rw0(WB_gpr_dest),
         .data_in(WB_val),
@@ -1850,13 +1861,13 @@ module CORE(
 
         .Dread_addr(memTarget[27:0]),
         .Dread_even(memTarget16),
-        .D_write_addr(MEM_memTarget[14:0]), //Writes happen in MEM
-        .we(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid),  //memWrite dgaf if mem is ready or not
-        .re(MEM_memRead && !memViolation && MEM_ram_cs && isMEM_valid), //same thing
-        .ram_op(isMEM_valid && MEM_ram_cs && (MEM_memRead || MEM_memWrite)),
+        .D_write_addr(VER_memTarget[14:0]), //Writes happen in VER
+        .we(VER_memWrite && !memViolation && VER_ram_cs && isVER_valid),  //memWrite dgaf if mem is ready or not
+        .re(VER_memRead && !memViolation && VER_ram_cs && isVER_valid), //same thing
+        .ram_op(isVER_valid && VER_ram_cs && (VER_memRead || VER_memWrite)),
 
-        .D_data_in(MEM_ram_data_in),
-        .mem_size(MEM_mem_size),
+        .D_data_in(VER_ram_data_in),
+        .mem_size(VER_mem_size),
 
         .D_data_out(ram_data_out),
         .D_mem_rdy(D_mem_rdy),
@@ -1876,19 +1887,19 @@ module CORE(
 
     VRAM system_vram (
         .clk(clk),
-        .addrRead(stall ? MEM_vram_addr : ({12'b0, memTarget[19:0]})), //memTarget - 0x04000000 but much faster
+        .addrRead(stall ? VER_vram_addr : ({12'b0, memTarget[19:0]})), //memTarget - 0x04000000 but much faster
         .addrWrite(vram_addr),
         .data_in(vram_data_out),
-        .mem_size(MEM_mem_size),
+        .mem_size(VER_mem_size),
         .mem_write(vram_write),
-        .mem_read(stall ? MEM_memRead : memRead),
+        .mem_read(stall ? VER_memRead : memRead),
         .data_out(vram_data_read)
     );
 
     //I would have kept it in the file include, but sim_main(and debug) requires them and
     //it doesn't matte tbh
-    assign vram_addr     = MEM_vram_addr;
-    assign vram_data_out = MEM_ram_data_in;
-    assign vram_write    = MEM_memWrite && MEM_vram_cs && isMEM_valid;
+    assign vram_addr     = VER_vram_addr;
+    assign vram_data_out = VER_ram_data_in;
+    assign vram_write    = VER_memWrite && VER_vram_cs && isVER_valid;
 
 endmodule

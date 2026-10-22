@@ -1,5 +1,5 @@
 [+]Dynamic branch prediction
-[+]Resolve unconditional branching in ID
+[+]Resolve unconditional branching in GA
 [+]Variable sized instructions using branching opcodes with imm28(256MB)
 [+]quick-radix-4 div
 [/]Shared div barrel shifter(LUT optimization)

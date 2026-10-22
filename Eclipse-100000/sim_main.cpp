@@ -39,7 +39,7 @@ static uint64_t g_lost_imiss = 0;
 static uint64_t g_redirects = 0;
 static uint64_t g_faults = 0;
 static constexpr uint64_t FLUSH_PENALTY =
-    3; // MEM_redirect kills IF, ID and EX - measured, not assumed
+    3; // VER_redirect kills IF, GA and EX - measured, not assumed
 
 static inline double current_cpi() {
     return g_retired_instructions
@@ -157,16 +157,16 @@ int main(int argc, char **argv) {
             } else if (!top->rootp->CORE__DOT__I_mem_rdy) {
                 g_lost_imiss++;
             }
-            if (top->rootp->CORE__DOT__MEM_redirect) {
+            if (top->rootp->CORE__DOT__VER_redirect) {
                 g_redirects++;
             }
-            if (top->rootp->CORE__DOT__MEM_fault) {
+            if (top->rootp->CORE__DOT__VER_fault) {
                 g_faults++;
             }
-            if (top->rootp->CORE__DOT__isMEM_valid && top->rootp->CORE__DOT__MEM_branch &&
-                !top->rootp->CORE__DOT__MEM_irq && !top->rootp->CORE__DOT__mem_stall) {
+            if (top->rootp->CORE__DOT__isVER_valid && top->rootp->CORE__DOT__VER_branch &&
+                !top->rootp->CORE__DOT__VER_irq && !top->rootp->CORE__DOT__mem_stall) {
                 g_cond_branches++;
-                if (top->rootp->CORE__DOT__MEM_mispredict) {
+                if (top->rootp->CORE__DOT__VER_mispredict) {
                     g_branch_mispredicts++;
                 }
             }

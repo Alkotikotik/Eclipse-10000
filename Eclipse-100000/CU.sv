@@ -123,7 +123,7 @@ module CU(
             2'b11: begin // conditional branch default
                 PCSrc = 4'b0000;
                 //The CU no longer decides whether branch was taken, bc its
-                //now in MEM
+                //now in VER
             end
             2'b01: begin // LOAD-imm
                 if (opcode == 6'b010001) begin

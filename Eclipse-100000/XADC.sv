@@ -1,6 +1,6 @@
 /* verilator lint_off UNUSEDSIGNAL */
 /* verilator lint_off UNUSEDPARAM */
-module XADC #(parameter [15:0] INIT_40 = 0, INIT_41 = 0, INIT_42 = 0) (
+module XADC #(parameter [15:0] INIT_40 = 0, INIT_41 = 0, INIT_42 = 0, INIT_48 = 0) (
     //Unfortunately verilator doesn't accept XADC so I gotta hand write it
     input               DCLK, RESET, DEN, DWE,
     input        [6:0]  DADDR,

@@ -127,7 +127,7 @@ module L1_D (
             even_idx_lat <= 10'h0;
             odd_idx_lat <= 10'h0;
         end else begin
-            if (advance) begin //latch em bc BRAM req starts at EX and arrives at the start of MEM
+            if (advance) begin //latch em bc BRAM req starts at EX and arrives at the start of VER
                 Dread_addr_lat <= Dread_addr;
                 even_idx_lat <= Dread_even;
                 odd_idx_lat <= Dread_addr[14:5];

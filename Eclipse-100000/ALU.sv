@@ -28,7 +28,7 @@ module ALU (
     //== DSP ==// 
     //DSP is kinda sick so I just wanna highlight it, its basically a built-in
     //board multipliers.
-    //Internal DSP register to multi-cycle mul between EX and MEM which
+    //Internal DSP register to multi-cycle mul between EX and VER which
     //supposedely should shorten a critical path according to my assumptions
     //Based on vivado's report
     logic [31:0] mul_x, mul_y;
@@ -48,7 +48,7 @@ module ALU (
         /* verilator lint_off UNUSEDSIGNAL */ 
         //mp - short for mul product, each DSP has its own
         //mpc - mul product cascade - PCOUT
-        //mp_lo flop at the end of MEM that holding low 17bits
+        //mp_lo flop at the end of VER that holding low 17bits
         logic [47:0] mp0, mp1, mp2, mp3, mpc0, mpc2;
         /* verilator lint_on UNUSEDSIGNAL */
         logic [16:0] mp0_lo, mp2_lo;
