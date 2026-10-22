@@ -9,6 +9,7 @@ module L1_D (
     input logic [14:0] D_write_addr,
     input logic we, //EMI changed me - now im writing unreadable code...
     input logic re, //read enable
+    input logic ram_op,
 
     input logic [31:0] D_data_in,
     input logic [1:0]  mem_size,
@@ -76,8 +77,12 @@ module L1_D (
     logic [12:0]  m_cur_tag, m_hi_tag, tag_rE, tag_rO;
     logic m_lo, pend, busy;
     logic loE_eq, loO_eq, hiE_eq, hiO_eq; //that looks funny
-    logic [143:0] D_data_read, D_data_read_n, D_read_E, D_read_O, rd_data;
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [143:0] D_data_read, D_data_read_n;
+    /* verilator lint_on UNUSEDSIGNAL */
+    logic [143:0] D_read_E, D_read_O, rd_data;
     logic [4:0]   pos;
+    logic [1:0]   ld_sh;
     logic [9:0]   even_idx, odd_idx;
     logic [10:0]  refill_row;
     logic rd_par;
@@ -318,13 +323,13 @@ module L1_D (
         //if it reaches into hi, I gotta check for hi miss too
         overlap = {1'b0, Dread_addr_lat[3:0]} + (5'd1 << mem_size) > 16;
         for (int i = 0; i < 4; i++) begin
-            pos = {1'b0, Dread_addr_lat[3:0]} + 5'(i);
-            if (pos[4]) begin //>0xF check, bc if it is, it overlaps and I gotta read from hi, which is opposite of lo
-                rd_data = D_data_read_n;
+            pos = {1'b0, Dread_addr_lat[3:0]} + 5'(i) - {3'b0, ld_sh};
+            if (pos[4] ^ rd_par) begin //>0xF check, bc if it is, it overlaps and I gotta read from hi, which is opposite of lo
+                rd_data = D_read_O;
             end else begin
-                rd_data = D_data_read;
+                rd_data = D_read_E;
             end
-            D_data_out[31 - 8*i -: 8] = rd_data[36*pos[3:2] + 9*pos[1:0] +: 8]; //-: 8bits before ofc, bc big endian
+            D_data_out[31 - 8*i -: 8] = (2'(i) >= ld_sh) ? rd_data[36*pos[3:2] + 9*pos[1:0] +: 8] : 8'h0; //-: 8bits before ofc, bc big endian
         end
         case (mem_size)
             2'b10, 2'b11: begin
@@ -390,6 +395,7 @@ module L1_D (
     assign busy = Dreq_EMI || pend;
     assign hazard = (st_v && ((st_e_wr && st_e_idx == even_idx_lat) || (st_o_wr && st_o_idx == odd_idx_lat)))
                  || (last_e_wr && last_e_idx == even_idx_lat) || (last_o_wr && last_o_idx == odd_idx_lat);
-    assign mem_rdy = (!re && !we) || (!busy && !hazard && rst_clr == 0);
+    assign ld_sh = mem_size[1] ? 2'd0 : {1'b1, !mem_size[0]};
+    assign mem_rdy = !ram_op || (!busy && !hazard && rst_clr == 0);
     assign Dreq = refill_req || drain; //There would be other Dreqs causes here
 endmodule

@@ -75,8 +75,12 @@ module CORE(
     assign IF_PC_tofetch = I_kill ? ID_PC[27:0]
         : IF_take ? IF_PC_plus4[27:0] : IF_PC[27:0];
 
-    assign IF_even_tofetch = I_kill ? even_row(ID_PC[13:4])
-        : IF_take ? even_row(IF_PC_plus4[13:4]) : even_row(IF_PC[13:4]);
+    (* keep = "true" *) logic [8:0] IF_even_kill, IF_even_take, IF_even_hold;
+    assign IF_even_kill = even_row(ID_PC[13:4]);
+    assign IF_even_take = even_row(IF_PC_plus4[13:4]);
+    assign IF_even_hold = even_row(IF_PC[13:4]);
+    assign IF_even_tofetch = I_kill ? IF_even_kill
+        : IF_take ? IF_even_take : IF_even_hold;
 
     assign IF_take = !stall && !bubble && I_mem_rdy && !IF_redir;
 
@@ -1106,19 +1110,16 @@ module CORE(
     logic [31:0] vram_data_read;
 
     //Big endian
-    logic [31:0] ram_data_sized, vram_data_sized;
+    logic [31:0] vram_data_sized;
     always_comb begin
         unique case (MEM_mem_size)
             2'b00: begin
-                ram_data_sized  = {24'h0, ram_data_out[31:24]};
                 vram_data_sized = {24'h0, vram_data_read[31:24]};
             end
             2'b01: begin
-                ram_data_sized  = {16'h0, ram_data_out[31:16]};
                 vram_data_sized = {16'h0, vram_data_read[31:16]};
             end
             default: begin //2'b10
-                ram_data_sized  = ram_data_out;
                 vram_data_sized = vram_data_read;
             end
         endcase
@@ -1126,7 +1127,7 @@ module CORE(
 
     always_comb begin
         if (MEM_ram_cs)
-            mem_read_data = ram_data_sized;
+            mem_read_data = ram_data_out;
         else if (MEM_io_cs)
             mem_read_data = io_data_out;
         else if (MEM_vram_cs)
@@ -1852,6 +1853,7 @@ module CORE(
         .D_write_addr(MEM_memTarget[14:0]), //Writes happen in MEM
         .we(MEM_memWrite && !memViolation && MEM_ram_cs && isMEM_valid),  //memWrite dgaf if mem is ready or not
         .re(MEM_memRead && !memViolation && MEM_ram_cs && isMEM_valid), //same thing
+        .ram_op(isMEM_valid && MEM_ram_cs && (MEM_memRead || MEM_memWrite)),
 
         .D_data_in(MEM_ram_data_in),
         .mem_size(MEM_mem_size),

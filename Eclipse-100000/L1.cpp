@@ -126,6 +126,7 @@ int main(int argc, char **argv) {
     auto set_mem = [&](const Op &op) { // MEM-stage inputs, killed like CORE's isMEM_valid on a replay
         top->re = op.valid && !op.store && !top->D_miss_ff;
         top->we = op.valid && op.store && !top->D_miss_ff;
+        top->ram_op = op.valid && !top->D_miss_ff;
         top->D_write_addr = op.addr;
         top->mem_size = op.size;
         top->D_data_in = op.data;
@@ -282,9 +283,8 @@ int main(int argc, char **argv) {
                 stores++;
             } else {
                 if (unconf.bad && d_errors++ < 10) {
-                    uint32_t keep = op.size == 2 ? 0xFFFFFFFF : op.size == 1 ? 0xFFFF0000 : 0xFF000000;
                     printf("cyc %lu: load u%d 0x%07x got 0x%08x want 0x%08x\n", cyc - 1, 8 << op.size,
-                           op.addr, unconf.got, cpu_word(op.addr) & keep);
+                           op.addr, unconf.got, cpu_word(op.addr) >> (op.size == 2 ? 0 : op.size == 1 ? 16 : 24));
                 }
                 loads++;
             }
@@ -303,9 +303,9 @@ int main(int argc, char **argv) {
         if (!cur.valid || top->D_mem_rdy) {
             if (cur.valid) {
                 // CORE keeps the top 1/2/4 bytes (ram_data_sized), so only those have to be right
-                uint32_t keep = cur.size == 2 ? 0xFFFFFFFF : cur.size == 1 ? 0xFFFF0000 : 0xFF000000;
-                unconf = {cur, true, !cur.store && (top->D_data_out & keep) != (cpu_word(cur.addr) & keep),
-                          d_stall != 0, top->D_data_out & keep};
+                uint32_t want = cpu_word(cur.addr) >> (cur.size == 2 ? 0 : cur.size == 1 ? 16 : 24);
+                unconf = {cur, true, !cur.store && top->D_data_out != want,
+                          d_stall != 0, top->D_data_out};
             }
             d_stall = 0;
             top->D_advance = 1;

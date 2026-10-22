@@ -20,6 +20,7 @@ module L1 (
     input logic [14:0] D_write_addr,
     input logic we,
     input logic re,
+    input logic ram_op,
 
     input logic [31:0] D_data_in,
     input logic [1:0]  mem_size,
@@ -104,6 +105,7 @@ module L1 (
         .D_write_addr(D_write_addr),
         .we(we),
         .re(re),
+        .ram_op(ram_op),
 
         .D_data_in(D_data_in),
         .mem_size(mem_size),
