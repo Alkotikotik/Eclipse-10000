@@ -65,7 +65,6 @@ module CORE(
     endfunction
     logic I_mem_rdy, I_miss_ff, I_took_ff, I_kill;
 
-    //Just a neat little bit trick to get rid of IF_PC_plus(4/8)
     assign IF_PC_plus4 = IF_PC + 32'd4;
     assign IF_PC_plus8 = IF_PC + 32'd8;
     assign IF_PC_plus4_or8 = (IF_64 || IF_branch) ? IF_PC_plus8 : IF_PC_plus4;
@@ -74,9 +73,19 @@ module CORE(
     assign IF_jump = instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000 || instr_fetch_data[31:26] == 6'b010000 || instr_fetch_data[31:26] == 6'b111101 || IF_predicted_taken;
     assign IF_PC_next = IF_jump ? IF_redirect_target : IF_PC_plus4_or8;
 
-    //Change on memfaults, redirects, stalls etc
-    assign IF_PC_tofetch = I_kill ? GA_PC[27:0]
-        : IF_take ? IF_PC_plus4[27:0] : IF_PC[27:0];
+    //Either fetch next seq, or next predicted branch or stall or kill on miss
+    always_comb begin
+        if (BTB_hit) begin
+            unique case (BTB_read[35:34])
+                2'b01: IF_PC_tofetch = BTB_read[25:0]; //JMP/CALL
+                //2'b10: IF_PC_tofetch = RAS top
+                2'b11: IF_PC_tofetch = pht_out[1] : BTB_read[25:0] ? IF_PC_plus8;
+                default: IF_PC_tofetch = 26'hdead67; //theoretically unreachable
+            endcase
+        end else begin
+            IF_PC_tofetch = I_kill ? GA_PC[27:0] : IF_take ? IF_PC_plus4[27:0] : IF_PC[27:0];
+        end
+    end
 
     //Alright so to optimize critical path I had to basically fetch IF_PC
     //+ 8 every cycle no matter what. That doesn't touch regular branches
@@ -234,19 +243,40 @@ module CORE(
     //I implement it using BRAM36 with encoding as follows:
     //2bits kind(very kind), 8bits tag(aka PC[18:11]), 26bits target.
     //kind is: 00 - empty, 01 - JMP/CALL, 10 - RET, 11 - fused cond
-    //Regarding RETs i've got a really good idea, more on that later.
 
     (* ram_style = "block" *) logic [1023:0] BTB [35:0]; //up to 1024branch instructions stored
-
+    initial begin
+        for (integer i = 0; i < 1024; i = i + 1) BTB[i] = 36'd0;
+    end
     logic [35:0] BTB_read;
     always_ff @(posedge clk) begin
         BTB_read <= BTB[IF_PC_tofetch[10:2]];
     end
 
+    logic  BTB_hit;
+    assign BTB_hit = (BTB_read == IF_PC_tofetch[18:11]) && BTB[35:34] != 00; //00 is for startup mainly
+
+    always_ff @(posedge clk) begin
+        if (!BTB_hit || !BTB_www) begin
+            //512KB aliases are simply cought by the mispredict machinery
+            BTB[IF_PC[11:2]] <= {2'b01, IF_PC[20:12], instr_fetch_data[25:0]};
+        end
+    end
+
+    logic BTB_www;
+    always_comb begin
+        unique case (BTB[35:34])
+            2'b01: BTB_www = (instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000) && (instr_fetch_data[25:0] == BTB[25:0]);
+            2'b10: BTB_www =  instr_fetch_data[31:26] == 6'b010000; //rest in EX
+            2'b11: BTB_www = (instr_fetch_data[31:26] == 6'b110000) && (IF_IR_2 == BTB_read[25:0]);
+            default: BTB_www <= 1'b0; //startup again
+        endcase
+
+    end
 
     //== That looks nice ==//
     //== Anyways GA(Gather) stage ==//
-    logic [31:0] GA_PC, GA_IR; //Each stage gets into own IR and PC
+    logic [31:0] GA_PC, GA_IR; //Each stage gets its own IR and PC
     logic [31:0] GA_early_target;
     logic [13:0] GA_pht_idx;
     logic [1:0]  GA_pht_val;
