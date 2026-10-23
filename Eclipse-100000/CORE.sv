@@ -74,17 +74,21 @@ module CORE(
     assign IF_PC_next = IF_jump ? IF_redirect_target : IF_PC_plus4_or8;
 
     //Either fetch next seq, or next predicted branch or stall or kill on miss
+    logic [27:0] eff_PC_next;
     always_comb begin
         if (BTB_hit) begin
             unique case (BTB_read[35:34])
-                2'b01: IF_PC_tofetch = BTB_read[25:0]; //JMP/CALL
-                //2'b10: IF_PC_tofetch = RAS top
-                2'b11: IF_PC_tofetch = pht_out[1] : BTB_read[25:0] ? IF_PC_plus8;
-                default: IF_PC_tofetch = 26'hdead67; //theoretically unreachable
+                2'b01: eff_PC_next = {BTB_read[25:0], 2'b00}; //JMP/CALL
+                //2'b10: eff_PC_next = RAS top
+                2'b10: eff_PC_next = IF_PC_plus4[27:0];
+                2'b11: eff_PC_next = pht_out[1] ? {BTB_read[25:0], 2'b00} : IF_PC_plus8[27:0];
+                default: eff_PC_next = 28'hdead67; //theoretically unreachable
             endcase
         end else begin
-            IF_PC_tofetch = I_kill ? GA_PC[27:0] : IF_take ? IF_PC_plus4[27:0] : IF_PC[27:0];
+            eff_PC_next = IF_PC_plus4[27:0];
         end
+        //Kill, or move further, or stall
+        IF_PC_tofetch = I_kill ? GA_PC[27:0] : IF_take ? eff_PC_next : IF_PC[27:0];
     end
 
     //Alright so to optimize critical path I had to basically fetch IF_PC
@@ -94,7 +98,7 @@ module CORE(
     //however a BTB or whatever its called should fix it.
     (* keep = "true" *) logic [8:0] IF_even_kill, IF_even_take, IF_even_hold;
     assign IF_even_kill = even_row(GA_PC[13:4]);
-    assign IF_even_take = even_row(IF_PC_plus4[13:4]);
+    assign IF_even_take = even_row(eff_PC_next[13:4]);
     assign IF_even_hold = even_row(IF_PC[13:4]);
     assign IF_even_tofetch = I_kill ? IF_even_kill
         : IF_take ? IF_even_take : IF_even_hold;
@@ -106,8 +110,8 @@ module CORE(
             IF_redir <= 1'b0;
             IF_skip  <= 1'b0;
         end else begin
-            IF_redir <= (IF_take && IF_jump && !I_kill) || VER_fault || VER_redirect;
-            IF_skip  <= IF_take && (IF_64 || IF_branch) && !VER_fault && !VER_redirect && !I_kill;
+            IF_redir <= (IF_take && IF_mispred && !I_kill) || VER_fault || VER_redirect;
+            IF_skip  <= IF_take && (IF_64 || IF_branch) && !BTB_pred && !VER_fault && !VER_redirect && !I_kill;
         end
     end : IF_window
 
@@ -244,34 +248,63 @@ module CORE(
     //2bits kind(very kind), 8bits tag(aka PC[18:11]), 26bits target.
     //kind is: 00 - empty, 01 - JMP/CALL, 10 - RET, 11 - fused cond
 
-    (* ram_style = "block" *) logic [1023:0] BTB [35:0]; //up to 1024branch instructions stored
+    (* ram_style = "block" *) logic [35:0] BTB [1023:0]; //up to 1024branch instructions stored
     initial begin
         for (integer i = 0; i < 1024; i = i + 1) BTB[i] = 36'd0;
     end
     logic [35:0] BTB_read;
     always_ff @(posedge clk) begin
-        BTB_read <= BTB[IF_PC_tofetch[10:2]];
+        BTB_read <= BTB[IF_PC_tofetch[11:2]];
     end
 
-    logic  BTB_hit;
-    assign BTB_hit = (BTB_read == IF_PC_tofetch[18:11]) && BTB[35:34] != 00; //00 is for startup mainly
+    logic  BTB_hit, BTB_pred, BTB_tgt_ok, BTB_we, BTB_we_ff, IF_mispred;
+    logic [25:0] BTB_tgt;
+    logic [9:0]  BTB_widx;
+    logic [35:0] BTB_wdata;
+    logic [1:0] very_kind;
+
+    always_comb begin
+        BTB_hit = (BTB_read[33:26] == IF_PC[19:12]) && BTB_read[35:34] != 2'b00; //00 is for startup mainly
+        BTB_pred = BTB_hit && BTB_read[34];
+
+        BTB_tgt = IF_redirect_target[27:2];
+        BTB_tgt_ok = BTB_read[25:0] == BTB_tgt;
+    end
 
     always_ff @(posedge clk) begin
-        if (!BTB_hit || !BTB_www) begin
-            //512KB aliases are simply cought by the mispredict machinery
-            BTB[IF_PC[11:2]] <= {2'b01, IF_PC[20:12], instr_fetch_data[25:0]};
+        if (BTB_we_ff) begin
+            //512KB aliases are simply cought by the mispredict machinery later
+            BTB[BTB_widx] <= BTB_wdata;
         end
+    end
+
+    //Those seeminignly useless signals are mainly for timing btw.
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            BTB_we_ff <= 1'b0;
+        end else begin
+            BTB_we_ff <= BTB_we;
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        BTB_widx  <= IF_PC[11:2];
+        BTB_wdata <= {very_kind, IF_PC[19:12], BTB_tgt};
     end
 
     logic BTB_www;
     always_comb begin
-        unique case (BTB[35:34])
-            2'b01: BTB_www = (instr_fetch_data[31:26] == 6'b111111 || instr_fetch_data[31:26] == 6'b111000) && (instr_fetch_data[25:0] == BTB[25:0]);
-            2'b10: BTB_www =  instr_fetch_data[31:26] == 6'b010000; //rest in EX
-            2'b11: BTB_www = (instr_fetch_data[31:26] == 6'b110000) && (IF_IR_2 == BTB_read[25:0]);
-            default: BTB_www <= 1'b0; //startup again
+        unique case (BTB_read[35:34])
+            2'b01: BTB_www = very_kind == 2'b01 && BTB_tgt_ok;
+            2'b10: BTB_www = very_kind == 2'b10; //rest in EX
+            2'b11: BTB_www = very_kind == 2'b11 && BTB_tgt_ok;
+            default: BTB_www = 1'b0; //startup again
         endcase
     end
+
+    assign BTB_we = IF_take && !I_kill && (BTB_hit ? !BTB_www : very_kind != 2'b00);
+    assign IF_mispred = !BTB_pred ? IF_jump
+        : (BTB_read[35] && !pht_out[1]) ? (IF_jump || !(IF_64 || IF_branch)) : !BTB_www;
 
     //== That looks nice ==//
     //== Anyways GA(Gather) stage ==//
