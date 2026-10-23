@@ -271,7 +271,6 @@ module CORE(
             2'b11: BTB_www = (instr_fetch_data[31:26] == 6'b110000) && (IF_IR_2 == BTB_read[25:0]);
             default: BTB_www <= 1'b0; //startup again
         endcase
-
     end
 
     //== That looks nice ==//
