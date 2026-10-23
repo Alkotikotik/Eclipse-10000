@@ -80,7 +80,7 @@ module CORE(
             unique case (BTB_read[35:34])
                 2'b01: eff_PC_next = {BTB_read[25:0], 2'b00}; //JMP/CALL
                 //2'b10: eff_PC_next = RAS top
-                2'b10: eff_PC_next = IF_PC_plus4[27:0];
+                2'b10: eff_PC_next = {RAS_top, 2'b00};
                 2'b11: eff_PC_next = pht_out[1] ? {BTB_read[25:0], 2'b00} : IF_PC_plus8[27:0];
                 default: eff_PC_next = 28'hdead67; //theoretically unreachable
             endcase
@@ -144,12 +144,45 @@ module CORE(
     always_comb begin
         unique case (IF_op)
             6'b111101: IF_redirect_target = EPC; //RETU
-            6'b010000: IF_redirect_target = LR; //RET
+            6'b010000: IF_redirect_target = {4'b0, RAS_top, 2'b00}; //RET
             6'b111111, 6'b111000: IF_redirect_target = {4'b0, instr_fetch_data[25:0], 2'b00}; //JMP / CALL
             6'b110000: IF_redirect_target = {4'b0, IF_IR_2[25:0], 2'b00}; //64bit branches
             default: IF_redirect_target = {4'b0, IF_IR_2[25:0], 2'b00};
         endcase
     end
+
+    //So implementing it throught ffs is possible ofc, but LUTRAM is much
+    //nicer, bc it gives you 26bits of storage for like 20LUTs, whether its 8, 16 or 32 deep
+    //Meaning 32entries deep RAS(Return Address Stack) is essentially free.
+    //I had that idea for a while, i actually came up with it based on SPARC register shifting
+    //But yeah turns out im not the only one who thought of that. But im not
+    //even surprised atp
+    (* ram_style = "distributed" *) logic [25:0] RAS [35:0];
+    logic [4:0] RAS_top_ptr;
+
+    always_ff @(posedge clk or posedge rst) begin
+        if (rst) begin
+            RAS_top_ptr <= 5'b0;
+        end else if (IF_take && !I_kill) begin
+            if (IF_op == 6'b111000) begin
+                if (RAS_top_ptr == 5'd31) begin
+                    //Spill
+                end else begin
+                    RAS[RAS_top_ptr] <= LR[25:0];
+                    RAS_top_ptr <= RAS_top_ptr + 1;
+                end
+            end else if (IF_op == 6'b010000) begin
+                if (RAS_top_ptr == 5'd0) begin
+                    //That just shouldn't happen prolly gotta make some kind
+                    //of trap vector
+                end else begin
+                    RAS_top_ptr <= RAS_top_ptr - 1;
+                end
+            end
+        end
+    end
+
+    assign RAS_top = RAS[RAS_top_ptr];
 
     //== 64bit instructions ==//
     //If opcode is 000000 we check for sub-op of its 000000 too then its just
@@ -257,11 +290,11 @@ module CORE(
         BTB_read <= BTB[IF_PC_tofetch[11:2]];
     end
 
-    logic  BTB_hit, BTB_pred, BTB_tgt_ok, BTB_we, BTB_we_ff, IF_mispred;
+    logic BTB_hit, BTB_pred, BTB_tgt_ok, BTB_we, BTB_we_ff, IF_mispred;
     logic [25:0] BTB_tgt;
     logic [9:0]  BTB_widx;
     logic [35:0] BTB_wdata;
-    logic [1:0] very_kind;
+    logic [1:0]  very_kind;
 
     always_comb begin
         BTB_hit = (BTB_read[33:26] == IF_PC[19:12]) && BTB_read[35:34] != 2'b00; //00 is for startup mainly
