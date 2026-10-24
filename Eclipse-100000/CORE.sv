@@ -1039,7 +1039,8 @@ module CORE(
     /* verilator lint_on PINCONNECTEMPTY */
 
     //== VER(Verify) ==//
-    //Work with memory - load, store
+    //This grew its something much bigger than MEM, so I renamed it.
+    //Basically yeah it does verify, and does a bunch of other stuff.
     logic [31:0] VER_result;
     logic [31:0] VER_PC;
     logic [31:0] VER_memTarget;
@@ -1081,7 +1082,7 @@ module CORE(
     logic [31:0] VER_spr_result;
     logic [2:0]  VER_SPRSrc;
     logic [1:0]  VER_spr_target_sel;
-    logic VER_is_call;
+    logic VER_is_call, VER_is_ret;
 
     logic VER_irq_timer;
     logic VER_irq_key;
@@ -1151,7 +1152,8 @@ module CORE(
             //Active is kinda a weird word, looks kinda strange
             VER_rx0_val <= FWD_rx0;
             VER_spr_result <= spr_result;
-            VER_is_call <= isCallState && (opcode ==6'b111000); //CALL
+            VER_is_call <= isCallState && (opcode == 6'b111000); //CALL
+            VER_is_ret <= (opcode == 6'b010000); //guess what
 
             VER_irq_timer <= timer_interrupt_taken;
             VER_irq_key <= key_interrupt_taken;
@@ -1275,7 +1277,55 @@ module CORE(
             VER_val = VER_result;
     end
 
-    //== Comparator ==//
+    //== LRS(Link Register Stack)
+    //So I had this idea for a while, basically return addresses are pushed
+    //onto the this stack instead of plain LR, that allows to not save LR on
+    //nested calls whatsoever. I settled on 32 entries of 36bits, I mean
+    //I don't think I have ever had anything go past 32 deep nesting. Apart
+    //from recursion of course, mainly bc of it I have to spill overflow on to
+    //the actual stack. But i came up with a patly solution to that recursion
+    //Along with each record store 10 cnt bits that increase if address that
+    //we are about to push is the same as stored at the top. And we pop, we
+    //first check if cnt is zero, if it is pop, if it isn't just dec it.
+    //That handles normal recursion up to 1024times, and partly handles some
+    //other recursion, it doesn't handle recursion that calls another func, eg
+    //f() -> g () -> f() -> g(), so they will get spilled on the stack. But
+    //i don't think that is a very likely situation to happen.
+    //Upper 10bits cnt, lower 26address.
+    (* ram_style = "distributed" *) logic [35:0] LRS [0:31];
+    logic [4:0] LRS_top_ptr;
+
+    always_ff @(posedge clk or posedge rst) begin
+        if (rst) begin
+            LRS_top_ptr <= 5'h0;
+        end else begin
+            if (isVER_valid && !mem_stall && !VER_fault && !VER_irq && VER_is_call) begin
+                if (VER_is_call) begin
+                    if (LRS_top_ptr == 5'h31) begin
+                        //spill
+                    end else begin
+                        LRS_top_ptr <= LRS_top_ptr + 1;
+                        LRS_wr <= 1'b1;
+                    end
+                end else if (VER_is_ret) begin
+                    if (LRS_top_ptr == 5'h0) begin
+                        //Basically you are cooked buddy
+                    end else begin
+                        LRS_top_ptr <= LRS_top_ptr - 1;
+                    end
+                end
+            end
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (LRS_wr) begin
+            LRS[LRS_top_ptr] <= {10'h1, VER_PCNext[27:2]};
+        end
+    end
+
+
+    //== Comparator
     //Moved the compare module from ALU to here, for 1) shorten critical path,
     //2) convinience
     //Now I moved it from EX to VER reason above
