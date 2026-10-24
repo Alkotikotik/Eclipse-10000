@@ -79,7 +79,6 @@ module CORE(
         if (BTB_hit) begin
             unique case (BTB_read[35:34])
                 2'b01: eff_PC_next = {BTB_read[25:0], 2'b00}; //JMP/CALL
-                //2'b10: eff_PC_next = RAS top
                 2'b10: eff_PC_next = {RAS_top, 2'b00};
                 2'b11: eff_PC_next = pht_out[1] ? {BTB_read[25:0], 2'b00} : IF_PC_plus8[27:0];
                 default: eff_PC_next = 28'hdead67; //theoretically unreachable
@@ -111,7 +110,7 @@ module CORE(
             IF_skip  <= 1'b0;
         end else begin
             IF_redir <= (IF_take && IF_mispred && !I_kill) || VER_fault || VER_redirect;
-            IF_skip  <= IF_take && (IF_64 || IF_branch) && !BTB_pred && !VER_fault && !VER_redirect && !I_kill;
+            IF_skip  <= IF_take && (IF_64 || IF_branch) && !BTB_hit && !VER_fault && !VER_redirect && !I_kill;
         end
     end : IF_window
 
@@ -154,31 +153,33 @@ module CORE(
     //So implementing it throught ffs is possible ofc, but LUTRAM is much
     //nicer, bc it gives you 26bits of storage for like 20LUTs, whether its 8, 16 or 32 deep
     //Meaning 32entries deep RAS(Return Address Stack) is essentially free.
-    (* ram_style = "distributed" *) logic [25:0] RAS [35:0];
-    logic [4:0] RAS_top_ptr;
+    //This is return address predictor btw, not the architectural stack. Its
+    //essentially just a BTB but for RETs
+    (* ram_style = "distributed" *) logic [25:0] RAS [0:31];
+    logic [4:0] RAS_top_ptr, RAS_ptr_next, WB_RAS_ptr;
+    logic RAS_push, RAS_pop;
 
-    always_ff @(posedge clk or posedge rst) begin
-        if (rst) begin
+    assign RAS_push = IF_take && !I_kill && IF_op == 6'b111000;
+    assign RAS_pop  = IF_take && !I_kill && IF_op == 6'b010000;
+    assign RAS_ptr_next = RAS_push ? RAS_top_ptr + 5'd1 : RAS_pop ? RAS_top_ptr - 5'd1 : RAS_top_ptr;
+
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
             RAS_top_ptr <= 5'b0;
-        end else if (IF_take && !I_kill) begin
-            if (IF_op == 6'b111000) begin
-                if (RAS_top_ptr == 5'd31) begin
-                    //Spill
-                end else begin
-                    RAS[RAS_top_ptr] <= LR[25:0];
-                    RAS_top_ptr <= RAS_top_ptr + 1;
-                end
-            end else if (IF_op == 6'b010000) begin
-                if (RAS_top_ptr == 5'd0) begin
-                    //That just shouldn't happen prolly gotta make some kind
-                    //of trap vector
-                end else begin
-                    RAS_top_ptr <= RAS_top_ptr - 1;
-                end
-            end
+        end else if (D_miss_ff) begin
+            RAS_top_ptr <= WB_RAS_ptr;
+        end else if (VER_redirect || VER_fault) begin
+            RAS_top_ptr <= VER_RAS_ptr;
+        end else begin
+            RAS_top_ptr <= RAS_ptr_next;
         end
     end
 
+    always_ff @(posedge clk) begin
+        if (RAS_push) RAS[RAS_top_ptr + 5'd1] <= IF_PC_plus4_or8[27:2];
+    end
+
+    logic [25:0] RAS_top;
     assign RAS_top = RAS[RAS_top_ptr];
 
     //== 64bit instructions ==//
@@ -287,15 +288,15 @@ module CORE(
         BTB_read <= BTB[IF_PC_tofetch[11:2]];
     end
 
-    logic BTB_hit, BTB_pred, BTB_tgt_ok, BTB_we, BTB_we_ff, IF_mispred;
+    logic BTB_hit, BTB_tgt_ok, BTB_we, BTB_we_ff, IF_mispred;
     logic [25:0] BTB_tgt;
     logic [9:0]  BTB_widx;
     logic [35:0] BTB_wdata;
     logic [1:0]  very_kind;
+    assign very_kind = (IF_op == 6'b111111 || IF_op == 6'b111000) ? 2'b01 : (IF_op == 6'b010000) ? 2'b10 : IF_branch ? 2'b11 : 2'b00;
 
     always_comb begin
         BTB_hit = (BTB_read[33:26] == IF_PC[19:12]) && BTB_read[35:34] != 2'b00; //00 is for startup mainly
-        BTB_pred = BTB_hit && BTB_read[34];
 
         BTB_tgt = IF_redirect_target[27:2];
         BTB_tgt_ok = BTB_read[25:0] == BTB_tgt;
@@ -303,7 +304,7 @@ module CORE(
 
     always_ff @(posedge clk) begin
         if (BTB_we_ff) begin
-            //512KB aliases are simply cought by the mispredict machinery later
+            //1MB aliases are simply cought by the mispredict machinery later
             BTB[BTB_widx] <= BTB_wdata;
         end
     end
@@ -333,8 +334,8 @@ module CORE(
     end
 
     assign BTB_we = IF_take && !I_kill && (BTB_hit ? !BTB_www : very_kind != 2'b00);
-    assign IF_mispred = !BTB_pred ? IF_jump
-        : (BTB_read[35] && !pht_out[1]) ? (IF_jump || !(IF_64 || IF_branch)) : !BTB_www;
+    assign IF_mispred = !BTB_hit ? IF_jump
+        : (BTB_read[35:34] == 2'b11 && !pht_out[1]) ? (IF_jump || !(IF_64 || IF_branch)) : !BTB_www;
 
     //== That looks nice ==//
     //== Anyways GA(Gather) stage ==//
@@ -342,6 +343,7 @@ module CORE(
     logic [31:0] GA_early_target;
     logic [13:0] GA_pht_idx;
     logic [1:0]  GA_pht_val;
+    logic [4:0]  GA_RAS_ptr;
 
     logic isGA_valid, isGA_valid_ff;
     logic GA_branch;
@@ -378,6 +380,7 @@ module CORE(
             GA_early_target <= IF_redirect_target;
             GA_pht_idx <= pht_idx_r;
             GA_pht_val <= pht_out;
+            GA_RAS_ptr <= RAS_ptr_next;
             GA_predicted_taken <= IF_predicted_taken;
         end
         //else: stall holds PC and IR as they are
@@ -702,6 +705,7 @@ module CORE(
     logic [31:0] EX_early_target;
     logic [13:0] EX_pht_idx;
     logic [1:0]  EX_pht_val;
+    logic [4:0]  EX_RAS_ptr;
     logic [31:0] EX_rx0_val, EX_rx1_val, EX_rx2_val;
     logic       EX_from_mem0, EX_from_mem1, EX_from_mem2;
     logic [1:0] EX_mem_byte0, EX_mem_byte1, EX_mem_byte2;
@@ -744,6 +748,7 @@ module CORE(
             EX_early_target <= GA_early_target;
             EX_pht_idx <= GA_pht_idx;
             EX_pht_val <= GA_pht_val;
+            EX_RAS_ptr <= GA_RAS_ptr;
             EX_predicted_taken <= GA_predicted_taken;
 
             //Forwarding entirely in GA now yayyy
@@ -1040,6 +1045,7 @@ module CORE(
     logic [31:0] VER_memTarget;
     logic VER_memRead, VER_memWrite;
     logic [31:0] VER_ram_data_in;
+    logic [4:0]  VER_RAS_ptr;
     logic [1:0]  VER_mem_size;
 
     logic [7:0]  VER_gpr_dest;
@@ -1102,55 +1108,56 @@ module CORE(
         if (!mem_stall) begin
             //That many variables are actually harmless, because they live in
             //FFs which are free, there are a lot of unused FFs in logic slices.
-            VER_result      <= GPRs_data_in;
-            VER_PC          <= EX_PC;
+            VER_result <= GPRs_data_in;
+            VER_PC <= EX_PC;
 
-            VER_memTarget   <= memTarget;
-            VER_memRead     <= memRead;
-            VER_memWrite    <= memWrite;
+            VER_memTarget <= memTarget;
+            VER_memRead <= memRead;
+            VER_memWrite <= memWrite;
             VER_ram_data_in <= store_val;
-            VER_mem_size  <= mem_size;
+            VER_mem_size <= mem_size;
+            VER_RAS_ptr <= EX_RAS_ptr;
 
-            VER_EPCWrite    <= EPCWrite;
-            VER_irq         <= irq_taken;
-            VER_PCNext      <= EX_PC_next;
+            VER_EPCWrite <= EPCWrite;
+            VER_irq <= irq_taken;
+            VER_PCNext <= EX_PC_next;
 
-            VER_gpr_write   <= GPRsWrite;
-            VER_gpr_dest    <= gpr_rw0_sel;
-            VER_kernelMode  <= EX_kernel_mode;
-            VER_is_lomul    <= (opcode == 6'b000111);
-            VER_is_himul    <= (opcode == 6'b001101);
-            VER_zeroDiv     <= ZeroDivException && !irq_taken;
+            VER_gpr_write <= GPRsWrite;
+            VER_gpr_dest <= gpr_rw0_sel;
+            VER_kernelMode <= EX_kernel_mode;
+            VER_is_lomul <= (opcode == 6'b000111);
+            VER_is_himul <= (opcode == 6'b001101);
+            VER_zeroDiv <= ZeroDivException && !irq_taken;
 
-            VER_demolish        <= demolish;
-            VER_redirect_pc     <= PCNext;
-            VER_branch          <= EX_branch;
+            VER_demolish <= demolish;
+            VER_redirect_pc <= PCNext;
+            VER_branch <= EX_branch;
             VER_predicted_taken <= EX_predicted_taken;
-            VER_early_target    <= EX_early_target;
-            VER_branch_op       <= branch_op;
-            VER_branch_x        <= branch_x;
-            VER_branch_y        <= branch_y;
-            VER_branch_xs       <= branch_xs;
-            VER_branch_ys       <= branch_ys;
-            VER_branch_mask     <= branch_mask;
-            VER_pht_idx         <= EX_pht_idx;
-            VER_pht_val         <= EX_pht_val;
+            VER_early_target <= EX_early_target;
+            VER_branch_op <= branch_op;
+            VER_branch_x <= branch_x;
+            VER_branch_y <= branch_y;
+            VER_branch_xs <= branch_xs;
+            VER_branch_ys <= branch_ys;
+            VER_branch_mask <= branch_mask;
+            VER_pht_idx <= EX_pht_idx;
+            VER_pht_val <= EX_pht_val;
 
-            VER_is_load     <= (GPRsSrc == 3'b001);
+            VER_is_load <= (GPRsSrc == 3'b001);
 
-            VER_SPRWrite    <= SPRWrite;
-            VER_SPRSrc      <= SPRSrc;
+            VER_SPRWrite <= SPRWrite;
+            VER_SPRSrc <= SPRSrc;
             VER_spr_target_sel <= spr_target_sel;
             //Active is kinda a weird word, looks kinda strange
-            VER_rx0_val     <= FWD_rx0;
-            VER_spr_result  <= spr_result;
-            VER_is_call     <= isCallState && (opcode ==6'b111000); //CALL
+            VER_rx0_val <= FWD_rx0;
+            VER_spr_result <= spr_result;
+            VER_is_call <= isCallState && (opcode ==6'b111000); //CALL
 
             VER_irq_timer <= timer_interrupt_taken;
-            VER_irq_key   <= key_interrupt_taken;
+            VER_irq_key <= key_interrupt_taken;
 
-            VER_lanes     <= EX_lanes;
-            VER_base      <= EX_base;
+            VER_lanes <= EX_lanes;
+            VER_base <= EX_base;
         end
     end : VER_main
 
@@ -1370,6 +1377,7 @@ module CORE(
     always_ff @(posedge clk) begin
         if (!mem_stall) begin
             WB_PC <= VER_PC;
+            WB_RAS_ptr <= VER_RAS_ptr;
             WB_result<= VER_val;
             WB_gpr_dest <= VER_gpr_dest;
             WB_gpr_write <= VER_gpr_write;
