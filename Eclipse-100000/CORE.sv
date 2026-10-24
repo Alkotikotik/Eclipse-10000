@@ -154,9 +154,6 @@ module CORE(
     //So implementing it throught ffs is possible ofc, but LUTRAM is much
     //nicer, bc it gives you 26bits of storage for like 20LUTs, whether its 8, 16 or 32 deep
     //Meaning 32entries deep RAS(Return Address Stack) is essentially free.
-    //I had that idea for a while, i actually came up with it based on SPARC register shifting
-    //But yeah turns out im not the only one who thought of that. But im not
-    //even surprised atp
     (* ram_style = "distributed" *) logic [25:0] RAS [35:0];
     logic [4:0] RAS_top_ptr;
 
