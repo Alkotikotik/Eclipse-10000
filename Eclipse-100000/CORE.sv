@@ -299,7 +299,7 @@ module CORE(
         BTB_hit = (BTB_read[33:26] == IF_PC[19:12]) && BTB_read[35:34] != 2'b00; //00 is for startup mainly
 
         BTB_tgt = IF_redirect_target[27:2];
-        BTB_tgt_ok = BTB_read[25:0] == BTB_tgt;
+        BTB_tgt_ok = BTB_read[35] ? (BTB_read[25:0] == IF_IR_2[25:0]) : (BTB_read[25:0] == instr_fetch_data[25:0]);
     end
 
     always_ff @(posedge clk) begin
@@ -740,6 +740,8 @@ module CORE(
         if (!stall) begin
             EX_PC <= GA_PC; //Handing instruction to the EX
             EX_IR <= GA_IR;
+            EX_spr_target_sel <= GA_spr_sel;
+            EX_rx0_frag <= (GA_IR[31:26] == 6'b111000 || GA_IR[31:26] == 6'b010000) ? 3'b000 : GA_IR[20:18];
             EX_64 <= GA_64;
             EX_IR_2 <= GA_IR_2;
             EX_rx0_val <= GA_opnd0;
@@ -1300,7 +1302,6 @@ module CORE(
     logic [31:0] LRS_top;
     logic [4:0] LRS_top_ptr;
     logic [5:0] LRS_depth;
-    logic [31:0] LRS_bot;
     logic [15:0] LRS_spilled;
     logic LRS_wr;
     logic LRS_push, LRS_pop, LRS_inc, LRS_new, LRS_dec, LRS_spill, LRS_fill;
@@ -1326,8 +1327,10 @@ module CORE(
         //On overflow - just spill to the stack, then load from it on shortage
         //Also every CALL increases SP by 4bytes, and every RET decreases it by 4bytes.
         //Reason being - flare loads spilled arguments at a fixed offset, and it doesn't know whether
-        //CPU pushed return address or not. So it just increases/decreases and on overflow it also puts
-        //oldest LR entry there. And i also think its kinda neat, separate
+        //CPU pushed return address or not. So it just increases/decreases and an overflow puts newest entry there
+        //Instead of LRS. I had it previosely push oldest entry because I thought it would reduce mem_stalls for RETs, but now
+        //I realized that it doesn't really matter since we just accessed that
+        //address to store an address there, so its very likely to be in cache.
         //calls by either 4empty bits or return address, i like it.
         LRS_spill = LRS_new && LRS_depth == 6'd32;
         LRS_fill  = LRS_pop && !LRS_dec && LRS_depth == 6'd32 && LRS_spilled != 16'd0;
@@ -1342,20 +1345,16 @@ module CORE(
             LRS_top_ptr <= 5'd0;
             LRS_depth   <= 6'd0;
             LRS_spilled <= 16'd0;
+        end else if (LRS_spill) begin
+            LRS_spilled <= LRS_spilled + 16'd1;
+        end else if (LRS_fill) begin
+            LRS_spilled <= LRS_spilled - 16'd1;
         end else if (LRS_new) begin
             LRS_top_ptr <= LRS_top_ptr + 5'd1;
-            if (LRS_spill) begin
-                LRS_spilled <= LRS_spilled + 16'd1;
-            end else begin
-                LRS_depth <= LRS_depth + 6'd1;
-            end
+            LRS_depth   <= LRS_depth + 6'd1;
         end else if (LRS_pop && !LRS_dec) begin
             LRS_top_ptr <= LRS_top_ptr - 5'd1;
-            if (LRS_fill) begin
-                LRS_spilled <= LRS_spilled - 16'd1;
-            end else begin
-                LRS_depth <= LRS_depth - 6'd1;
-            end
+            LRS_depth   <= LRS_depth - 6'd1;
         end
     end
 
@@ -1364,12 +1363,11 @@ module CORE(
     end
     always_ff @(posedge clk) begin
         if (LRS_wr) begin
-            LRS[LRS_new ? LRS_top_ptr + 5'h1 : LRS_top_ptr] <= LRS_new ? {6'd1, VER_PCNext[27:2]}
+            LRS[(LRS_new && !LRS_spill) ? LRS_top_ptr + 5'h1 : LRS_top_ptr] <= LRS_new ? {6'd1, VER_PCNext[27:2]}
                 : LRS_inc ? {LRS_top[31:26] + 6'd1, LRS_top[25:0]} : LRS_dec ? {LRS_top[31:26] - 6'd1, LRS_top[25:0]} : ram_data_out;
         end
     end
     assign LRS_top = LRS[LRS_top_ptr];
-    assign LRS_bot = LRS[LRS_top_ptr + 5'd1];
 
     logic  VER_RAS_mispred;
     assign VER_RAS_mispred = isVER_valid && VER_is_ret && !VER_irq && VER_early_target[27:2] != LRS_top[25:0];
@@ -1673,7 +1671,8 @@ module CORE(
     logic [31:0] memLimit;
     logic [32:0] memEnd;
     logic [31:0] memTarget;
-    logic [1:0] spr_target_sel;
+    logic [1:0] spr_target_sel, EX_spr_target_sel;
+    logic [2:0] EX_rx0_frag;
 
     logic [3:0] PCSrc;
     logic [2:0] GPRsSrc;
@@ -1716,7 +1715,7 @@ module CORE(
                 rx0;
 
     logic [2:0] rx0_frag;
-    assign rx0_frag = (opcode == 6'b111000 || opcode == 6'b010000) ? 3'b000 : rx0[2:0];
+    assign rx0_frag = EX_rx0_frag;
 
     logic [2:0] push_pop_bytes;
     always_comb begin
@@ -1768,9 +1767,7 @@ module CORE(
                             ((VER_memTarget < memBase) ||
                             (33'(VER_memTarget) >= memEnd)));
 
-    assign spr_target_sel =
-        (opcode == 6'b101000 || opcode == 6'b101001 || opcode == 6'b101010 ||
-        opcode == 6'b101011 || opcode == 6'b101100 || opcode == 6'b101101) ? EX_IR[17:16] : 2'b00;
+    assign spr_target_sel = EX_spr_target_sel;
 
     logic [31:0] spr_reg, SelectedSPR;
     always_comb begin
@@ -1811,11 +1808,11 @@ module CORE(
         unique case (PCSrc)
             4'b0000: PCNext = EX_early_target;
             4'b0001: PCNext = EX_early_target;
-            4'b0011: PCNext = EX_EPC;       // RETU
-            4'b0010: PCNext = 32'h00000064; // Syscall Vector
-            4'b0100: PCNext = 32'h00000068; // Timer Vector
+            4'b0011: PCNext = EX_EPC;          // RETU
+            4'b0010: PCNext = 32'h00000064;   // Syscall Vector
+            4'b0100: PCNext = 32'h00000068;  // Timer Vector
             4'b1000: PCNext = 32'h0000006C; // Key Interrupt Vector
-            4'b0111: PCNext = FWD_rx0; // JR
+            4'b0111: PCNext = FWD_rx0;     // JR
             default: PCNext = EX_early_target;
         endcase
     end : PC_MUX
@@ -2069,7 +2066,7 @@ module CORE(
         .re((VER_is_ret ? LRS_fill_rd : VER_memRead) && !memViolation && VER_ram_cs && isVER_valid), //same thing
         .ram_op(isVER_valid && VER_ram_cs && (VER_memRead || VER_memWrite)),
 
-        .D_data_in(VER_is_call ? LRS_bot : VER_ram_data_in),
+        .D_data_in(VER_is_call ? LRS_top : VER_ram_data_in),
         .mem_size(VER_mem_size),
 
         .D_data_out(ram_data_out),
