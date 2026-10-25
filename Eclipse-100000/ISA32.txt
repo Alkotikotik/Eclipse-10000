@@ -92,8 +92,8 @@ Special type operations (S-Type)
 Jumps & Subroutines
 111111 : JMP imm26        // Unconditional Jump to imm26 address/label
 110111 : JR rx0          // Unconditional Jump to rx0
-111000 : CALL imm26     // Save PC+4 to LR and Jump to imm26 address
-010000 : RET           // Return from subroutine (PC = LR)
+111000 : CALL imm26     // Save PC+4 to LRS and Jump to imm26 address, and increase SP by 4bytes
+010000 : RET           // Return from subroutine (PC = LR), and decrease SP by 4bytes
 
 Privilege and Syscalls
 010010 : SYS             // System Call Exception

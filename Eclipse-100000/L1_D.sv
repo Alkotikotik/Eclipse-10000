@@ -17,6 +17,7 @@ module L1_D (
     output logic [31:0] D_data_out,
     output logic mem_rdy,
     output logic miss_ff,
+    output logic D_miss,
 
     output logic Dreq,
     output logic Dreq_we,
@@ -171,7 +172,7 @@ module L1_D (
             if ((re || we) && mem_rdy && miss) begin
                 pend <= 1'b1;
             end
-            miss_ff <= (re || we) && mem_rdy && miss;
+            miss_ff <= D_miss;
             if (capturing) begin //checking if its dirty
                 //This happens at the same time as im writing data to cache,
                 //because while im writing well im not reading so might as well
@@ -397,5 +398,6 @@ module L1_D (
                  || (last_e_wr && last_e_idx == even_idx_lat) || (last_o_wr && last_o_idx == odd_idx_lat);
     assign ld_sh = mem_size[1] ? 2'd0 : {1'b1, !mem_size[0]};
     assign mem_rdy = !ram_op || (!busy && !hazard && rst_clr == 0);
+    assign D_miss = (re || we) && mem_rdy && miss;
     assign Dreq = refill_req || drain; //There would be other Dreqs causes here
 endmodule

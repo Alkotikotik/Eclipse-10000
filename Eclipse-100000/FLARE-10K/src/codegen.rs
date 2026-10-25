@@ -788,7 +788,6 @@ pub struct Codegen<'a> {
     next_temp: usize,
     call_saves: HashMap<(usize, usize), Vec<IROperand>>,
     operand_sizes: HashMap<IROperand, RegType>,
-    lr_slot: Option<usize>,
     wait_for_the_final_result: Vec<AsmInst>,
     final_graph: Option<InterferenceGraph>,
 }
@@ -851,7 +850,6 @@ impl<'a> Codegen<'a> {
                         .map(|(id, ty)| (IROperand::Temp(*id), type_to_regtype(ty))),
                 )
                 .collect(),
-            lr_slot: Some(0),
             wait_for_the_final_result: Vec::new(),
             final_graph: None,
         };
@@ -1793,14 +1791,6 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    //If function calls another function its a leaf function, we need this because there is only 1
-    //LR register meaning it has to be saved before the call and restored after the call
-    fn is_leaf(&self) -> bool {
-        !self
-            .cfg
-            .iter()
-            .any(|b| b.body.iter().any(|i| matches!(i, IRInst::Call { .. })))
-    }
 
     fn fold_slot_addrs(&mut self) {
         let mut uses: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
@@ -2094,7 +2084,6 @@ impl<'a> Codegen<'a> {
         self.fold_abs_index();
         self.fold_coalesce();
         let mut compiled = Vec::new();
-        let leaf = self.is_leaf();
         let blocks = self.cfg.clone();
 
         if let Some(first_inst) = blocks.first().and_then(|b| b.body.first()) {
@@ -2103,30 +2092,11 @@ impl<'a> Codegen<'a> {
             }
         }
 
-        //It wasn't accounting that PUSH additionally decreases SP by 4, so I fixed it
-        if !leaf {
-            self.lr_slot = Some(self.frame_size);
-            self.frame_size += 4;
-        }
-
         if self.frame_size > 0 {
             compiled.push(AsmInst::SprAdd(
                 rx31(),
                 Spr::SP,
                 AsmOperand::Imm16(self.frame_size as i16),
-            ));
-        }
-
-        if !leaf {
-            compiled.push(AsmInst::SprLea(
-                reg_op(rx30_reg()),
-                Spr::LR,
-                AsmOperand::Imm16(0),
-            ));
-            compiled.push(AsmInst::SprStr(
-                reg_op(rx30_reg()),
-                Spr::SP,
-                AsmOperand::Imm16(self.sp_off(self.lr_slot.unwrap())),
             ));
         }
 
@@ -2294,7 +2264,7 @@ impl<'a> Codegen<'a> {
             //Caller pushes overflowed args in reverse so fetch them in reverse as well
             IROperand::IncomingArgSlot(idx) => (
                 AddrBase::Spr(Spr::SP),
-                -((self.frame_size + 4 + idx * 4) as i32),
+                -((self.frame_size + 8 + idx * 4) as i32),
                 false,
             ),
             _ if is_const(ptr_addr) && fits(const_val(ptr_addr) as i64, 29, true) => {
@@ -3106,16 +3076,6 @@ impl<'a> Codegen<'a> {
             //return returns to rx30 to matter what, though I do make sure next instruction moved
             //value out of rx30 bc its a scratch afterall
             IRInst::Return(val) => {
-                if !self.is_leaf() {
-                    let lr_off = self.lr_slot.expect("lr_slot reserved for non-leaf functions");
-                    out.push(AsmInst::SprLdr(
-                        reg_op(rx30_reg()),
-                        Spr::SP,
-                        AsmOperand::Imm16(self.sp_off(lr_off)),
-                    ));
-                    out.push(AsmInst::SprSet(reg_op(rx30_reg()), Spr::LR));
-                }
-
                 if let Some(val) = val {
                     if is_const(val) {
                         load_const(rx30_reg(), const_val(val), out);

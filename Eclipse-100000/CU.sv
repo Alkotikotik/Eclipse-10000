@@ -152,10 +152,14 @@ module CU(
                 PCSrc   = 4'b0001;
                 PCWrite = 1;
                 isCallState = 1;
+                SPRSrc = 3'b100;
+                SPRWrite = 1;
             end
             6'b010000: begin //RET
                 PCSrc   = 4'b0101;
                 PCWrite = 1;
+                SPRSrc = 3'b101;
+                SPRWrite = 1;
             end
             6'b110111: begin //JR
                 PCSrc   = 4'b0111;

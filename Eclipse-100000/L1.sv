@@ -28,6 +28,7 @@ module L1 (
     output logic [31:0] D_data_out,
     output logic D_mem_rdy,
     output logic D_miss_ff,
+    output logic D_miss,
 
     //From TOP that holds EMI
     output logic EMI_req, EMI_req_we,
@@ -113,6 +114,7 @@ module L1 (
         .D_data_out(D_data_out),
         .mem_rdy(D_mem_rdy),
         .miss_ff(D_miss_ff),
+        .D_miss(D_miss),
 
         .Dreq(Dreq),
         .Dreq_we(Dreq_we),

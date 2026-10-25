@@ -97,19 +97,17 @@ JMP ~init_0x00
 	SPRSET rx30 -> GP
 
 ~main:
-	SPRADD rx31 ->SP<- 5
-	SPRLEA rx30 <- [LR 0]
-	SPRSTR rx30 -> [SP -4]
+	SPRADD rx31 ->SP<- 1
 	LOAD rz283 <- 0
 	LOAD rx27 <- 0
-	SPRLEA rx29 <- [SP -5]
+	SPRLEA rx29 <- [SP -1]
 	LOAD rz282 <- 0
 	LOAD ry260 <- 65535
 	LOAD ry280 <- 8
 
 ~Lab_while_start_0:
 	ADD  rx27 <- [rx27, rx31 1]
-	SPRLEA rx29 <- [SP -5]
+	SPRLEA rx29 <- [SP -1]
 	STR  rz283 -> [rx29 0]
 
 	IBSEU [rx27 <-> 200000] >-> ~Lab_endif_3
@@ -117,7 +115,7 @@ JMP ~init_0x00
 	LOAD rx30 <- 15
 	MUL  ry260 <- [ry260, rx30 0]
 	LOAD rx27 <- 0
-	SPRLEA rx29 <- [SP -5]
+	SPRLEA rx29 <- [SP -1]
 	PUSH <- ry260
 	PUSH <- rz283
 	PUSH <- rx27
@@ -156,9 +154,7 @@ JMP ~init_0x00
 
 
 ~Lab_while_end_1:
-	SPRLDR rx30 <- [SP -4]
-	SPRSET rx30 -> LR
-	SPRSUB rx31 ->SP<- 5
+	SPRSUB rx31 ->SP<- 1
 	RET
 
 ~kprintr:
