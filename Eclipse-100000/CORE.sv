@@ -1280,50 +1280,68 @@ module CORE(
     //== LRS(Link Register Stack)
     //So I had this idea for a while, basically return addresses are pushed
     //onto the this stack instead of plain LR, that allows to not save LR on
-    //nested calls whatsoever. I settled on 32 entries of 36bits, I mean
+    //nested calls whatsoever. I settled on 32 entries of 32bits, I mean
     //I don't think I have ever had anything go past 32 deep nesting. Apart
     //from recursion of course, mainly bc of it I have to spill overflow on to
     //the actual stack. But i came up with a patly solution to that recursion
-    //Along with each record store 10 cnt bits that increase if address that
+    //Along with each record store 6 cnt bits that increase if address that
     //we are about to push is the same as stored at the top. And we pop, we
     //first check if cnt is zero, if it is pop, if it isn't just dec it.
-    //That handles normal recursion up to 1024times, and partly handles some
+    //That handles normal recursion up to 64times per entry, and partly handles some
     //other recursion, it doesn't handle recursion that calls another func, eg
     //f() -> g () -> f() -> g(), so they will get spilled on the stack. But
     //i don't think that is a very likely situation to happen.
-    //Upper 10bits cnt, lower 26address.
-    (* ram_style = "distributed" *) logic [35:0] LRS [0:31];
+    //Upper 6bits cnt, lower 26address.
+    (* ram_style = "distributed" *) logic [31:0] LRS [0:31];
+    logic [31:0] LRS_top;
+    logic [31:0] LRS_top_ff;
     logic [4:0] LRS_top_ptr;
+    logic [4:0] LRS_ptr_minus1;
+    logic [5:0] LRS_cur_cnt;
+    logic LRS_wr;
 
-    always_ff @(posedge clk or posedge rst) begin
-        if (rst) begin
+    always_ff @(posedge clk or posedge reset) begin
+        if (reset) begin
+            LRS_top_ff <= 32'h0;
             LRS_top_ptr <= 5'h0;
+            LRS_ptr_minus1 <= 5'h0;
+            LRS_cur_cnt <= 6'h1;
+            LRS_wr <= 1'b0;
         end else begin
             if (isVER_valid && !mem_stall && !VER_fault && !VER_irq && VER_is_call) begin
                 if (VER_is_call) begin
-                    if (LRS_top_ptr == 5'h31) begin
+                    if ((LRS_top[25:0] == VER_PCNext[27:2]) && (LRS_cur_cnt != 6'h3F)) begin
+                        LRS_cur_cnt <= LRS_cur_cnt + 1;
+                        LRS_wr <= 1'b1;
+                    end else if (LRS_top_ptr == 5'h31) begin
                         //spill
                     end else begin
                         LRS_top_ptr <= LRS_top_ptr + 1;
                         LRS_wr <= 1'b1;
+                        LRS_cur_cnt <= 6'h1;
                     end
                 end else if (VER_is_ret) begin
                     if (LRS_top_ptr == 5'h0) begin
                         //Basically you are cooked buddy
+                    end else if (LRS_cur_cnt != 1) begin
+                        LRS_cur_cnt <= LRS_cur_cnt - 1;
                     end else begin
                         LRS_top_ptr <= LRS_top_ptr - 1;
                     end
                 end
             end
+            LRS_top_ff <= LRS_top;
+            LRS_ptr_minus1 <= LRS_top_ptr - 4'h1;
         end
     end
 
     always_ff @(posedge clk) begin
         if (LRS_wr) begin
-            LRS[LRS_top_ptr] <= {10'h1, VER_PCNext[27:2]};
+            LRS[LRS_top_ptr] <= {LRS_cur_cnt, VER_PCNext[27:2]};
         end
     end
 
+    assign LRS_top = LRS[LRS_top_ptr];
 
     //== Comparator
     //Moved the compare module from ALU to here, for 1) shorten critical path,
