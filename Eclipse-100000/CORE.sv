@@ -39,15 +39,15 @@ module CORE(
     logic  bubble;   //for handling load-use hazard
 
     logic  early_target_ok;
-    assign early_target_ok = (opcode == 6'b010000) ? (EX_early_target == EX_LR) : (EX_early_target == EX_EPC);
+    assign early_target_ok = EX_early_target == EX_EPC;
 
     //Basically thats a massive check for unexpected PC change, like branch
     //misprediction, interrupt and JR maybe other but I forgot
     assign demolish  =  isEX_valid && !mem_stall && !VER_redirect &&
                         (irq_taken ||
                         (PCWrite &&
-                        !(opcode == 6'b111111 || opcode == 6'b111000) &&
-                        !((opcode == 6'b010000 || opcode == 6'b111101) && early_target_ok)));
+                        !(opcode == 6'b111111 || opcode == 6'b111000 || opcode == 6'b010000) &&
+                        !(opcode == 6'b111101 && early_target_ok)));
 
     assign stall     = div_stall || mem_stall;
     assign bubble    = (mul_use_hazard || load_use_hazard || rr2_conflict || mdx_idx_hazard) && !stall; //If we already stall no point in bubble, it also breaks div
@@ -1294,54 +1294,51 @@ module CORE(
     //Upper 6bits cnt, lower 26address.
     (* ram_style = "distributed" *) logic [31:0] LRS [0:31];
     logic [31:0] LRS_top;
-    logic [31:0] LRS_top_ff;
     logic [4:0] LRS_top_ptr;
-    logic [4:0] LRS_ptr_minus1;
-    logic [5:0] LRS_cur_cnt;
+    logic [5:0] LRS_depth;
     logic LRS_wr;
+    logic LRS_push, LRS_pop, LRS_inc, LRS_new, LRS_dec;
+
+    logic  lavc; //long ass valid check
+    assign lavc = isVER_valid && !mem_stall && !VER_fault && !VER_irq;
+
+    always_comb begin
+        LRS_push = lavc && VER_is_call;
+        LRS_pop  = lavc && VER_is_ret;
+
+        LRS_inc = LRS_push && LRS_depth != 0 && LRS_top[25:0] == VER_PCNext[27:2] && LRS_top[31:26] != 6'd63;
+        LRS_new = LRS_push && !LRS_inc;
+        LRS_dec = LRS_pop  && LRS_top[31:26] != 6'd1;
+
+        LRS_wr = LRS_push || LRS_dec;
+    end
 
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
-            LRS_top_ff <= 32'h0;
-            LRS_top_ptr <= 5'h0;
-            LRS_ptr_minus1 <= 5'h0;
-            LRS_cur_cnt <= 6'h1;
-            LRS_wr <= 1'b0;
-        end else begin
-            if (isVER_valid && !mem_stall && !VER_fault && !VER_irq && VER_is_call) begin
-                if (VER_is_call) begin
-                    if ((LRS_top[25:0] == VER_PCNext[27:2]) && (LRS_cur_cnt != 6'h3F)) begin
-                        LRS_cur_cnt <= LRS_cur_cnt + 1;
-                        LRS_wr <= 1'b1;
-                    end else if (LRS_top_ptr == 5'h31) begin
-                        //spill
-                    end else begin
-                        LRS_top_ptr <= LRS_top_ptr + 1;
-                        LRS_wr <= 1'b1;
-                        LRS_cur_cnt <= 6'h1;
-                    end
-                end else if (VER_is_ret) begin
-                    if (LRS_top_ptr == 5'h0) begin
-                        //Basically you are cooked buddy
-                    end else if (LRS_cur_cnt != 1) begin
-                        LRS_cur_cnt <= LRS_cur_cnt - 1;
-                    end else begin
-                        LRS_top_ptr <= LRS_top_ptr - 1;
-                    end
-                end
-            end
-            LRS_top_ff <= LRS_top;
-            LRS_ptr_minus1 <= LRS_top_ptr - 4'h1;
+            LRS_top_ptr <= 5'd0;
+            LRS_depth   <= 6'd0;
+        end else if (LRS_new) begin
+            LRS_top_ptr <= LRS_top_ptr + 5'd1;
+            LRS_depth   <= LRS_depth + 6'd1;
+        end else if (LRS_pop && !LRS_dec) begin
+            LRS_top_ptr <= LRS_top_ptr - 5'd1;
+            LRS_depth   <= LRS_depth - 6'd1;
         end
     end
 
+    initial begin
+        for (integer i = 0; i < 32; i = i + 1) LRS[i] = 32'd67108864; //))
+    end
     always_ff @(posedge clk) begin
         if (LRS_wr) begin
-            LRS[LRS_top_ptr] <= {LRS_cur_cnt, VER_PCNext[27:2]};
+            LRS[LRS_new ? LRS_top_ptr + 5'h1 : LRS_top_ptr] <= LRS_new ? {6'd1, VER_PCNext[27:2]}
+                : LRS_inc ? {LRS_top[31:26] + 6'd1, LRS_top[25:0]} : {LRS_top[31:26] - 6'd1, LRS_top[25:0]};
         end
     end
-
     assign LRS_top = LRS[LRS_top_ptr];
+
+    logic  VER_RAS_mispred;
+    assign VER_RAS_mispred = isVER_valid && VER_is_ret && !VER_irq && VER_early_target[27:2] != LRS_top[25:0];
 
     //== Comparator
     //Moved the compare module from ALU to here, for 1) shorten critical path,
@@ -1415,8 +1412,8 @@ module CORE(
     logic  VER_mispredict /*verilator public_flat_rd*/;
     logic  VER_redirect;
     assign VER_mispredict = isVER_valid && VER_branch && !VER_irq && (branch_cond_met != VER_predicted_taken);
-    assign VER_redirect   = D_miss_ff || VER_mispredict || (isVER_valid && VER_demolish);
-    assign VER_redirect_target = D_miss_ff ? WB_PC : VER_demolish ? VER_redirect_pc : (branch_cond_met ? VER_early_target : VER_PCNext);
+    assign VER_redirect   = D_miss_ff || VER_mispredict || (isVER_valid && VER_demolish) || VER_RAS_mispred;
+    assign VER_redirect_target = D_miss_ff ? WB_PC : VER_demolish ? VER_redirect_pc : VER_RAS_mispred ? {4'b0, LRS_top[25:0], 2'b00} : (branch_cond_met ? VER_early_target : VER_PCNext);
 
     //== WB(WriteBack) ==//
     logic [31:0] WB_result;
