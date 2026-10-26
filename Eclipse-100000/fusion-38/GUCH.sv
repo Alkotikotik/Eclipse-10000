@@ -1,6 +1,5 @@
 module GUCH (
     //GUCH - Graphical Unified Computing Heart
-    //Or CHUGE Computational Heart of Unified Graphics Engine
     //Well well finally starting the GPU im so excited for it.
     //So first one is ofc smallest core its the basic GPU contruct.
     //The heart is efp32 FMA that is done through 2DSPs, it also has integer mode,
@@ -16,7 +15,6 @@ module GUCH (
 
     output logic [31:0] result
 );
-
     //So efp32 is Eclipsing Floating (Point/Precision word-play) 32bits
     //Its a custom floating format I designed, I actually spent a little while
     //invinting it from scratch, and I came up to a conclusion that main idea
@@ -59,9 +57,9 @@ module GUCH (
             c_sign <= 1'b0;
             sub_mags <= 1'b0;
         end else begin
-            product_sign <= a[31] ^ b[31] ^ sub_sel[0]; //FNMA...
-            c_sign <= c[31] ^ sub_sel[1]; //FMS...
-            sub_mags <= a[31] ^ b[31] ^ c[31] ^ sel[0] ^ sel[1]; //Whether to add or sub magnitudes
+            product_sign <= a[31] ^ b[31] ^ sub_sel[0]; //FNMA... etc
+            c_sign <= c[31] ^ sub_sel[1]; //FMS... etc
+            sub_mags <= a[31] ^ b[31] ^ c[31] ^ sub_sel[0] ^ sub_sel[1]; //Whether to add or sub magnitudes
         end
     end : signs
 
@@ -70,7 +68,7 @@ module GUCH (
     //are computing a shift, more on that later. Also, only lower bits rn
     //28 is constant offset for efp 32, it is calculated by 76 - 48 which is
     //shifted C bit length minus bits of a*c product
-    assign sh_exp = {3{~a[30]}, a[29:24]} + {3{~b[30]}, b[29:24]} - {3{~c[30]}, c[29:24]} + 9'd28;
+    assign sh_exp = {{3{~a[30]}}, a[29:24]} + {{3{~b[30]}}, b[29:24]} - {{3{~c[30]}}, c[29:24]} + 9'd28;
 
     //I need to align C to 77bits then add lower bits in first DSP, and rest
     //in fabric. I do it in 4 stages across 2 cycles parallel to first cycles of DSP so it
@@ -219,6 +217,9 @@ module GUCH (
 
 
 
-
+    //syntax drafts for flare
+    //parallel [u32 i : arr.len<()>] {
+    //  arr[i].rgbpck<(var0, var1)>;
+    //}
 
 endmodule

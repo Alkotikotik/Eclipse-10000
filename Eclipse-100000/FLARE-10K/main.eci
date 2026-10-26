@@ -1,21 +1,3 @@
-#ORG 60
-~JmpBoot:
-	JMP ~boot
-	
-#ORG 100   >_ 0x64 Syscall Vector
-	RETU
-	
-#ORG 104   >_ 0x68 Timer Vector
-	RETU
-	
-#ORG 108   >_ 0x6C Key Interrupt Vector
-	JMP ~HandleKey
-	>_RETU
-	
-#ORG 112   >_ 0x70 Memory Fault Vector
-	RETU
-#ORG 0x1000
-~boot:
 #ORG 0x1000
 LMA rx31 <- ~this_is_the_end_0x00
 SPRSET rx31 -> SP
@@ -23,91 +5,28 @@ SPRSET rx31 -> SP
 	XOR [rx31, rx31]
 
 ~main:
-	LMA  rx26 <- 268435456
-	LOAD rx30 <- 11
-	STX  rx30 >=> [rx31, rx31 << 0 + 4096]
 	LOAD rx29 <- 0
-	LOAD rz290 <- 15
-	LOAD rz291 <- 0
-	LOAD rz292 <- 0
-	LOAD rz293 <- 15
-	LOAD rz250 <- 0
+	MOV  rx0 <- rx29 0
+	CALL rec
 
-~Lab_while_start_0:
-	LOAD rx30 <- 12
-	STX  rx30 >=> [rx31, rx31 << 0 + 4092]
-	MOV  rz280 <- rz290 0
-	MOV  rx27 <- rz280 0
-	SHL  [rx27, rx31 12]
-	MOV  rz280 <- rz291 0
-	MOV  rx28 <- rz280 0
-	SHL  [rx28, rx31 8]
-	OR  [rx27, rx28 0]
-	MOV  rz280 <- rz292 0
-	MOV  rx28 <- rz280 0
-	SHL  [rx28, rx31 4]
-	OR  [rx27, rx28 0]
-	MOV  rz280 <- rz293 0
-	MOV  rx30 <- rz280 0
-	MOV  ry280 <- rx27 0
-	OR  [ry280, rx30 0]
-	STR  ry280 -> [rx26 0]
-	ADD  rx26 <- [rx26, rx31 2]
+	MOV  rx29 <- rx30 0
+	STX  rx29 >=> [rx31, rx31 << 0 + 4000]
+	RET
 
-	IBNE [rz250 <-> 0] >-> ~Lab_else_2
+~rec:
+	MOV  rx29 <- rx0 0
+	ADD  rx29 <- [rx29, rx31 1]
 
-	SUB  rz290 <- [rz290, rx31 1]
-	ADD  rz291 <- [rz291, rx31 1]
-	MOV  rz280 <- rz291 0
+	IBSEU [rx29 <-> 5000] >-> ~Lab_endif_1
 
-	IBNE [rz280 <-> 15] >-> ~Lab_endif_5
+	MOV  rx30 <- rx29 0
+	RET
 
-	LOAD rz250 <- 1
+~Lab_endif_1:
+	MOV  rx0 <- rx29 0
+	CALL rec
 
-~Lab_endif_5:
-	JMP  -> ~Lab_endif_3
-
-
-~Lab_else_2:
-
-	IBNE [rz250 <-> 1] >-> ~Lab_else_6
-
-	SUB  rz291 <- [rz291, rx31 1]
-	ADD  rz292 <- [rz292, rx31 1]
-	MOV  rz280 <- rz292 0
-
-	IBNE [rz280 <-> 15] >-> ~Lab_endif_9
-
-	LOAD rz250 <- 2
-
-~Lab_endif_9:
-	JMP  -> ~Lab_endif_7
-
-
-~Lab_else_6:
-
-	IBNE [rz250 <-> 2] >-> ~Lab_endif_11
-
-	SUB  rz292 <- [rz292, rx31 1]
-	ADD  rz290 <- [rz290, rx31 1]
-	MOV  rz280 <- rz290 0
-
-	IBNE [rz280 <-> 15] >-> ~Lab_endif_13
-
-	LOAD rz250 <- 0
-
-~Lab_endif_13:
-
-~Lab_endif_11:
-
-~Lab_endif_7:
-
-~Lab_endif_3:
-	LOAD rx30 <- 13
-	STX  rx30 >=> [rx31, rx31 << 0 + 4088]
-	JMP  -> ~Lab_while_start_0
-
-
-~Lab_while_end_1:
+	MOV  rx29 <- rx30 0
+	MOV  rx30 <- rx29 0
 	RET
 ~this_is_the_end_0x00:

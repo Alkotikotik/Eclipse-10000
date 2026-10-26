@@ -1,4 +1,13 @@
-parallel [u32 i : arr.len<()>] {
-    arr[i].rgbpck<(var0, var1)>;
+func main(){
+    u32 result = 0;
+    result = rec(result);
+    [4000] = result;
+}
 
+func rec(u32 result) => u32 {
+    result += 1;
+    if [result > 5000] {
+        return result;
+    }
+    return rec(result);
 }

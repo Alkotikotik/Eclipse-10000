@@ -1,3 +1,2 @@
 ~init:
-    ADD rx0, rz00, ry10
-    RET
+    
