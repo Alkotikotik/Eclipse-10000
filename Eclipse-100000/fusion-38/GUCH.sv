@@ -39,32 +39,45 @@ module GUCH (
     //Im planning to pipeline it like crazy, like 10-11 stages for GUCH
     //which means i've got like 1-2 logic levels per stage
 
+    //== PREA (Preamble) ==//
+    //Moving longest stuff from STRT to here, for crit path ofc
+    logic [32:0] PREA_a, PREA_b, PREA_c;
+    logic [8:0]  PREA_shexp, PREA_cexp;
+    always_ff @(posedge clk) begin : PREA_EFP
+        //unbias by inverting top bit, and put back hidden bit.
+        //No need for reset, otherwise DSP wouldn't accept them immediately
+        PREA_a <= {a[31], ~a[30], a[29:24], |a[30:24], a[23:0]};
+        PREA_b <= {b[31], ~b[30], b[29:24], |b[30:24], b[23:0]};
+        PREA_c <= {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
+
+        PREA_shexp <= {{3{~a[30]}}, {a[29:25], a[24] | ~|a[30:24]}} + {{3{~b[30]}}, {b[29:25], b[24] | ~|b[30:24]}} + 9'd28;
+        PREA_cexp  <= {{3{~c[30]}}, {c[29:25], c[24] | ~|c[30:24]}};
+    end : PREA_EFP
+
     //== STRT (start) ==//
-    //Register operands, calc sh and start DSPs
+    //Calc sh and start DSPs
+
     logic [32:0] STRT_a, STRT_b, STRT_c;
     logic [8:0] shexp;
     logic [6:0] sh_exp;
-    always_ff @(posedge clk) begin : STRT_EFP
-        //unbias by inverting top bit, and put back hidden bit.
-        //No need for reset, otherwise DSP wouldn't accept them immediately
-        STRT_a <= {a[31], ~a[30], a[29:24], |a[30:24], a[23:0]};
-        STRT_b <= {b[31], ~b[30], b[29:24], |b[30:24], b[23:0]};
-        STRT_c <= {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
-    end : STRT_EFP
+    always_ff @(posedge clk) begin : STRT_CRRY
+        STRT_a <= PREA_a;
+        STRT_b <= PREA_b;
+        STRT_c <= PREA_c;
+    end : STRT_CRRY
 
     //Basically sub_sel bits govern the sign of products and c result
     //add or subtract. Subtract magnitudes
     logic product_sign, c_sign, sub_mags;
-
     always_ff @(posedge clk or negedge rst_n) begin : signs
         if (!rst_n) begin
             product_sign <= 1'b0;
             c_sign <= 1'b0;
             sub_mags <= 1'b0;
         end else begin
-            product_sign <= a[31] ^ b[31] ^ neg_p[0]; //FNMA... etc
-            c_sign <= c[31] ^ neg_c[1]; //FMS... etc
-            sub_mags <= efp_op & (a[31] ^ b[31] ^ c[31] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
+            product_sign <= PREA_a[32] ^ PREA_b[32] ^ neg_p; //FNMA... etc
+            c_sign <= PREA_c[32] ^ neg_c; //FMS... etc
+            sub_mags <= efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
         end
     end : signs
 
@@ -77,7 +90,7 @@ module GUCH (
     //it actually shouldn't be -64, but instead -63. Because subnormals hidden
     //bit is actually 0 instead of 1, such as they are 0.ff * 2^exp instead of
     //1.ff * 2^exp for normals.
-    assign shexp = {{3{~a[30]}}, {a[29:25], a[24] | ~|a[30:24]}} + {{3{~b[30]}}, {b[29:25], b[24] | ~|b[30:24]}} - {{3{~c[30]}}, {c[29:25], c[24] | ~|c[30:24]}} + 9'd28;
+    assign shexp = PREA_shexp - PREA_cexp;
     //clamp, if sign bit is 1(two's copmliment), don't move because shifter
     //can only move down. Then if 7th bit is 1, its between 128-256, and it
     //all is too high, so just set it to highest number within 7bits - 127.
@@ -85,10 +98,7 @@ module GUCH (
 
     //I need to align C to 77bits then add lower bits in first DSP, and rest
     //in fabric. I do it in 4 stages across 2 cycles parallel to first cycles of DSP so it
-    //arrives just in time. The split is 2-2-2-1 bits per stage. I did it
-    //because it saves LUT since 2shift bits plus shift fits just in LUT6
-    //hence its the cheapest possible way to do it. And more bits before bc my
-    //gut feeling tells me that its safer to it in DSAL0.
+    //arrives just in time. The split is 2-2-2-1 bits per stage.
     logic [1:0] STRT_shexp_lo, STRT_shexp_lmid, STRT_shexp_hmid;
     logic STRT_shexp_hi;
     always_ff @(posedge clk or negedge rst_n) begin : STRT_SH
@@ -135,7 +145,7 @@ module GUCH (
         .BREG(2),                         // Number of pipeline stages for B (0, 1 or 2)
         .CARRYINREG(1),                   // Number of pipeline stages for CARRYIN (0 or 1)
         .CARRYINSELREG(1),                // Number of pipeline stages for CARRYINSEL (0 or 1)
-        .CREG(1),                         // Number of pipeline stages for C (0 or 1)
+        .CREG(0),                         // Number of pipeline stages for C (0 or 1)
         .DREG(1),                         // Number of pipeline stages for D (0 or 1)
         .INMODEREG(1),                    // Number of pipeline stages for INMODE (0 or 1)
         .MREG(1),                         // Number of multiplier pipeline stages (0 or 1)
@@ -166,14 +176,14 @@ module GUCH (
         //Btw this signal should theoretically be in DSAL1, however why don't
         //just delay it in SM? Thats what I thought too. It only saves ffs,
         //but hey, ill take it.
-        .ALUMODE({ALUMODE[3:2], ALUMODE[1:0]} | {2{DSAL0_sub_mags}}),//Bc float isn't two's compliment
+        .ALUMODE({ALUMODE[3:2], ALUMODE[1:0] | {2{DSAL0_sub_mags}}}),//Bc float isn't two's compliment
         .CARRYINSEL(3'b000),             // 3-bit input: Carry select input
         .CLK(clk),                       // 1-bit input: Clock input
         .INMODE(5'b00000),               // 5-bit input: INMODE control input
         .OPMODE(OPMODE),           // 7-bit input: Operation mode input
         //Its two's comlimetn so top bit gotta be 0
-        .A({6'b0, a[23:0]}),                           // 30-bit input: A data input
-        .B({1'b0, b[16:0]}),
+        .A({6'b0, PREA_a[23:0]}),                           // 30-bit input: A data input
+        .B({1'b0, PREA_b[16:0]}),
         .C(C_alig3[47:0]), //we're gonna need it at the third DSP cycle
         .CARRYIN(1'b0),                  // 1-bit input: Carry input signal
         .D(25'h0),                       // 25-bit input: D data input
@@ -206,34 +216,39 @@ module GUCH (
 
     //==DSAL0(Digital Signal Proccesing / Aligment)==//
     //The DSP is pipelined and will take total of 4cycles.
-    //This is the second one. It also performs align stages 1+2
-    logic [1:0] DSAL0_shexp_hmid;
+    //This is the second one. It also performs align stage
+    logic [1:0] DSAL0_shexp_lmid, DSAL0_shexp_hmid;
     logic DSAL0_shexp_hi;
     logic [27:0] C_alig0;
     logic [39:0] C_alig1; // aligned C
 
-    assign C_alig0 = {STRT_c[24:0], 3'h0} >> STRT_shexp_lo;
-    always_ff @(posedge clk or negedge rst_n) begin : DSAL0
+    always_ff @(posedge clk or negedge rst_n) begin : DSAL0_CRRY
         if (!rst_n) begin
+            DSAL0_shexp_lmid <= 2'h0;
             DSAL0_shexp_hmid <= 2'h0;
             DSAL0_shexp_hi <= 1'h0;
             DSAL0_sub_mags <= 1'b0;
         end else begin
+            DSAL0_shexp_lmid <= STRT_shexp_lmid;
             DSAL0_shexp_hmid <= STRT_shexp_hmid;
             DSAL0_shexp_hi <= STRT_shexp_hi;
             DSAL0_sub_mags <= sub_mags;
         end
-    end : DSAL0
+    end : DSAL0_CRRY
 
     always_ff @(posedge clk) begin : DSAL0_C
-        C_alig1 <= {C_alig0, 12'h0} >> {STRT_shexp_lmid, 2'h0};
+        C_alig0 <= {STRT_c[24:0], 3'h0} >> STRT_shexp_lo;
     end : DSAL0_C
 
 
     //== DSAL1 (Digital Signal Proccesing / Aligment) ==//
-    //Finishing alignment and starting second DSP
+    //Finishing alignment(2-2-1) and starting second DSP
+    assign C_alig1 = {C_alig0, 12'h0} >> {DSAL0_shexp_lmid, 2'h0};
     assign C_alig2 = {C_alig1, 37'h0} >> {DSAL0_shexp_hmid, 4'h0};
-    assign C_alig3 = C_alig2 >> {DSAL0_shexp_hi, 6'h0};
+
+    always_ff @(posedge clk) begin : DSAL1_C
+        C_alig3 <= C_alig2 >> {DSAL0_shexp_hi, 6'h0};
+    end : DSAL1_C
 
     //syntax drafts for flare
     //parallel [u32 i : arr.len<()>] {
