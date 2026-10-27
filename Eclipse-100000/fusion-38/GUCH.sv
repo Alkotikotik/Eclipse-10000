@@ -8,8 +8,12 @@ module GUCH (
     input logic rst_n,
 
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
-    input logic [1:0] op_mode,
-    input logic [5:0] sub_sel,
+    //First of all, all signals are computed in 1 SM because all GUCHes share them
+    //But that I mean b becomes one or c becomes zero
+    input logic efp_op, neg_p, neg_c, ffma16,
+    input logic [1:0] cmp_code, //<=, <, ==, !=
+    input logic [6:0] OPMODE,
+    input logic [3:0] ALUMODE,
 
     input logic [31:0] a, b, c,
 
@@ -45,11 +49,11 @@ module GUCH (
         //No need for reset, otherwise DSP wouldn't accept them immediately
         STRT_a <= {a[31], ~a[30], a[29:24], |a[30:24], a[23:0]};
         STRT_b <= {b[31], ~b[30], b[29:24], |b[30:24], b[23:0]};
-        STRT_c <= sub_sel[3] ? 33'h0 : {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
+        STRT_c <= {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
     end : STRT_EFP
 
     //Basically sub_sel bits govern the sign of products and c result
-    //add or subtract.
+    //add or subtract. Subtract magnitudes
     logic product_sign, c_sign, sub_mags;
 
     always_ff @(posedge clk or negedge rst_n) begin : signs
@@ -58,9 +62,9 @@ module GUCH (
             c_sign <= 1'b0;
             sub_mags <= 1'b0;
         end else begin
-            product_sign <= a[31] ^ b[31] ^ sub_sel[0]; //FNMA... etc
-            c_sign <= c[31] ^ sub_sel[1]; //FMS... etc
-            sub_mags <= a[31] ^ b[31] ^ c[31] ^ sub_sel[0] ^ sub_sel[1]; //Whether to add or sub magnitudes
+            product_sign <= a[31] ^ b[31] ^ neg_p[0]; //FNMA... etc
+            c_sign <= c[31] ^ neg_c[1]; //FMS... etc
+            sub_mags <= efp_op & (a[31] ^ b[31] ^ c[31] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
         end
     end : signs
 
@@ -103,6 +107,11 @@ module GUCH (
         end
     end : STRT_SH
 
+    logic DSAL0_sub_mags;
+    logic [76:0] C_alig2, C_alig3;
+    logic [47:0] P1, PCOUT1;
+
+    /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
         // Feature Control Attributes: Data Path Selection
         .A_INPUT("DIRECT"),               // Selects A input source, "DIRECT" (A port) or "CASCADE" (ACIN port)
@@ -135,91 +144,95 @@ module GUCH (
     )
     SoItBegins (
         // Cascade: 30-bit (each) output: Cascade Ports
-        .ACOUT(ACOUT),                   // 30-bit output: A port cascade output
-        .BCOUT(BCOUT),                   // 18-bit output: B port cascade output
-        .CARRYCASCOUT(CARRYCASCOUT),     // 1-bit output: Cascade carry output
-        .MULTSIGNOUT(MULTSIGNOUT),       // 1-bit output: Multiplier sign cascade output
-        .PCOUT(PCOUT),                   // 48-bit output: Cascade output
+        .ACOUT(),                        // 30-bit output: A port cascade output
+        .BCOUT(),                        // 18-bit output: B port cascade output
+        .CARRYCASCOUT(),                 // 1-bit output: Cascade carry output
+        .MULTSIGNOUT(),                  // 1-bit output: Multiplier sign cascade output
+        .PCOUT(PCOUT1),                  // 48-bit output: Cascade output
         // Control: 1-bit (each) output: Control Inputs/Status Bits
-        .OVERFLOW(OVERFLOW),             // 1-bit output: Overflow in add/acc output
-        .PATTERNBDETECT(PATTERNBDETECT), // 1-bit output: Pattern bar detect output
-        .PATTERNDETECT(PATTERNDETECT),   // 1-bit output: Pattern detect output
-        .UNDERFLOW(UNDERFLOW),           // 1-bit output: Underflow in add/acc output
+        .OVERFLOW(),                     // 1-bit output: Overflow in add/acc output
+        .PATTERNBDETECT(),               // 1-bit output: Pattern bar detect output
+        .PATTERNDETECT(),                // 1-bit output: Pattern detect output
+        .UNDERFLOW(),                    // 1-bit output: Underflow in add/acc output
         // Data: 4-bit (each) output: Data Ports
-        .CARRYOUT(CARRYOUT),             // 4-bit output: Carry output
-        .P(P),                           // 48-bit output: Primary data output
+        .CARRYOUT(),                     // 4-bit output: Carry output
+        .P(P1),                          // 48-bit output: Primary data output
         // Cascade: 30-bit (each) input: Cascade Ports
-        .ACIN(ACIN),                     // 30-bit input: A cascade data input
-        .BCIN(BCIN),                     // 18-bit input: B cascade input
-        .CARRYCASCIN(CARRYCASCIN),       // 1-bit input: Cascade carry input
-        .MULTSIGNIN(MULTSIGNIN),         // 1-bit input: Multiplier sign input
-        .PCIN(PCIN),                     // 48-bit input: P cascade input
-        // Control: 4-bit (each) input: Control Inputs/Status Bits
-        .ALUMODE(ALUMODE),               // 4-bit input: ALU control input
-        .CARRYINSEL(CARRYINSEL),         // 3-bit input: Carry select input
+        .ACIN(30'h0),                    // 30-bit input: A cascade data input
+        .BCIN(18'h0),                    // 18-bit input: B cascade input
+        .CARRYCASCIN(1'b0),              // 1-bit input: Cascade carry input
+        .MULTSIGNIN(1'b0),               // 1-bit input: Multiplier sign input
+        .PCIN(48'h0),                    // 48-bit input: P cascade input
+        //Btw this signal should theoretically be in DSAL1, however why don't
+        //just delay it in SM? Thats what I thought too. It only saves ffs,
+        //but hey, ill take it.
+        .ALUMODE({ALUMODE[3:2], ALUMODE[1:0]} | {2{DSAL0_sub_mags}}),//Bc float isn't two's compliment
+        .CARRYINSEL(3'b000),             // 3-bit input: Carry select input
         .CLK(clk),                       // 1-bit input: Clock input
-        .INMODE(INMODE),                 // 5-bit input: INMODE control input
-        .OPMODE(OPMODE),                 // 7-bit input: Operation mode input
+        .INMODE(5'b00000),               // 5-bit input: INMODE control input
+        .OPMODE(OPMODE),           // 7-bit input: Operation mode input
         //Its two's comlimetn so top bit gotta be 0
         .A({6'b0, a[23:0]}),                           // 30-bit input: A data input
-        .B(sub_sel[2] ? 18'h1 : {1'b0, b[16:0]}), //For fused or plain add, should be good level-wise
-        .C(C_alig3), //we're gonna need it at the third DSP cycle
-        .CARRYIN(CARRYIN),               // 1-bit input: Carry input signal
-        .D(D),                           // 25-bit input: D data input
+        .B({1'b0, b[16:0]}),
+        .C(C_alig3[47:0]), //we're gonna need it at the third DSP cycle
+        .CARRYIN(1'b0),                  // 1-bit input: Carry input signal
+        .D(25'h0),                       // 25-bit input: D data input
         // Reset/Clock Enable: 1-bit (each) input: Reset/Clock Enable Inputs
-        .CEA1(CEA1),                     // 1-bit input: Clock enable input for 1st stage AREG
-        .CEA2(CEA2),                     // 1-bit input: Clock enable input for 2nd stage AREG
-        .CEAD(CEAD),                     // 1-bit input: Clock enable input for ADREG
-        .CEALUMODE(CEALUMODE),           // 1-bit input: Clock enable input for ALUMODE
-        .CEB1(CEB1),                     // 1-bit input: Clock enable input for 1st stage BREG
-        .CEB2(CEB2),                     // 1-bit input: Clock enable input for 2nd stage BREG
-        .CEC(CEC),                       // 1-bit input: Clock enable input for CREG
-        .CECARRYIN(CECARRYIN),           // 1-bit input: Clock enable input for CARRYINREG
-        .CECTRL(CECTRL),                 // 1-bit input: Clock enable input for OPMODEREG and CARRYINSELREG
-        .CED(CED),                       // 1-bit input: Clock enable input for DREG
-        .CEINMODE(CEINMODE),             // 1-bit input: Clock enable input for INMODEREG
-        .CEM(CEM),                       // 1-bit input: Clock enable input for MREG
-        .CEP(CEP),                       // 1-bit input: Clock enable input for PREG
-        .RSTA(RSTA),                     // 1-bit input: Reset input for AREG
-        .RSTALLCARRYIN(RSTALLCARRYIN),   // 1-bit input: Reset input for CARRYINREG
-        .RSTALUMODE(RSTALUMODE),         // 1-bit input: Reset input for ALUMODEREG
-        .RSTB(RSTB),                     // 1-bit input: Reset input for BREG
-        .RSTC(RSTC),                     // 1-bit input: Reset input for CREG
-        .RSTCTRL(RSTCTRL),               // 1-bit input: Reset input for OPMODEREG and CARRYINSELREG
-        .RSTD(RSTD),                     // 1-bit input: Reset input for DREG and ADREG
-        .RSTINMODE(RSTINMODE),           // 1-bit input: Reset input for INMODEREG
-        .RSTM(RSTM),                     // 1-bit input: Reset input for MREG
-        .RSTP(RSTP)                      // 1-bit input: Reset input for PREG
+        .CEA1(1'b1),                     // 1-bit input: Clock enable input for 1st stage AREG
+        .CEA2(1'b1),                     // 1-bit input: Clock enable input for 2nd stage AREG
+        .CEAD(1'b1),                     // 1-bit input: Clock enable input for ADREG
+        .CEALUMODE(1'b1),                // 1-bit input: Clock enable input for ALUMODE
+        .CEB1(1'b1),                     // 1-bit input: Clock enable input for 1st stage BREG
+        .CEB2(1'b1),                     // 1-bit input: Clock enable input for 2nd stage BREG
+        .CEC(1'b1),                      // 1-bit input: Clock enable input for CREG
+        .CECARRYIN(1'b1),                // 1-bit input: Clock enable input for CARRYINREG
+        .CECTRL(1'b1),                   // 1-bit input: Clock enable input for OPMODEREG and CARRYINSELREG
+        .CED(1'b1),                      // 1-bit input: Clock enable input for DREG
+        .CEINMODE(1'b1),                 // 1-bit input: Clock enable input for INMODEREG
+        .CEM(1'b1),                      // 1-bit input: Clock enable input for MREG
+        .CEP(1'b1),                      // 1-bit input: Clock enable input for PREG
+        .RSTA(1'b0),                     // 1-bit input: Reset input for AREG
+        .RSTALLCARRYIN(1'b0),            // 1-bit input: Reset input for CARRYINREG
+        .RSTALUMODE(1'b0),               // 1-bit input: Reset input for ALUMODEREG
+        .RSTB(1'b0),                     // 1-bit input: Reset input for BREG
+        .RSTC(1'b0),                     // 1-bit input: Reset input for CREG
+        .RSTCTRL(1'b0),                  // 1-bit input: Reset input for OPMODEREG and CARRYINSELREG
+        .RSTD(1'b0),                     // 1-bit input: Reset input for DREG and ADREG
+        .RSTINMODE(1'b0),                // 1-bit input: Reset input for INMODEREG
+        .RSTM(1'b0),                     // 1-bit input: Reset input for MREG
+        .RSTP(1'b0)                      // 1-bit input: Reset input for PREG
     );
+    /* verilator lint_on PINCONNECTEMPTY */
 
     //==DSAL0(Digital Signal Proccesing / Aligment)==//
     //The DSP is pipelined and will take total of 4cycles.
     //This is the second one. It also performs align stages 1+2
     logic [1:0] DSAL0_shexp_hmid;
     logic DSAL0_shexp_hi;
-    logic [35:0] C_alig0;
-    logic [47:0] C_alig1; // aligned C
-    logic [31:0] C_alig1;
+    logic [27:0] C_alig0;
+    logic [39:0] C_alig1; // aligned C
 
-    assign C_alig0 = {STRT_c[24:0], 4'h0} >> STRT_shexp_lo;
+    assign C_alig0 = {STRT_c[24:0], 3'h0} >> STRT_shexp_lo;
     always_ff @(posedge clk or negedge rst_n) begin : DSAL0
         if (!rst_n) begin
             DSAL0_shexp_hmid <= 2'h0;
             DSAL0_shexp_hi <= 1'h0;
-            C_alig1 <= 48'h0;
+            DSAL0_sub_mags <= 1'b0;
         end else begin
             DSAL0_shexp_hmid <= STRT_shexp_hmid;
             DSAL0_shexp_hi <= STRT_shexp_hi;
-            C_alig0 <= {C_alig0, 16'h0} >> {STRT_shexp_lmid, 2'h0};
+            DSAL0_sub_mags <= sub_mags;
         end
     end : DSAL0
+
+    always_ff @(posedge clk) begin : DSAL0_C
+        C_alig1 <= {C_alig0, 12'h0} >> {STRT_shexp_lmid, 2'h0};
+    end : DSAL0_C
 
 
     //== DSAL1 (Digital Signal Proccesing / Aligment) ==//
     //Finishing alignment and starting second DSP
-    logic [76:0] C_alig2, C_alig3;
-
-    assign C_alig2 = {C_alig1, 20'h0} >> {DSAL0_shexp_hmid, 4'h0};
+    assign C_alig2 = {C_alig1, 37'h0} >> {DSAL0_shexp_hmid, 4'h0};
     assign C_alig3 = C_alig2 >> {DSAL0_shexp_hi, 6'h0};
 
     //syntax drafts for flare
