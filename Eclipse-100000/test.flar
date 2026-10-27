@@ -6,7 +6,7 @@ func main(){
 
 func rec(u32 result) => u32 {
     result += 1;
-    if [result > 5000] {
+    if [result == 100000] {
         return result;
     }
     return rec(result);

@@ -38,7 +38,8 @@ module GUCH (
     //== STRT (start) ==//
     //Register operands, calc sh and start DSPs
     logic [32:0] STRT_a, STRT_b, STRT_c;
-    logic [8:0]  sh_exp;
+    logic [8:0] shexp;
+    logic [6:0] sh_exp;
     always_ff @(posedge clk) begin : STRT_EFP
         //unbias by inverting top bit, and put back hidden bit.
         //No need for reset, otherwise DSP wouldn't accept them immediately
@@ -68,7 +69,15 @@ module GUCH (
     //are computing a shift, more on that later. Also, only lower bits rn
     //28 is constant offset for efp 32, it is calculated by 76 - 48 which is
     //shifted C bit length minus bits of a*c product
-    assign sh_exp = {{3{~a[30]}}, a[29:24]} + {{3{~b[30]}}, b[29:24]} - {{3{~c[30]}}, c[29:24]} + 9'd28;
+    //And for subnormals, is it is a subnormal, which is exp 0_000_000 (bc of bias)
+    //it actually shouldn't be -64, but instead -63. Because subnormals hidden
+    //bit is actually 0 instead of 1, such as they are 0.ff * 2^exp instead of
+    //1.ff * 2^exp for normals.
+    assign shexp = {{3{~a[30]}}, {a[29:25], a[24] | ~|a[30:24]}} + {{3{~b[30]}}, {b[29:25], b[24] | ~|b[30:24]}} - {{3{~c[30]}}, {c[29:25], c[24] | ~|c[30:24]}} + 9'd28;
+    //clamp, if sign bit is 1(two's copmliment), don't move because shifter
+    //can only move down. Then if 7th bit is 1, its between 128-256, and it
+    //all is too high, so just set it to highest number within 7bits - 127.
+    assign sh_exp = shexp[8] ? 0 : (shexp[7] ? 7'd127 : shexp[6:0]);
 
     //I need to align C to 77bits then add lower bits in first DSP, and rest
     //in fabric. I do it in 4 stages across 2 cycles parallel to first cycles of DSP so it
@@ -212,10 +221,6 @@ module GUCH (
 
     assign C_alig2 = {C_alig1, 20'h0} >> {DSAL0_shexp_hmid, 4'h0};
     assign C_alig3 = C_alig2 >> {DSAL0_shexp_hi, 6'h0};
-
-
-
-
 
     //syntax drafts for flare
     //parallel [u32 i : arr.len<()>] {

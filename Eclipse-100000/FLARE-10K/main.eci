@@ -17,7 +17,7 @@ SPRSET rx31 -> SP
 	MOV  rx29 <- rx0 0
 	ADD  rx29 <- [rx29, rx31 1]
 
-	IBSEU [rx29 <-> 5000] >-> ~Lab_endif_1
+	IBNE [rx29 <-> 100000] >-> ~Lab_endif_1
 
 	MOV  rx30 <- rx29 0
 	RET
