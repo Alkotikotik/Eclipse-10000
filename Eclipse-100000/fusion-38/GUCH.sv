@@ -10,9 +10,10 @@ module GUCH (
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
     //First of all, all signals are computed in 1 SM because all GUCHes share them
     //But that I mean b becomes one or c becomes zero
-    input logic efp_op, neg_p, neg_c, ffma16,
+    input logic efp_op, neg_p, neg_c, ffma16_op,
     input logic [1:0] cmp_code, //<=, <, ==, !=
-    input logic [6:0] OPMODE,
+    input logic [6:0] OPMODE1, OPMODE2,
+    input logic [4:0] INMODE1, INMODE2,
     input logic [3:0] ALUMODE,
 
     input logic [31:0] a, b, c,
@@ -50,13 +51,12 @@ module GUCH (
         PREA_b <= {b[31], ~b[30], b[29:24], |b[30:24], b[23:0]};
         PREA_c <= {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
 
-        PREA_shexp <= {{3{~a[30]}}, {a[29:25], a[24] | ~|a[30:24]}} + {{3{~b[30]}}, {b[29:25], b[24] | ~|b[30:24]}} + 9'd28;
-        PREA_cexp  <= {{3{~c[30]}}, {c[29:25], c[24] | ~|c[30:24]}};
+        PREA_shexp <= {{3{~a[30]}}, {a[29:25], a[24] | ~|a[30:24]}} + {{3{~b[30]}}, {b[29:25], b[24] | ~|b[30:24]}};
+        PREA_cexp  <= {{3{~c[30]}}, {c[29:25], c[24] | ~|c[30:24]}} - 9'd28;
     end : PREA_EFP
 
     //== STRT (start) ==//
     //Calc sh and start DSPs
-
     logic [32:0] STRT_a, STRT_b, STRT_c;
     logic [8:0] shexp;
     logic [6:0] sh_exp;
@@ -119,98 +119,93 @@ module GUCH (
 
     logic DGAF0_sub_mags;
     logic [76:0] C_alig2, C_alig3;
-    logic [47:0] P1, PCOUT0;
+    logic [47:0] P1, PCOUT0, P2;
+    logic [29:0] ACOUT0;
 
     /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
-        // Feature Control Attributes: Data Path Selection
-        .A_INPUT("DIRECT"),               // Selects A input source, "DIRECT" (A port) or "CASCADE" (ACIN port)
-        .B_INPUT("DIRECT"),               // Selects B input source, "DIRECT" (B port) or "CASCADE" (BCIN port)
-        .USE_DPORT("FALSE"),              // Select D port usage (TRUE or FALSE)
+        .A_INPUT("DIRECT"),
+        .B_INPUT("DIRECT"),
+        .USE_DPORT("TRUE"),
         .USE_MULT("DYNAMIC"), //For both floats and integer ops
-        .USE_SIMD("ONE48"),               // SIMD selection ("ONE48", "TWO24", "FOUR12")
-        // Pattern Detector Attributes: Pattern Detection Configuration
-        .AUTORESET_PATDET("NO_RESET"),    // "NO_RESET", "RESET_MATCH", "RESET_NOT_MATCH" 
-        .MASK(48'h3fffffffffff),          // 48-bit mask value for pattern detect (1=ignore)
-        .PATTERN(48'h000000000000),       // 48-bit pattern match for pattern detect
-        .SEL_MASK("MASK"),                // "C", "MASK", "ROUNDING_MODE1", "ROUNDING_MODE2" 
-        .SEL_PATTERN("PATTERN"),          // Select pattern value ("PATTERN" or "C")
-        .USE_PATTERN_DETECT("NO_PATDET"), // Enable pattern detect ("PATDET" or "NO_PATDET")
-        // Register Control Attributes: Pipeline Register Configuration
-        .ACASCREG(2),                     // Number of pipeline stages between A/ACIN and ACOUT (0, 1 or 2)
-        .ADREG(1),                        // Number of pipeline stages for pre-adder (0 or 1)
-        .ALUMODEREG(1),                   // Number of pipeline stages for ALUMODE (0 or 1)
-        .AREG(2),                         // Number of pipeline stages for A (0, 1 or 2)
-        .BCASCREG(1),                     // Number of pipeline stages between B/BCIN and BCOUT (0, 1 or 2)
-        .BREG(2),                         // Number of pipeline stages for B (0, 1 or 2)
-        .CARRYINREG(1),                   // Number of pipeline stages for CARRYIN (0 or 1)
-        .CARRYINSELREG(1),                // Number of pipeline stages for CARRYINSEL (0 or 1)
-        .CREG(0),                         // Number of pipeline stages for C (0 or 1)
-        .DREG(1),                         // Number of pipeline stages for D (0 or 1)
-        .INMODEREG(1),                    // Number of pipeline stages for INMODE (0 or 1)
-        .MREG(1),                         // Number of multiplier pipeline stages (0 or 1)
-        .OPMODEREG(1),                    // Number of pipeline stages for OPMODE (0 or 1)
-        .PREG(1)                          // Number of pipeline stages for P (0 or 1)
+        .USE_SIMD("ONE48"),
+        .AUTORESET_PATDET("NO_RESET"),
+        .MASK(48'h3fffffffffff),
+        .PATTERN(48'h000000000000),
+        .SEL_MASK("MASK"),
+        .SEL_PATTERN("PATTERN"),
+        .USE_PATTERN_DETECT("NO_PATDET"),
+        .ACASCREG(1),
+        .ADREG(1),
+        .ALUMODEREG(1),
+        .AREG(1),
+        .BCASCREG(1),
+        .BREG(2),
+        .CARRYINREG(1),
+        .CARRYINSELREG(1),
+        .CREG(0),
+        .DREG(1),
+        .INMODEREG(1),
+        .MREG(1),
+        .OPMODEREG(1),
+        .PREG(1)
     )
     SoItBegins (
-        // Cascade: 30-bit (each) output: Cascade Ports
-        .ACOUT(),                        // 30-bit output: A port cascade output
-        .BCOUT(),                        // 18-bit output: B port cascade output
-        .CARRYCASCOUT(),                 // 1-bit output: Cascade carry output
-        .MULTSIGNOUT(),                  // 1-bit output: Multiplier sign cascade output
-        .PCOUT(PCOUT0),                  // 48-bit output: Cascade output
-        // Control: 1-bit (each) output: Control Inputs/Status Bits
-        .OVERFLOW(),                     // 1-bit output: Overflow in add/acc output
-        .PATTERNBDETECT(),               // 1-bit output: Pattern bar detect output
-        .PATTERNDETECT(),                // 1-bit output: Pattern detect output
-        .UNDERFLOW(),                    // 1-bit output: Underflow in add/acc output
-        // Data: 4-bit (each) output: Data Ports
-        .CARRYOUT(),                     // 4-bit output: Carry output
-        .P(P1),                          // 48-bit output: Primary data output
-        // Cascade: 30-bit (each) input: Cascade Ports
-        .ACIN(30'h0),                    // 30-bit input: A cascade data input
-        .BCIN(18'h0),                    // 18-bit input: B cascade input
-        .CARRYCASCIN(1'b0),              // 1-bit input: Cascade carry input
-        .MULTSIGNIN(1'b0),               // 1-bit input: Multiplier sign input
-        .PCIN(48'h0),                    // 48-bit input: P cascade input
+        .ACOUT(ACOUT0),
+        .BCOUT(),
+        .CARRYCASCOUT(),
+        .MULTSIGNOUT(),
+        .PCOUT(PCOUT0),
+        .OVERFLOW(),
+        .PATTERNBDETECT(),
+        .PATTERNDETECT(),
+        .UNDERFLOW(),
+        .CARRYOUT(),
+        .P(P1),
+        .ACIN(30'h0),
+        .BCIN(18'h0),
+        .CARRYCASCIN(1'b0),
+        .MULTSIGNIN(1'b0),
+        .PCIN(48'h0),
         //Btw this signal should theoretically be in DGAF1, however why don't
         //just delay it in SM? Thats what I thought too. It only saves ffs,
         //but hey, ill take it.
         .ALUMODE({ALUMODE[3:2], ALUMODE[1:0] | {2{DGAF0_sub_mags}}}),//Bc float isn't two's compliment
-        .CARRYINSEL(3'b000),             // 3-bit input: Carry select input
-        .CLK(clk),                       // 1-bit input: Clock input
-        .INMODE(5'b00000),               // 5-bit input: INMODE control input
-        .OPMODE(OPMODE),           // 7-bit input: Operation mode input
+        .CARRYINSEL(3'b000),
+        .CLK(clk),
+        .INMODE(INMODE1),//One for float ops, one for FFMA
+        .OPMODE(OPMODE1),
         //Its two's comlimetn so top bit gotta be 0
-        .A({6'b0, PREA_a[23:0]}),                           // 30-bit input: A data input
+        .A({6'b0, PREA_a[23:0]}),
         .B({1'b0, PREA_b[16:0]}),
         .C(C_alig3[47:0]), //we're gonna need it at the third DSP cycle
-        .CARRYIN(1'b0),                  // 1-bit input: Carry input signal
-        .D(25'h0),                       // 25-bit input: D data input
-        // Reset/Clock Enable: 1-bit (each) input: Reset/Clock Enable Inputs
-        .CEA1(1'b1),                     // 1-bit input: Clock enable input for 1st stage AREG
-        .CEA2(1'b1),                     // 1-bit input: Clock enable input for 2nd stage AREG
-        .CEAD(1'b1),                     // 1-bit input: Clock enable input for ADREG
-        .CEALUMODE(1'b1),                // 1-bit input: Clock enable input for ALUMODE
-        .CEB1(1'b1),                     // 1-bit input: Clock enable input for 1st stage BREG
-        .CEB2(1'b1),                     // 1-bit input: Clock enable input for 2nd stage BREG
-        .CEC(1'b1),                      // 1-bit input: Clock enable input for CREG
-        .CECARRYIN(1'b1),                // 1-bit input: Clock enable input for CARRYINREG
-        .CECTRL(1'b1),                   // 1-bit input: Clock enable input for OPMODEREG and CARRYINSELREG
-        .CED(1'b1),                      // 1-bit input: Clock enable input for DREG
-        .CEINMODE(1'b1),                 // 1-bit input: Clock enable input for INMODEREG
-        .CEM(1'b1),                      // 1-bit input: Clock enable input for MREG
-        .CEP(1'b1),                      // 1-bit input: Clock enable input for PREG
-        .RSTA(1'b0),                     // 1-bit input: Reset input for AREG
-        .RSTALLCARRYIN(1'b0),            // 1-bit input: Reset input for CARRYINREG
-        .RSTALUMODE(1'b0),               // 1-bit input: Reset input for ALUMODEREG
-        .RSTB(1'b0),                     // 1-bit input: Reset input for BREG
-        .RSTC(1'b0),                     // 1-bit input: Reset input for CREG
-        .RSTCTRL(1'b0),                  // 1-bit input: Reset input for OPMODEREG and CARRYINSELREG
-        .RSTD(1'b0),                     // 1-bit input: Reset input for DREG and ADREG
-        .RSTINMODE(1'b0),                // 1-bit input: Reset input for INMODEREG
-        .RSTM(1'b0),                     // 1-bit input: Reset input for MREG
-        .RSTP(1'b0)                      // 1-bit input: Reset input for PREG
+        .CARRYIN(1'b0),
+        //using D port here too, to save up some LUTs on mux for high bits
+        //That whether it is ffma16_op or efp_op decide.
+        .D({{9{PREA_a[15]}}, PREA_a[15:0]}),
+        .CEA1(1'b1),
+        .CEA2(1'b1),
+        .CEAD(1'b1),
+        .CEALUMODE(1'b1),
+        .CEB1(1'b1),
+        .CEB2(1'b1),
+        .CEC(1'b1),
+        .CECARRYIN(1'b1),
+        .CECTRL(1'b1),
+        .CED(1'b1),
+        .CEINMODE(1'b1),
+        .CEM(1'b1),
+        .CEP(1'b1),
+        .RSTA(1'b0),
+        .RSTALLCARRYIN(1'b0),
+        .RSTALUMODE(1'b0),
+        .RSTB(1'b0),
+        .RSTC(1'b0),
+        .RSTCTRL(1'b0),
+        .RSTD(1'b0),
+        .RSTINMODE(1'b0),
+        .RSTM(1'b0),
+        .RSTP(1'b0)
     );
     /* verilator lint_on PINCONNECTEMPTY */
 
@@ -220,7 +215,6 @@ module GUCH (
     logic [1:0] DGAF0_shexp_lmid, DGAF0_shexp_hmid;
     logic DGAF0_shexp_hi;
     logic [27:0] C_alig0;
-    logic [39:0] C_alig1; // aligned C
 
     always_ff @(posedge clk or negedge rst_n) begin : DGAF0_CRRY
         if (!rst_n) begin
@@ -243,108 +237,100 @@ module GUCH (
 
     //== DGAF1 (Digital Signal Proccesing / Guard / Aligment / Float Prep) ==//
     //Finishing alignment(2-2-1) and starting second DSP
+    logic [39:0] C_alig1; // aligned C
+    logic [3:0]  DGAF1_ALUMODE;
+
     assign C_alig1 = {C_alig0, 12'h0} >> {DGAF0_shexp_lmid, 2'h0};
     assign C_alig2 = {C_alig1, 37'h0} >> {DGAF0_shexp_hmid, 4'h0};
 
     always_ff @(posedge clk) begin : DGAF1_C
         C_alig3 <= C_alig2 >> {DGAF0_shexp_hi, 6'h0};
+        DGAF1_ALUMODE <= {ALUMODE[3:2], ALUMODE[1:0] | {2{DGAF0_sub_mags}}};
     end : DGAF1_C
 
     //== TEMP(Temporary name) ==//
     //Second DSP starts here
 
 
-
     /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
-        // Feature Control Attributes: Data Path Selection
-        .A_INPUT("DIRECT"),               // Selects A input source, "DIRECT" (A port) or "CASCADE" (ACIN port)
-        .B_INPUT("DIRECT"),               // Selects B input source, "DIRECT" (B port) or "CASCADE" (BCIN port)
-        .USE_DPORT("FALSE"),              // Select D port usage (TRUE or FALSE)
+        .A_INPUT("CASCADE"), //from prev
+        .B_INPUT("DIRECT"),
+        .USE_DPORT("TRUE"),
         .USE_MULT("DYNAMIC"), //For both floats and integer ops
-        .USE_SIMD("ONE48"),               // SIMD selection ("ONE48", "TWO24", "FOUR12")
-        // Pattern Detector Attributes: Pattern Detection Configuration
-        .AUTORESET_PATDET("NO_RESET"),    // "NO_RESET", "RESET_MATCH", "RESET_NOT_MATCH" 
-        .MASK(48'h3fffffffffff),          // 48-bit mask value for pattern detect (1=ignore)
-        .PATTERN(48'h000000000000),       // 48-bit pattern match for pattern detect
-        .SEL_MASK("MASK"),                // "C", "MASK", "ROUNDING_MODE1", "ROUNDING_MODE2" 
-        .SEL_PATTERN("PATTERN"),          // Select pattern value ("PATTERN" or "C")
-        .USE_PATTERN_DETECT("NO_PATDET"), // Enable pattern detect ("PATDET" or "NO_PATDET")
-        // Register Control Attributes: Pipeline Register Configuration
-        .ACASCREG(2),                     // Number of pipeline stages between A/ACIN and ACOUT (0, 1 or 2)
-        .ADREG(1),                        // Number of pipeline stages for pre-adder (0 or 1)
-        .ALUMODEREG(1),                   // Number of pipeline stages for ALUMODE (0 or 1)
-        .AREG(2),                         // Number of pipeline stages for A (0, 1 or 2)
-        .BCASCREG(1),                     // Number of pipeline stages between B/BCIN and BCOUT (0, 1 or 2)
-        .BREG(2),                         // Number of pipeline stages for B (0, 1 or 2)
-        .CARRYINREG(1),                   // Number of pipeline stages for CARRYIN (0 or 1)
-        .CARRYINSELREG(1),                // Number of pipeline stages for CARRYINSEL (0 or 1)
-        .CREG(0),                         // Number of pipeline stages for C (0 or 1)
-        .DREG(1),                         // Number of pipeline stages for D (0 or 1)
-        .INMODEREG(1),                    // Number of pipeline stages for INMODE (0 or 1)
-        .MREG(1),                         // Number of multiplier pipeline stages (0 or 1)
-        .OPMODEREG(1),                    // Number of pipeline stages for OPMODE (0 or 1)
-        .PREG(1)                          // Number of pipeline stages for P (0 or 1)
+        .USE_SIMD("ONE48"),
+        .AUTORESET_PATDET("NO_RESET"),
+        .MASK(48'h3fffffffffff),
+        .PATTERN(48'h000000000000),
+        .SEL_MASK("MASK"),
+        .SEL_PATTERN("PATTERN"),
+        .USE_PATTERN_DETECT("NO_PATDET"),
+        .ACASCREG(1),
+        .ADREG(1),
+        .ALUMODEREG(1),
+        .AREG(1),
+        .BCASCREG(1),
+        .BREG(2),
+        .CARRYINREG(1),
+        .CARRYINSELREG(1),
+        .CREG(0),
+        .DREG(1),
+        .INMODEREG(1),
+        .MREG(1),
+        .OPMODEREG(1),
+        .PREG(1)
     )
-    SoItBegins (
-        // Cascade: 30-bit (each) output: Cascade Ports
-        .ACOUT(),                        // 30-bit output: A port cascade output
-        .BCOUT(),                        // 18-bit output: B port cascade output
-        .CARRYCASCOUT(),                 // 1-bit output: Cascade carry output
-        .MULTSIGNOUT(),                  // 1-bit output: Multiplier sign cascade output
-        .PCOUT(PCOUT0),                  // 48-bit output: Cascade output
-        // Control: 1-bit (each) output: Control Inputs/Status Bits
-        .OVERFLOW(),                     // 1-bit output: Overflow in add/acc output
-        .PATTERNBDETECT(),               // 1-bit output: Pattern bar detect output
-        .PATTERNDETECT(),                // 1-bit output: Pattern detect output
-        .UNDERFLOW(),                    // 1-bit output: Underflow in add/acc output
-        // Data: 4-bit (each) output: Data Ports
-        .CARRYOUT(),                     // 4-bit output: Carry output
-        .P(P1),                          // 48-bit output: Primary data output
-        // Cascade: 30-bit (each) input: Cascade Ports
-        .ACIN(30'h0),                    // 30-bit input: A cascade data input
-        .BCIN(18'h0),                    // 18-bit input: B cascade input
-        .CARRYCASCIN(1'b0),              // 1-bit input: Cascade carry input
-        .MULTSIGNIN(1'b0),               // 1-bit input: Multiplier sign input
-        .PCIN(PCOUT0),                    // 48-bit input: P cascade input
-        //Btw this signal should theoretically be in DGAF1, however why don't
-        //just delay it in SM? Thats what I thought too. It only saves ffs,
-        //but hey, ill take it.
-        .ALUMODE(DGAF0_ALUMODE),
-        .CARRYINSEL(3'b000),             // 3-bit input: Carry select input
-        .CLK(clk),                       // 1-bit input: Clock input
-        .INMODE(5'b00000),               // 5-bit input: INMODE control input
-        .OPMODE(OPMODE),           // 7-bit input: Operation mode input
+    ItContinues (
+        .ACOUT(),
+        .BCOUT(),
+        .CARRYCASCOUT(),
+        .MULTSIGNOUT(),
+        .PCOUT(),
+        .OVERFLOW(),
+        .PATTERNBDETECT(),
+        .PATTERNDETECT(),
+        .UNDERFLOW(),
+        .CARRYOUT(),
+        .P(P2),
+        .ACIN(ACOUT0),
+        .BCIN(18'h0),
+        .CARRYCASCIN(1'b0),
+        .MULTSIGNIN(1'b0),
+        .PCIN(PCOUT0),
+        .ALUMODE(DGAF1_ALUMODE),
+        .CARRYINSEL(3'b000),
+        .CLK(clk),
+        .INMODE(INMODE2),
+        .OPMODE(OPMODE2),
         //Its two's comlimetn so top bit gotta be 0
-        .A(),                           // 30-bit input: A data input
-        .B(STRT_b[24:17]),
+        .A(30'h0),
+        .B({10'h0, STRT_b[24:17]}),
         .C(), //we're gonna need it at the third DSP cycle
-        .CARRYIN(1'b0),                  // 1-bit input: Carry input signal
-        .D(25'h0),                       // 25-bit input: D data input
-        // Reset/Clock Enable: 1-bit (each) input: Reset/Clock Enable Inputs
-        .CEA1(1'b1),                     // 1-bit input: Clock enable input for 1st stage AREG
-        .CEA2(1'b1),                     // 1-bit input: Clock enable input for 2nd stage AREG
-        .CEAD(1'b1),                     // 1-bit input: Clock enable input for ADREG
-        .CEALUMODE(1'b1),                // 1-bit input: Clock enable input for ALUMODE
-        .CEB1(1'b1),                     // 1-bit input: Clock enable input for 1st stage BREG
-        .CEB2(1'b1),                     // 1-bit input: Clock enable input for 2nd stage BREG
-        .CEC(1'b1),                      // 1-bit input: Clock enable input for CREG
-        .CECARRYIN(1'b1),                // 1-bit input: Clock enable input for CARRYINREG
-        .CECTRL(1'b1),                   // 1-bit input: Clock enable input for OPMODEREG and CARRYINSELREG
-        .CED(1'b1),                      // 1-bit input: Clock enable input for DREG
-        .CEINMODE(1'b1),                 // 1-bit input: Clock enable input for INMODEREG
-        .CEM(1'b1),                      // 1-bit input: Clock enable input for MREG
-        .CEP(1'b1),                      // 1-bit input: Clock enable input for PREG
-        .RSTA(1'b0),                     // 1-bit input: Reset input for AREG
-        .RSTALLCARRYIN(1'b0),            // 1-bit input: Reset input for CARRYINREG
-        .RSTALUMODE(1'b0),               // 1-bit input: Reset input for ALUMODEREG
-        .RSTB(1'b0),                     // 1-bit input: Reset input for BREG
-        .RSTC(1'b0),                     // 1-bit input: Reset input for CREG
-        .RSTCTRL(1'b0),                  // 1-bit input: Reset input for OPMODEREG and CARRYINSELREG
-        .RSTD(1'b0),                     // 1-bit input: Reset input for DREG and ADREG
-        .RSTINMODE(1'b0),                // 1-bit input: Reset input for INMODEREG
-        .RSTM(1'b0),                     // 1-bit input: Reset input for MREG
-        .RSTP(1'b0)                      // 1-bit input: Reset input for PREG
+        .CARRYIN(1'b0),
+        .D({{9{STRT_a[32]}}, STRT_a[32], ~STRT_a[31], STRT_a[30:25], STRT_a[23:16]}), //for FFMA16
+        .CEA1(1'b1),
+        .CEA2(1'b1),
+        .CEAD(1'b1),
+        .CEALUMODE(1'b1),
+        .CEB1(1'b1),
+        .CEB2(1'b1),
+        .CEC(1'b1),
+        .CECARRYIN(1'b1),
+        .CECTRL(1'b1),
+        .CED(1'b1),
+        .CEINMODE(1'b1),
+        .CEM(1'b1),
+        .CEP(1'b1),
+        .RSTA(1'b0),
+        .RSTALLCARRYIN(1'b0),
+        .RSTALUMODE(1'b0),
+        .RSTB(1'b0),
+        .RSTC(1'b0),
+        .RSTCTRL(1'b0),
+        .RSTD(1'b0),
+        .RSTINMODE(1'b0),
+        .RSTM(1'b0),
+        .RSTP(1'b0)
     );
     /* verilator lint_on PINCONNECTEMPTY */
 
