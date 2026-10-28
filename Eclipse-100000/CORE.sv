@@ -52,7 +52,7 @@ module CORE(
     assign stall     = div_stall || mem_stall;
     assign bubble    = (mul_use_hazard || load_use_hazard || rr2_conflict || mdx_idx_hazard || lr_ret_hazard) && !stall; //If we already stall no point in bubble, it also breaks div
 
-    //== IF(Instruction Fetch) ==//
+    //=> IF(Instruction Fetch) <=//
     logic [31:0] IF_PC;
     logic [31:0] IF_PC_plus4_or8;
     logic [27:0] IF_PC_tofetch;
@@ -338,7 +338,7 @@ module CORE(
         : (BTB_read[35:34] == 2'b11 && !pht_out[1]) ? (IF_jump || !(IF_64 || IF_branch)) : !BTB_www;
 
     //== That looks nice ==//
-    //== Anyways GA(Gather) stage ==//
+    //=> Anyways GA(Gather) stage <=//
     logic [31:0] GA_PC, GA_IR; //Each stage gets its own IR and PC
     logic [31:0] GA_early_target;
     logic [13:0] GA_pht_idx;
@@ -701,7 +701,7 @@ module CORE(
                                            (EX_is_mul && isGA_mdsx && (gpr_rw0_sel[7:3] == GA_IR_2[26:22])));
 
 
-    //== EX(Execute) ==//
+    //=> EX(Execute) <=//
     //A lot of things happen here, full enum in CU.sv
     logic [31:0] EX_PC, EX_IR;
     logic [31:0] EX_IR_2;
@@ -1044,7 +1044,7 @@ module CORE(
     );
     /* verilator lint_on PINCONNECTEMPTY */
 
-    //== VER(Verify) ==//
+    //=> VER(Verify) <=//
     //This grew its something much bigger than MEM, so I renamed it.
     //Basically yeah it does verify, and does a bunch of other stuff.
     logic [31:0] VER_result;
@@ -1447,7 +1447,7 @@ module CORE(
     assign VER_redirect   = D_miss_ff || VER_mispredict || (isVER_valid && VER_demolish) || VER_RAS_mispred;
     assign VER_redirect_target = D_miss_ff ? WB_PC : VER_demolish ? VER_redirect_pc : VER_RAS_mispred ? {4'b0, LRS_top[25:0], 2'b00} : (branch_cond_met ? VER_early_target : VER_PCNext);
 
-    //== WB(WriteBack) ==//
+    //=> WB(WriteBack) <=//
     logic [31:0] WB_result;
     logic [7:0]  WB_gpr_dest;
 

@@ -40,7 +40,7 @@ module GUCH (
     //Im planning to pipeline it like crazy, like 10-11 stages for GUCH
     //which means i've got like 1-2 logic levels per stage
 
-    //== PREA (Preamble) ==//
+    //=> PREA (Preamble) <=//
     //Moving longest stuff from STRT to here, for crit path ofc
     logic [32:0] PREA_a, PREA_b, PREA_c;
     logic [8:0]  PREA_shexp, PREA_cexp;
@@ -52,11 +52,11 @@ module GUCH (
         PREA_c <= {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
 
         PREA_shexp <= {{3{~a[30]}}, {a[29:25], a[24] | ~|a[30:24]}} + {{3{~b[30]}}, {b[29:25], b[24] | ~|b[30:24]}};
-        //So basically subtracting a number from cost should be a little better.
+        //So basically subtracting a number from const should be a little better.
         PREA_cexp  <= 9'd28 - {{3{~c[30]}}, {c[29:25], c[24] | ~|c[30:24]}};
     end : PREA_EFP
 
-    //== STRT (start) ==//
+    //=> STRT (Start) <=//
     //Calc sh and start DSPs
     logic [32:0] STRT_a, STRT_b, STRT_c;
     logic [8:0] shexp;
@@ -210,7 +210,7 @@ module GUCH (
     );
     /* verilator lint_on PINCONNECTEMPTY */
 
-    //==DGAF0(Digital Signal Proccesing / Guard / Aligment / Float Prep)==//
+    //=> DGAF0(Digital Signal Proccesing / Guard / Aligment / Float Prep) <=//
     //The DSP is pipelined and will take total of 4cycles.
     //This is the second one. It also performs align stage
     logic [1:0] DGAF0_shexp_lmid, DGAF0_shexp_hmid;
@@ -236,7 +236,7 @@ module GUCH (
     end : DGAF0_C
 
 
-    //== DGAF1 (Digital Signal Proccesing / Guard / Aligment / Float Prep) ==//
+    //=> DGAF1 (Digital Signal Proccesing / Guard / Aligment / Float Prep) <=//
     //Finishing alignment(2-2-1) and starting second DSP
     logic [39:0] C_alig1; // aligned C
     logic [3:0]  DGAF1_ALUMODE;
