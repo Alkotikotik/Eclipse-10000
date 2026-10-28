@@ -52,7 +52,8 @@ module GUCH (
         PREA_c <= {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
 
         PREA_shexp <= {{3{~a[30]}}, {a[29:25], a[24] | ~|a[30:24]}} + {{3{~b[30]}}, {b[29:25], b[24] | ~|b[30:24]}};
-        PREA_cexp  <= {{3{~c[30]}}, {c[29:25], c[24] | ~|c[30:24]}} - 9'd28;
+        //So basically subtracting a number from cost should be a little better.
+        PREA_cexp  <= 9'd28 - {{3{~c[30]}}, {c[29:25], c[24] | ~|c[30:24]}};
     end : PREA_EFP
 
     //== STRT (start) ==//
@@ -90,7 +91,7 @@ module GUCH (
     //it actually shouldn't be -64, but instead -63. Because subnormals hidden
     //bit is actually 0 instead of 1, such as they are 0.ff * 2^exp instead of
     //1.ff * 2^exp for normals.
-    assign shexp = PREA_shexp - PREA_cexp;
+    assign shexp = PREA_shexp + PREA_cexp;
     //clamp, if sign bit is 1(two's copmliment), don't move because shifter
     //can only move down. Then if 7th bit is 1, its between 128-256, and it
     //all is too high, so just set it to highest number within 7bits - 127.
