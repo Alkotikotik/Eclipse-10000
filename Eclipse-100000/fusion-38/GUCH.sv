@@ -4,7 +4,9 @@ module GUCH (
     //So first one is ofc smallest core its the basic GPU contruct.
     //The heart is efp32 FMA that is done through 2DSPs, it also has integer mode,
     //16bit fma, float to int conversion and min/max/abs.
+
     //Also I don't need resets here, bc its just pipeline computations
+    //And it would give vivado jsut a little more room for placement
     input logic clk,
 
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
@@ -110,8 +112,10 @@ module GUCH (
     //I need to align C to 77bits then add lower bits in first DSP, and rest
     //in fabric. I do it in 4 stages across 2 cycles parallel to first cycles of DSP so it
     //arrives just in time. The split is 2-2-2-1 bits per stage.
-    logic [1:0] STRT_shexp_lo, STRT_shexp_lmid, STRT_shexp_hmid;
-    logic STRT_shexp_hi;
+    //So vivado assigned a reset to those guys without any permission ofc,
+    //thus messing up the path, so it might fix it.
+    (* extract_reset = "no" *) logic [1:0] STRT_shexp_lo, STRT_shexp_lmid, STRT_shexp_hmid;
+    (* extract_reset = "no" *) logic STRT_shexp_hi;
     always_ff @(posedge clk) begin : STRT_SH
         STRT_shexp_lo <= sh_exp[1:0];
         STRT_shexp_lmid <= sh_exp[3:2];
