@@ -129,6 +129,7 @@ module GUCH (
     logic [47:0] P1, PCOUT0, P2;
     logic [29:0] ACOUT0;
 
+
     /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
         .A_INPUT("DIRECT"),
