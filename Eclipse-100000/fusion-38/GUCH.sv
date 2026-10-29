@@ -4,8 +4,8 @@ module GUCH (
     //So first one is ofc smallest core its the basic GPU contruct.
     //The heart is efp32 FMA that is done through 2DSPs, it also has integer mode,
     //16bit fma, float to int conversion and min/max/abs.
+    //Also I don't need resets here, bc its just pipeline computations
     input logic clk,
-    input logic rst_n,
 
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
     //First of all, all signals are computed in 1 SM because all GUCHes share them
@@ -64,26 +64,29 @@ module GUCH (
     //Calc sh and start DSPs
     logic [32:0] STRT_a, STRT_b, STRT_c;
     logic [8:0] shexp;
+    logic [8:0] STRT_abexp, STRT_cexp; //exp of a and b
+    logic STRT_prod_zero, STRT_shexp_neg;
+
     logic [6:0] sh_exp;
     always_ff @(posedge clk) begin : STRT_CRRY
         STRT_a <= PREA_a;
         STRT_b <= PREA_b;
         STRT_c <= PREA_c;
+
+        STRT_abexp <= PREA_shexp;
+        STRT_cexp <= PREA_cexp;
+
+        STRT_prod_zero <= PREA_a_zero | PREA_b_zero;
+        STRT_shexp_neg <= shexp[8];
     end : STRT_CRRY
 
     //Basically sub_sel bits govern the sign of products and c result
     //add or subtract. Subtract magnitudes
     logic product_sign, c_sign, sub_mags;
-    always_ff @(posedge clk or negedge rst_n) begin : signs
-        if (!rst_n) begin
-            product_sign <= 1'b0;
-            c_sign <= 1'b0;
-            sub_mags <= 1'b0;
-        end else begin
-            product_sign <= PREA_a[32] ^ PREA_b[32] ^ neg_p; //FNMA... etc
-            c_sign <= PREA_c[32] ^ neg_c; //FMS... etc
-            sub_mags <= efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
-        end
+    always_ff @(posedge clk) begin : signs
+        product_sign <= PREA_a[32] ^ PREA_b[32] ^ neg_p; //FNMA... etc
+        c_sign <= PREA_c[32] ^ neg_c; //FMS... etc
+        sub_mags <= efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
     end : signs
 
     //So exp(a) + exp(b) is self explanatory - we are multiplying them, but
@@ -109,20 +112,12 @@ module GUCH (
     //arrives just in time. The split is 2-2-2-1 bits per stage.
     logic [1:0] STRT_shexp_lo, STRT_shexp_lmid, STRT_shexp_hmid;
     logic STRT_shexp_hi;
-    always_ff @(posedge clk or negedge rst_n) begin : STRT_SH
-        if (!rst_n) begin
-            STRT_shexp_lo <= 2'h0;
-            STRT_shexp_lmid <= 2'h0;
+    always_ff @(posedge clk) begin : STRT_SH
+        STRT_shexp_lo <= sh_exp[1:0];
+        STRT_shexp_lmid <= sh_exp[3:2];
 
-            STRT_shexp_hmid <= 2'h0;
-            STRT_shexp_hi <= 1'h0;
-        end else begin
-            STRT_shexp_lo <= sh_exp[1:0];
-            STRT_shexp_lmid <= sh_exp[3:2];
-
-            STRT_shexp_hmid <= sh_exp[5:4];
-            STRT_shexp_hi <= sh_exp[6];
-        end
+        STRT_shexp_hmid <= sh_exp[5:4];
+        STRT_shexp_hi <= sh_exp[6];
     end : STRT_SH
 
     logic DGAF0_sub_mags;
@@ -223,23 +218,18 @@ module GUCH (
     logic [1:0] DGAF0_shexp_lmid, DGAF0_shexp_hmid;
     logic DGAF0_shexp_hi;
     logic [27:0] C_alig0;
+    (* dont_touch = "true" *) logic [8:0] DGAF0_exp_base;
 
-    always_ff @(posedge clk or negedge rst_n) begin : DGAF0_CRRY
-        if (!rst_n) begin
-            DGAF0_shexp_lmid <= 2'h0;
-            DGAF0_shexp_hmid <= 2'h0;
-            DGAF0_shexp_hi <= 1'h0;
-            DGAF0_sub_mags <= 1'b0;
-        end else begin
-            DGAF0_shexp_lmid <= STRT_shexp_lmid;
-            DGAF0_shexp_hmid <= STRT_shexp_hmid;
-            DGAF0_shexp_hi <= STRT_shexp_hi;
-            DGAF0_sub_mags <= sub_mags;
-        end
+    always_ff @(posedge clk) begin : DGAF0_CRRY
+        DGAF0_shexp_lmid <= STRT_shexp_lmid;
+        DGAF0_shexp_hmid <= STRT_shexp_hmid;
+        DGAF0_shexp_hi <= STRT_shexp_hi;
+        DGAF0_sub_mags <= sub_mags;
     end : DGAF0_CRRY
 
     always_ff @(posedge clk) begin : DGAF0_C
         C_alig0 <= {STRT_c[24:0], 3'h0} >> STRT_shexp_lo;
+        DGAF0_exp_base <= ((STRT_shexp_neg | STRT_prod_zero) && |in_grp[6:0]) ? -STRT_cexp : STRT_abexp;
     end : DGAF0_C
 
     //So this is sticky computation, basically thats just for rounding, if we
@@ -249,7 +239,6 @@ module GUCH (
     //The cool part is that instead of doing expensive tz, i realized that we just need to know
     //If 52 + ith bit of STRT_c < sh_exp, if it is, it is sticky. I also compute it in groups
     //Of 4bits to compute groups in parallel and just fit each group into LUT6.
-
     logic [6:0] in_grp; //any 1 in group
     logic [7:1] below_grp; //if 1 in group below, its 7:1 bc nothing can be below first group
     logic [2:0] which1; //which one falls out exactly
