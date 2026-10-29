@@ -235,11 +235,53 @@ module GUCH (
         C_alig0 <= {STRT_c[24:0], 3'h0} >> STRT_shexp_lo;
     end : DGAF0_C
 
+    //So this is sticky computation, basically thats just for rounding, if we
+    //shift out at least one 1, we round up, this is the same as regular rounding.
+    //I mean not exactly there is also 1 more guard bit, which is first bit that gets shifted out
+    //And it got named fsr and if its 1 but sticky isn't we round to even, if guard is zero, round down.
+    //The cool part is that instead of doing expensive tz, i realized that we just need to know
+    //If 52 + ith bit of STRT_c < sh_exp, if it is, it is sticky. I also compute it in groups
+    //Of 4bits to compute groups in parallel and just fit each group into LUT6.
+
+    logic [6:0] in_grp; //any 1 in group
+    logic [7:1] below_grp; //if 1 in group below, its 7:1 bc nothing can be below first group
+    logic [2:0] which1; //which one falls out exactly
+
+    always_comb begin : sticky_comb //indeed comb is sticky
+        in_grp[6] = STRT_c[24];
+        which1 = {&STRT_shexp_lo, STRT_shexp_lo[1], |STRT_shexp_lo};
+        for (int i = 0; i < 6; i++) begin
+            in_grp[i] = |STRT_c[i * 4 +: 4];
+        end
+        //sv doesn't accept dynaic range unfortunately so i can't do
+        //below_grp[i+1] = |in_grp[i -: i + 1]; even tho i really wanted to
+        below_grp[1] =  in_grp[0];
+        below_grp[2] = |in_grp[1:0];
+        below_grp[3] = |in_grp[2:0];
+        below_grp[4] = |in_grp[3:0];
+        below_grp[5] = |in_grp[4:0];
+        below_grp[6] = |in_grp[5:0];
+        below_grp[7] = |in_grp[6:0];
+    end : sticky_comb
+
+    //So if some group is shifted out, we need to check if there was actually
+    //one, and register it for DGAF1, so this is what it is;
+    logic [7:0] DGAF0_lost;
+    always_ff @(posedge clk) begin
+        DGAF0_lost[0] <= |(STRT_c[2:0] & which1);
+        for (int i = 1; i < 6; i++) begin
+            DGAF0_lost[i] <= below_grp[i] | |(STRT_c[4*i +: 3] & which1);
+        end
+        DGAF0_lost[6] <= below_grp[6]  | (STRT_c[24] & which1[0]);
+        DGAF0_lost[7] <= below_grp[7];
+    end
 
     //=> DGAF1 (Digital Signal Proccesing / Guard / Aligment / Float Prep) <=//
     //Finishing alignment(2-2-1) and starting second DSP
     logic [39:0] C_alig1; // aligned C
     logic [3:0]  DGAF1_ALUMODE;
+    (* dont_touch = "true" *)  logic DGAF1_sticky;
+    logic DGAF1_sticky_comb;
 
     assign C_alig1 = {C_alig0, 12'h0} >> {DGAF0_shexp_lmid, 2'h0};
     assign C_alig2 = {C_alig1, 37'h0} >> {DGAF0_shexp_hmid, 4'h0};
@@ -247,7 +289,23 @@ module GUCH (
     always_ff @(posedge clk) begin : DGAF1_C
         C_alig3 <= C_alig2 >> {DGAF0_shexp_hi, 6'h0};
         DGAF1_ALUMODE <= {ALUMODE[3:2], ALUMODE[1:0] | {2{DGAF0_sub_mags}}};
+        DGAF1_sticky <= DGAF1_sticky_comb;
     end : DGAF1_C
+
+    always_comb begin : sticky_check
+        unique case ({DGAF0_shexp_hi, DGAF0_shexp_hmid, DGAF0_shexp_lmid}) inside //thats just sh_exp[6:2];
+            [5'd0 :5'd12]: DGAF1_sticky_comb = 1'b0; //sh_exp is below 51, so it certainly isn't sticky, also i love sv
+            5'd13: DGAF1_sticky_comb = DGAF0_lost[0];
+            5'd14: DGAF1_sticky_comb = DGAF0_lost[1];
+            5'd15: DGAF1_sticky_comb = DGAF0_lost[2];
+            5'd16: DGAF1_sticky_comb = DGAF0_lost[3];
+            5'd17: DGAF1_sticky_comb = DGAF0_lost[4];
+            5'd18: DGAF1_sticky_comb = DGAF0_lost[5];
+            5'd19: DGAF1_sticky_comb = DGAF0_lost[6];
+            [5'd20:5'd31]: DGAF1_sticky_comb = DGAF0_lost[7]; //shifts everything away, so if any is 1 its sticky
+        endcase
+    end : sticky_check
+
 
     //== TEMP(Temporary name) ==//
     //Second DSP starts here
