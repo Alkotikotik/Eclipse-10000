@@ -44,6 +44,7 @@ module GUCH (
     //Moving longest stuff from STRT to here, for crit path ofc
     logic [32:0] PREA_a, PREA_b, PREA_c;
     logic [8:0]  PREA_shexp, PREA_cexp;
+    logic PREA_a_zero, PREA_b_zero;
     always_ff @(posedge clk) begin : PREA_EFP
         //unbias by inverting top bit, and put back hidden bit.
         //No need for reset, otherwise DSP wouldn't accept them immediately
@@ -54,6 +55,9 @@ module GUCH (
         PREA_shexp <= {{3{~a[30]}}, {a[29:25], a[24] | ~|a[30:24]}} + {{3{~b[30]}}, {b[29:25], b[24] | ~|b[30:24]}};
         //So basically subtracting a number from const should be a little better.
         PREA_cexp  <= 9'd28 - {{3{~c[30]}}, {c[29:25], c[24] | ~|c[30:24]}};
+
+        PREA_a_zero <= ~|a[30:0];
+        PREA_b_zero <= ~|b[30:0];
     end : PREA_EFP
 
     //=> STRT (Start) <=//
@@ -95,7 +99,10 @@ module GUCH (
     //clamp, if sign bit is 1(two's copmliment), don't move because shifter
     //can only move down. Then if 7th bit is 1, its between 128-256, and it
     //all is too high, so just set it to highest number within 7bits - 127.
-    assign sh_exp = shexp[8] ? 0 : (shexp[7] ? 7'd127 : shexp[6:0]);
+    //ALmost clamp of either a or b is 0, bc if they are result should just be
+    //c, but, sh_exp still shifts c completely out of range sometimes, meaning
+    //its result becomes just zero.
+    assign sh_exp = (shexp[8] | PREA_a_zero | PREA_b_zero) ? 0 : (shexp[7] ? 7'd127 : shexp[6:0]);
 
     //I need to align C to 77bits then add lower bits in first DSP, and rest
     //in fabric. I do it in 4 stages across 2 cycles parallel to first cycles of DSP so it
@@ -293,8 +300,7 @@ module GUCH (
     end : DGAF1_C
 
     always_comb begin : sticky_check
-        unique case ({DGAF0_shexp_hi, DGAF0_shexp_hmid, DGAF0_shexp_lmid}) inside //thats just sh_exp[6:2];
-            [5'd0 :5'd12]: DGAF1_sticky_comb = 1'b0; //sh_exp is below 51, so it certainly isn't sticky, also i love sv
+        unique case ({DGAF0_shexp_hi, DGAF0_shexp_hmid, DGAF0_shexp_lmid}) //thats just sh_exp[6:2];
             5'd13: DGAF1_sticky_comb = DGAF0_lost[0];
             5'd14: DGAF1_sticky_comb = DGAF0_lost[1];
             5'd15: DGAF1_sticky_comb = DGAF0_lost[2];
@@ -302,7 +308,8 @@ module GUCH (
             5'd17: DGAF1_sticky_comb = DGAF0_lost[4];
             5'd18: DGAF1_sticky_comb = DGAF0_lost[5];
             5'd19: DGAF1_sticky_comb = DGAF0_lost[6];
-            [5'd20:5'd31]: DGAF1_sticky_comb = DGAF0_lost[7]; //shifts everything away, so if any is 1 its sticky
+            //if below 52, its zero, if above 72 or whatever one
+            default: DGAF1_sticky_comb = DGAF0_shexp_hi & DGAF0_lost[7];
         endcase
     end : sticky_check
 
