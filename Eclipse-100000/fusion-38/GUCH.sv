@@ -417,7 +417,7 @@ module GUCH (
     );
     /* verilator lint_on PINCONNECTEMPTY */
 
-    //=> DSFSH1 (DSH Finish 1) <=//
+    //=> DSFSH1 (DSP Finish 1) <=//
     always_ff @(posedge clk) begin : DSFSH1_CRRY
         DSFSH1_ato_add <= DSFSH0_ato_add;
         DSFSH1_c_sign <= DSFSH0_c_sign;
