@@ -71,7 +71,7 @@ module GUCH (
 
     logic [6:0] sh_exp;
     always_ff @(posedge clk) begin : STRT_CRRY
-        STRT_a <= PREA_a;
+        STRT_a <= {PREA_a[32:25], PREA_a[24] & efp_op, PREA_a[23:0]};
         STRT_b <= PREA_b;
         STRT_c <= PREA_c;
 
@@ -84,9 +84,8 @@ module GUCH (
 
     //Basically sub_sel bits govern the sign of products and c result
     //add or subtract. Subtract magnitudes
-    logic product_sign, c_sign, sub_mags;
+    logic c_sign, sub_mags;
     always_ff @(posedge clk) begin : signs
-        product_sign <= PREA_a[32] ^ PREA_b[32] ^ neg_p; //FNMA... etc
         c_sign <= PREA_c[32] ^ neg_c; //FMS... etc
         sub_mags <= efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
     end : signs
@@ -128,7 +127,6 @@ module GUCH (
     logic [76:0] C_alig2, C_alig3;
     logic [47:0] P1, PCOUT0, P2;
     logic [29:0] ACOUT0;
-
 
     /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
@@ -222,6 +220,17 @@ module GUCH (
     //This is the second one. It also performs align stage
     logic [1:0] DGAF0_shexp_lmid, DGAF0_shexp_hmid;
     logic DGAF0_shexp_hi;
+    //The DSP works with two's compliment 25bit number and 18bit one.
+    //To "Emulate" unsigned operations (what we need for mantissa multiply)
+    //I set highest bit to zero thus allows only for 24x17 multiply.
+    //And that's just one bit short of my a mantissa, so I have to carry it
+    //To the point after DSP, and then add it. Its not as bad because I can simply
+    //Add it along higher part of C, that I have to add in fabric nontheless.
+    //That shreg thing, basically converts some ffs shifts to LUTs, and
+    //usually its a good trade because it takes up quite a few ffs, and only
+    //1LUT. However idgaf about ffs, and i gaf about LUTs, so i just don't do it.
+    (* shreg_extract = "no" *) logic [24:0] DGAF0_ato_add;
+    (* shreg_extract = "no" *) logic DGAF0_c_sign;
     logic [27:0] C_alig0;
     (* dont_touch = "true" *) logic [8:0] DGAF0_exp_base;
 
@@ -230,11 +239,13 @@ module GUCH (
         DGAF0_shexp_hmid <= STRT_shexp_hmid;
         DGAF0_shexp_hi <= STRT_shexp_hi;
         DGAF0_sub_mags <= sub_mags;
+        DGAF0_c_sign <= c_sign;
     end : DGAF0_CRRY
 
     always_ff @(posedge clk) begin : DGAF0_C
         C_alig0 <= {STRT_c[24:0], 3'h0} >> STRT_shexp_lo;
         DGAF0_exp_base <= ((STRT_shexp_neg | STRT_prod_zero) && |in_grp[6:0]) ? -STRT_cexp : STRT_abexp;
+        DGAF0_ato_add <= STRT_a[24] ? STRT_b[24:0] : 25'h0;
     end : DGAF0_C
 
     //So this is sticky computation, basically thats just for rounding, if we
@@ -283,6 +294,8 @@ module GUCH (
     logic [3:0]  DGAF1_ALUMODE;
     (* dont_touch = "true" *)  logic DGAF1_sticky;
     logic DGAF1_sticky_comb;
+    (* shreg_extract = "no" *) logic [24:0] DGAF1_ato_add;
+    (* shreg_extract = "no" *) logic DGAF1_c_sign;
 
     assign C_alig1 = {C_alig0, 12'h0} >> {DGAF0_shexp_lmid, 2'h0};
     assign C_alig2 = {C_alig1, 37'h0} >> {DGAF0_shexp_hmid, 4'h0};
@@ -291,6 +304,8 @@ module GUCH (
         C_alig3 <= C_alig2 >> {DGAF0_shexp_hi, 6'h0};
         DGAF1_ALUMODE <= {ALUMODE[3:2], ALUMODE[1:0] | {2{DGAF0_sub_mags}}};
         DGAF1_sticky <= DGAF1_sticky_comb;
+        DGAF1_ato_add <= DGAF0_ato_add;
+        DGAF1_c_sign <= DGAF0_c_sign;
     end : DGAF1_C
 
     always_comb begin : sticky_check
@@ -308,9 +323,17 @@ module GUCH (
     end : sticky_check
 
 
-    //== TEMP(Temporary name) ==//
+    //=> DSFSH0 (DSP Finish 0) <=//
     //Second DSP starts here
+    (* shreg_extract = "no" *) logic [24:0] DSFSH0_ato_add;
+    (* shreg_extract = "no" *) logic DSFSH0_c_sign;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [24:0] DSFSH1_ato_add;
+    (* shreg_extract = "no", dont_touch = "true" *) logic DSFSH1_c_sign;
 
+    always_ff @(posedge clk) begin : DSFSH0_CRRY
+        DSFSH0_ato_add <= DGAF1_ato_add;
+        DSFSH0_c_sign <= DGAF1_c_sign;
+    end : DSFSH0_CRRY
 
     /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
@@ -393,6 +416,14 @@ module GUCH (
         .RSTP(1'b0)
     );
     /* verilator lint_on PINCONNECTEMPTY */
+
+    //=> DSFSH1 (DSH Finish 1) <=//
+    always_ff @(posedge clk) begin : DSFSH1_CRRY
+        DSFSH1_ato_add <= DSFSH0_ato_add;
+        DSFSH1_c_sign <= DSFSH0_c_sign;
+    end : DSFSH1_CRRY
+
+
 
 
 
