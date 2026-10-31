@@ -295,7 +295,7 @@ module GUCH (
     (* dont_touch = "true" *)  logic DGAF1_sticky;
     logic DGAF1_sticky_comb;
     (* shreg_extract = "no" *) logic [24:0] DGAF1_ato_add;
-    (* shreg_extract = "no" *) logic DGAF1_c_sign;
+    (* shreg_extract = "no" *) logic DGAF1_c_sign, DGAF1_sub_mags;
 
     assign C_alig1 = {C_alig0, 12'h0} >> {DGAF0_shexp_lmid, 2'h0};
     assign C_alig2 = {C_alig1, 37'h0} >> {DGAF0_shexp_hmid, 4'h0};
@@ -306,6 +306,7 @@ module GUCH (
         DGAF1_sticky <= DGAF1_sticky_comb;
         DGAF1_ato_add <= DGAF0_ato_add;
         DGAF1_c_sign <= DGAF0_c_sign;
+        DGAF1_sub_mags <= DGAF0_sub_mags;
     end : DGAF1_C
 
     always_comb begin : sticky_check
@@ -326,6 +327,8 @@ module GUCH (
     //=> DSFSH0 (DSP Finish 0) <=//
     //Second DSP starts here
     (* shreg_extract = "no" *) logic [24:0] DSFSH0_ato_add;
+    (* shreg_extract = "no" *) logic [28:0] DSFSH0_acto_add;
+    (* shreg_extract = "no" *) logic [28:0] DSFSH0_acto_ff;
     (* shreg_extract = "no" *) logic DSFSH0_c_sign;
     (* shreg_extract = "no", dont_touch = "true" *) logic [24:0] DSFSH1_ato_add;
     (* shreg_extract = "no", dont_touch = "true" *) logic DSFSH1_c_sign;
@@ -334,6 +337,20 @@ module GUCH (
         DSFSH0_ato_add <= DGAF1_ato_add;
         DSFSH0_c_sign <= DGAF1_c_sign;
     end : DSFSH0_CRRY
+
+    //DSP can't fully add C to the product, and it can't multiply last bit of
+    //a too(bc efp32 has one more mantissa bit). I solve this by a fabric
+    //adder after DSP, and since ato_add and hi c is known rn, i just add them here.
+    //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
+    //Flipping bits is xoring with all 1s, and xoring with 0s does nothing, so
+    //here we are, with this beautiful expression. It is even more beautiful because
+    //Theoretically it is free, since this carry chain is implemented using
+    //CARRY4, and LUT6s, and LUT6s don't have their input full, thus adding
+    //xoring to the same carry chain should be free.
+    assign DSFSH0_acto_add = C_alig3[76:48] + ((DGAF1_ato_add ^ {25{DGAF1_sub_mags}}) + sub_mags);
+    always_ff @(posedge clk) begin
+        DSFSH0_acto_ff <= DSFSH0_acto_add;
+    end
 
     /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
@@ -416,7 +433,6 @@ module GUCH (
         .RSTP(1'b0)
     );
     /* verilator lint_on PINCONNECTEMPTY */
-
 
     //=> DSFSH1 (DSP Finish 1) <=//
     always_ff @(posedge clk) begin : DSFSH1_CRRY
