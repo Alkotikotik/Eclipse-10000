@@ -341,13 +341,14 @@ module GUCH (
     //DSP can't fully add C to the product, and it can't multiply last bit of
     //a too(bc efp32 has one more mantissa bit). I solve this by a fabric
     //adder after DSP, and since ato_add and hi c is known rn, i just add them here.
+    //--This comment goes later --
     //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
     //Flipping bits is xoring with all 1s, and xoring with 0s does nothing, so
     //here we are, with this beautiful expression. It is even more beautiful because
     //Theoretically it is free, since this carry chain is implemented using
     //CARRY4, and LUT6s, and LUT6s don't have their input full, thus adding
     //xoring to the same carry chain should be free.
-    assign DSFSH0_acto_add = C_alig3[76:48] + ((DGAF1_ato_add ^ {25{DGAF1_sub_mags}}) + sub_mags);
+    assign DSFSH0_acto_add = {1'b0, C_alig3[76:48]} + {{28{DGAF1_sub_mags}}, DGAF1_sub_mags ^ DGAF1_ato_add[24]};
     always_ff @(posedge clk) begin
         DSFSH0_acto_ff <= DSFSH0_acto_add;
     end
