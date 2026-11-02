@@ -435,7 +435,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic [23:0] DSFSH1_ato_add;
     (* shreg_extract = "no" *) logic [29:0] DSFSH1_acto_add;
     (* shreg_extract = "no", dont_touch = "true" *) logic DSFSH1_c_sign;
-    logic [16:0] DSFSH1_P1_lo;
+    (* shreg_extract = "no" *) logic [16:0] DSFSH1_P1_lo;
 
     always_ff @(posedge clk) begin : DSFSH1_CRRY
         DSFSH1_ato_add <= DSFSH0_ato_add[23:0]; //last bit already added
@@ -445,7 +445,7 @@ module GUCH (
         DSFSH1_acto_add <= DSFSH0_acto_ff;
     end : DSFSH1_CRRY
 
-    //=> FAAD (Fabric Add) <=//
+    //=> FAAD0 (Fabric Add 1) <=//
     //Adding c_hi and ato_add to the hot, straight from DSP P2 result.
     //Can't do anything while adding tho. Add is also pretty long path-wise.
     //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
@@ -457,19 +457,43 @@ module GUCH (
     //should theoretically go into the carry in input of the first CARRY4, so it should
     //be as one more carry chain input.
     //Alright maybe its not that beautiful
-    logic [54:0] FAAD_sum;
-    logic [77:0] raw_result;
-    (* dont_touch = "true" *) logic [77:0] FAAD_raw_result;
+    logic [36:0] FAAD0_sum;
+    logic [36:1] FAAD0_sum_ff;
+    (* shreg_extract = "no" *) logic [5:0]  FAAD0_P2_hi; //hello
+    (* shreg_extract = "no" *) logic [18:0] FAAD0_acto;
+    (* shreg_extract = "no" *) logic [6:0]  FAAD0_P2_lo;
+    (* shreg_extract = "no" *) logic [16:0] FAAD0_P1_lo;
     always_comb begin
-        FAAD_sum = {{13{P2[47]}}, P2[47:7], 1'b1}  +
-            {DSFSH1_acto_add, DSFSH1_ato_add[23:0] ^
+        FAAD0_sum = {P2[41:7], 1'b1} +
+            {DSFSH1_acto_add[10:0], DSFSH1_ato_add[23:0] ^
             {24{DSFSH1_sub_mags}}, DSFSH1_sub_mags};
-        raw_result = {FAAD_sum[54:1], P2[6:0], DSFSH1_P1_lo};
+        //end
     end
     always_ff @(posedge clk) begin
-        FAAD_raw_result <= raw_result;
+        FAAD0_sum_ff <= FAAD0_sum[36:1];
+        FAAD0_P2_hi <= P2[47:42];
+        FAAD0_acto <= DSFSH1_acto_add[29:11];
+        FAAD0_P2_lo <= P2[6:0];
+        FAAD0_P1_lo <= DSFSH1_P1_lo;
     end
 
+    //=> FAAD1 (Fabric Add 1) <=//
+    //Well that didn't fit into 1 stage, as expected ngl. By about 0.2ns btw,
+    //which is better than I expected but still too slow. And yeah FAAD0 adds
+    //36bits (column 24:58, exact amount of CARRY4s too) and FAAD1 adds up the rest.
+    logic [19:0] FAAD1_sum;
+    logic [77:0] FAAD1_raw_result;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [77:0] FAAD1_raw_result_ff;
+    always_comb begin
+        FAAD1_sum = {{13{FAAD0_P2_hi[5]}}, FAAD0_P2_hi, 1'b1} +
+            {FAAD0_acto, FAAD0_sum_ff[36]};
+        FAAD1_raw_result = {FAAD1_sum[19:1], FAAD0_sum_ff[35:1],
+            FAAD0_P2_lo, FAAD0_P1_lo};
+        //end
+    end
+    always_ff @(posedge clk) begin
+        FAAD1_raw_result_ff <= FAAD1_raw_result;
+    end
 
     //syntax drafts for flare
     //parallel [u32 i : arr.len<()>] {
