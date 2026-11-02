@@ -326,14 +326,14 @@ module GUCH (
 
     //=> DSFSH0 (DSP Finish 0) <=//
     //Second DSP starts here
-    (* shreg_extract = "no" *) logic [24:0] DSFSH0_ato_add;
-    (* shreg_extract = "no" *) logic [28:0] DSFSH0_acto_add;
-    (* shreg_extract = "no" *) logic [28:0] DSFSH0_acto_ff;
+    (* shreg_extract = "no" *) logic [23:0] DSFSH0_ato_add;
+    (* shreg_extract = "no" *) logic [29:0] DSFSH0_acto_add;
+    (* shreg_extract = "no" *) logic [29:0] DSFSH0_acto_ff;
     (* shreg_extract = "no" *) logic DSFSH0_c_sign;
     (* shreg_extract = "no" *) logic DSFSH0_sub_mags;
 
     always_ff @(posedge clk) begin : DSFSH0_CRRY
-        DSFSH0_ato_add <= DGAF1_ato_add;
+        DSFSH0_ato_add <= DGAF1_ato_add[23:0];
         DSFSH0_c_sign <= DGAF1_c_sign;
         DSFSH0_sub_mags <= DGAF1_sub_mags;
     end : DSFSH0_CRRY
@@ -341,15 +341,7 @@ module GUCH (
     //DSP can't fully add C to the product, and it can't multiply last bit of
     //a too(bc efp32 has one more mantissa bit). I solve this by a fabric
     //adder after DSP, and since ato_add and hi c is known rn, i just add them here.
-    //--This comment goes later --
-    //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
-    //Flipping bits is xoring with all 1s, and xoring with 0s does nothing, so
-    //here we are, with this beautiful expression. It is even more beautiful because
-    //Theoretically it is free, since this carry chain is implemented using
-    //CARRY4, and LUT6s, and LUT6s don't have their input full, thus adding
-    //xoring to the same carry chain should be free.
-    //
-    //Add c_hi to sub_mags(sign) extended last bit of ato_add basically its sign.
+    //Add c_hi to sub_mags(sign) extended last bit of ato_add basically just its top bit.
     assign DSFSH0_acto_add = {1'b0, C_alig3[76:48]} + {{28{DGAF1_sub_mags}}, DGAF1_sub_mags ^ DGAF1_ato_add[24]};
     always_ff @(posedge clk) begin
         DSFSH0_acto_ff <= DSFSH0_acto_add;
@@ -439,30 +431,44 @@ module GUCH (
 
     //=> DSFSH1 (DSP Finish 1) <=//
     //Just waiting for the DSP result, while carrying operands for backend
-    (* shreg_extract = "no" *) logic DSFSH0_sub_mags;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [22:0] DSFSH1_ato_add;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [22:0] DSFSH1_acto_add;
+    (* shreg_extract = "no" *) logic DSFSH1_sub_mags;
+    (* shreg_extract = "no" *) logic [23:0] DSFSH1_ato_add;
+    (* shreg_extract = "no" *) logic [29:0] DSFSH1_acto_add;
     (* shreg_extract = "no", dont_touch = "true" *) logic DSFSH1_c_sign;
-    logic [29:0] DSFSH1_P1;
+    logic [16:0] DSFSH1_P1_lo;
 
     always_ff @(posedge clk) begin : DSFSH1_CRRY
-        DSFSH1_ato_add <= DSFSH0_ato_add[22:0]; //last bit already added
+        DSFSH1_ato_add <= DSFSH0_ato_add[23:0]; //last bit already added
         DSFSH1_c_sign <= DSFSH0_c_sign;
         DSFSH1_sub_mags <= DSFSH0_sub_mags;
         DSFSH1_P1_lo <= P1[16:0];
-        DSFSH1_sub_mags <= DSFSH0_acto_ff;
+        DSFSH1_acto_add <= DSFSH0_acto_ff;
     end : DSFSH1_CRRY
 
     //=> FAAD (Fabric Add) <=//
     //Adding c_hi and ato_add to the hot, straight from DSP P2 result.
     //Can't do anything while adding tho. Add is also pretty long path-wise.
-    logic [] raw_result;
-
-
-
-
-
-
+    //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
+    //Flipping bits is xoring with all 1s, and xoring with 0s does nothing, so
+    //here we are, with this beautiful expression. It is even more beautiful because
+    //Theoretically it is free, since this carry chain is implemented using
+    //CARRY4, and LUT6s, and LUT6s don't have their input full, thus adding
+    //xoring to the same carry chain should be free. Also DSFSH1_sub_mags
+    //should theoretically go into the carry in input of the first CARRY4, so it should
+    //be as one more carry chain input.
+    //Alright maybe its not that beautiful
+    logic [54:0] FAAD_sum;
+    logic [77:0] raw_result;
+    (* dont_touch = "true" *) logic [77:0] FAAD_raw_result;
+    always_comb begin
+        FAAD_sum = {{13{P2[47]}}, P2[47:7], 1'b1}  +
+            {DSFSH1_acto_add, DSFSH1_ato_add[23:0] ^
+            {24{DSFSH1_sub_mags}}, DSFSH1_sub_mags};
+        raw_result = {FAAD_sum[54:1], P2[6:0], DSFSH1_P1_lo};
+    end
+    always_ff @(posedge clk) begin
+        FAAD_raw_result <= raw_result;
+    end
 
 
     //syntax drafts for flare
