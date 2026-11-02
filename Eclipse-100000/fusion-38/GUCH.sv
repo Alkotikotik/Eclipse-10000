@@ -330,12 +330,12 @@ module GUCH (
     (* shreg_extract = "no" *) logic [28:0] DSFSH0_acto_add;
     (* shreg_extract = "no" *) logic [28:0] DSFSH0_acto_ff;
     (* shreg_extract = "no" *) logic DSFSH0_c_sign;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [24:0] DSFSH1_ato_add;
-    (* shreg_extract = "no", dont_touch = "true" *) logic DSFSH1_c_sign;
+    (* shreg_extract = "no" *) logic DSFSH0_sub_mags;
 
     always_ff @(posedge clk) begin : DSFSH0_CRRY
         DSFSH0_ato_add <= DGAF1_ato_add;
         DSFSH0_c_sign <= DGAF1_c_sign;
+        DSFSH0_sub_mags <= DGAF1_sub_mags;
     end : DSFSH0_CRRY
 
     //DSP can't fully add C to the product, and it can't multiply last bit of
@@ -348,6 +348,8 @@ module GUCH (
     //Theoretically it is free, since this carry chain is implemented using
     //CARRY4, and LUT6s, and LUT6s don't have their input full, thus adding
     //xoring to the same carry chain should be free.
+    //
+    //Add c_hi to sub_mags(sign) extended last bit of ato_add basically its sign.
     assign DSFSH0_acto_add = {1'b0, C_alig3[76:48]} + {{28{DGAF1_sub_mags}}, DGAF1_sub_mags ^ DGAF1_ato_add[24]};
     always_ff @(posedge clk) begin
         DSFSH0_acto_ff <= DSFSH0_acto_add;
@@ -436,10 +438,25 @@ module GUCH (
     /* verilator lint_on PINCONNECTEMPTY */
 
     //=> DSFSH1 (DSP Finish 1) <=//
+    //Just waiting for the DSP result, while carrying operands for backend
+    (* shreg_extract = "no" *) logic DSFSH0_sub_mags;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [22:0] DSFSH1_ato_add;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [22:0] DSFSH1_acto_add;
+    (* shreg_extract = "no", dont_touch = "true" *) logic DSFSH1_c_sign;
+    logic [29:0] DSFSH1_P1;
+
     always_ff @(posedge clk) begin : DSFSH1_CRRY
-        DSFSH1_ato_add <= DSFSH0_ato_add;
+        DSFSH1_ato_add <= DSFSH0_ato_add[22:0]; //last bit already added
         DSFSH1_c_sign <= DSFSH0_c_sign;
+        DSFSH1_sub_mags <= DSFSH0_sub_mags;
+        DSFSH1_P1_lo <= P1[16:0];
+        DSFSH1_sub_mags <= DSFSH0_acto_ff;
     end : DSFSH1_CRRY
+
+    //=> FAAD (Fabric Add) <=//
+    //Adding c_hi and ato_add to the hot, straight from DSP P2 result.
+    //Can't do anything while adding tho. Add is also pretty long path-wise.
+    logic [] raw_result;
 
 
 
