@@ -342,7 +342,7 @@ module GUCH (
     //a too(bc efp32 has one more mantissa bit). I solve this by a fabric
     //adder after DSP, and since ato_add and hi c is known rn, i just add them here.
     //Add c_hi to sub_mags(sign) extended last bit of ato_add basically just its top bit.
-    assign DSFSH0_acto_add = {1'b0, C_alig3[76:48]} + {{28{DGAF1_sub_mags}}, DGAF1_sub_mags ^ DGAF1_ato_add[24]};
+    assign DSFSH0_acto_add = {1'b0, C_alig3[76:48]} + {{29{DGAF1_sub_mags}}, DGAF1_sub_mags ^ DGAF1_ato_add[24]};
     always_ff @(posedge clk) begin
         DSFSH0_acto_ff <= DSFSH0_acto_add;
     end
