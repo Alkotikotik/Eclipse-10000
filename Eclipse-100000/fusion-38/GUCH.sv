@@ -471,10 +471,10 @@ module GUCH (
     end
     always_ff @(posedge clk) begin
         FAAD0_sum_ff <= FAAD0_sum[36:1];
-        FAAD0_P2_hi <= P2[47:42];
-        FAAD0_acto <= DSFSH1_acto_add[29:11];
-        FAAD0_P2_lo <= P2[6:0];
-        FAAD0_P1_lo <= DSFSH1_P1_lo;
+        FAAD0_P2_hi  <= P2[47:42];
+        FAAD0_acto   <= DSFSH1_acto_add[29:11];
+        FAAD0_P2_lo  <= P2[6:0];
+        FAAD0_P1_lo  <= DSFSH1_P1_lo;
     end
 
     //=> FAAD1 (Fabric Add 1) <=//
