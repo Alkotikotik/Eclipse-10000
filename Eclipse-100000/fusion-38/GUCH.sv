@@ -477,6 +477,7 @@ module GUCH (
         FAAD0_P1_lo  <= DSFSH1_P1_lo;
     end
 
+
     //=> FAAD1 (Fabric Add 1) <=//
     //Well that didn't fit into 1 stage, as expected ngl. By about 0.2ns btw,
     //which is better than I expected but still too slow. And yeah FAAD0 adds
