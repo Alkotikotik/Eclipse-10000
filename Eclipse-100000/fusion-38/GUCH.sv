@@ -74,6 +74,7 @@ module GUCH (
     //=> STRT (Start) <=//
     //Calc sh and start DSPs
     logic [32:0] STRT_a, STRT_b, STRT_c;
+    logic [8:0] STRT_abexp;
     logic [8:0] shexp;
     logic STRT_prod_zero, STRT_shexp_neg;
 
@@ -163,7 +164,7 @@ module GUCH (
         .OPMODEREG(1),
         .PREG(1)
     )
-    SoItBegins (
+    Welcome (
         .ACOUT(ACOUT0),
         .BCOUT(),
         .CARRYCASCOUT(),
@@ -240,7 +241,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic DGAF0_c_sign;
     logic [27:0] C_alig0;
     logic [6:0] in_grp; //any 1 in group
-    (* dont_touch = "true" *) logic [8:0] DGAF0_exp_base;
+    logic [8:0] DGAF0_exp_base;
 
     always_ff @(posedge clk) begin : DGAF0_CRRY
         DGAF0_shexp_lmid <= STRT_shexp_lmid;
@@ -306,11 +307,11 @@ module GUCH (
     //Finishing alignment(2-2-1) and starting second DSP
     logic [39:0] C_alig1; // aligned C
     logic [3:0]  DGAF1_ALUMODE;
-    (* dont_touch = "true" *)  logic DGAF1_sticky;
+    (* shreg_extract = "no" *) logic DGAF1_sticky;
     logic DGAF1_sticky_comb;
     (* shreg_extract = "no" *) logic [24:0] DGAF1_ato_add;
     (* shreg_extract = "no" *) logic DGAF1_c_sign, DGAF1_sub_mags;
-    logic [8:0] DGAF1_exp_base;
+    (* shreg_extract = "no" *) logic [8:0] DGAF1_exp_base;
 
     assign C_alig1 = {C_alig0, 12'h0} >> {DGAF0_shexp_lmid, 2'h0};
     assign C_alig2 = {C_alig1, 37'h0} >> {DGAF0_shexp_hmid, 4'h0};
@@ -347,13 +348,15 @@ module GUCH (
     (* shreg_extract = "no" *) logic [31:0] DSFSH0_acto_ff;
     (* shreg_extract = "no" *) logic DSFSH0_c_sign;
     (* shreg_extract = "no" *) logic DSFSH0_sub_mags;
-    logic [8:0] DSFSH0_exp_base;
+    (* shreg_extract = "no" *) logic [8:0] DSFSH0_exp_base;
+    (* shreg_extract = "no" *) logic DSFSH0_sticky;
 
     always_ff @(posedge clk) begin : DSFSH0_CRRY
         DSFSH0_ato_add <= DGAF1_ato_add[21:0];
         DSFSH0_c_sign <= DGAF1_c_sign;
         DSFSH0_sub_mags <= DGAF1_sub_mags;
         DSFSH0_exp_base <= DGAF1_exp_base;
+        DSFSH0_sticky <= DGAF1_sticky;
     end : DSFSH0_CRRY
 
     //DSP can't fully add C to the product, and it can't multiply last bit of
@@ -394,7 +397,7 @@ module GUCH (
         .OPMODEREG(1),
         .PREG(1)
     )
-    ItContinues (
+    intense_wallop (
         .ACOUT(),
         .BCOUT(),
         .CARRYCASCOUT(),
@@ -453,9 +456,10 @@ module GUCH (
     (* shreg_extract = "no" *) logic DSFSH1_sub_mags;
     (* shreg_extract = "no" *) logic [21:0] DSFSH1_ato_add;
     (* shreg_extract = "no" *) logic [31:0] DSFSH1_acto_add;
-    (* shreg_extract = "no", dont_touch = "true" *) logic DSFSH1_c_sign;
+    (* shreg_extract = "no" *) logic DSFSH1_c_sign;
     (* shreg_extract = "no" *) logic [16:0] DSFSH1_P1_lo;
-    logic [8:0] DSFSH1_exp_base;
+    (* shreg_extract = "no" *) logic [8:0] DSFSH1_exp_base;
+    (* shreg_extract = "no" *) logic DSFSH1_sticky;
 
     always_ff @(posedge clk) begin : DSFSH1_CRRY
         DSFSH1_ato_add <= DSFSH0_ato_add[21:0]; //last bit already added
@@ -464,6 +468,7 @@ module GUCH (
         DSFSH1_P1_lo <= P1[16:0];
         DSFSH1_acto_add <= DSFSH0_acto_ff;
         DSFSH1_exp_base <= DSFSH0_exp_base;
+        DSFSH1_sticky <= DSFSH0_sticky;
     end : DSFSH1_CRRY
 
     //=> FIAD (Final Add) <=//
@@ -483,6 +488,9 @@ module GUCH (
     logic [12:0] FIAD_hi, FIAD_hi_crry;
     logic [13:0] FIAD_hi_crry_sum;
     logic [3:0] FIAD_carry;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [16:0] FIAD_P1_lo;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [8:0] FIAD_exp_base;
+    (* shreg_extract = "no", dont_touch = "true" *) logic FIAD_c_sign, FIAD_sticky;
 
 
     //3rd dsp still can't quite reach hi bits still, so still gotta have
@@ -494,12 +502,19 @@ module GUCH (
         FIAD_hi_crry <= FIAD_hi_crry_sum[13:1];
     end
 
+    always_ff @(posedge clk) begin : FIAD_CRRY
+        FIAD_P1_lo <= DSFSH1_P1_lo;
+        FIAD_exp_base <= DSFSH1_exp_base;
+        FIAD_c_sign <= DSFSH1_c_sign;
+        FIAD_sticky <= DSFSH1_sticky;
+    end : FIAD_CRRY
+
     /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
-        .A_INPUT("DIRECT"), //from prev
+        .A_INPUT("DIRECT"),
         .B_INPUT("DIRECT"),
         .USE_DPORT("FALSE"),
-        .USE_MULT("NONE"), //For both floats and integer ops
+        .USE_MULT("NONE"),
         .USE_SIMD("ONE48"),
         .AUTORESET_PATDET("NO_RESET"),
         .MASK(48'h00000FFFFFFF),
@@ -516,9 +531,9 @@ module GUCH (
         .AREG(0),
         .BCASCREG(0),
         .BREG(0),
-        .CARRYINREG(0),
+        .CARRYINREG(1),
         .CARRYINSELREG(0),
-        .CREG(0),
+        .CREG(1),
         .DREG(0),
         .INMODEREG(0),
         .MREG(0),
@@ -558,10 +573,10 @@ module GUCH (
         //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
         //Flipping bits is xoring with all 1s, and xoring with 0s does nothing, so
         //here we are, with this beautiful expression
-        .C({DSFSH1_acto_add[18:0], DSFSH1_ato_add[21:0] ^
-                {22{DSFSH1_sub_mags}}, {7{DSFSH1_sub_mags}}}),
-        .CARRYIN(DSFSH1_sub_mags), //thats so nice actually
-        .D(25'h0), //for FFMA16
+        .C({DSFSH0_acto_ff[18:0], DSFSH0_ato_add[21:0] ^
+                {22{DSFSH0_sub_mags}}, {7{DSFSH0_sub_mags}}}),
+        .CARRYIN(DSFSH0_sub_mags), //thats so nice actually
+        .D(25'h0),
         .CEA1(1'b1),
         .CEA2(1'b1),
         .CEAD(1'b1),
@@ -589,58 +604,7 @@ module GUCH (
     /* verilator lint_on PINCONNECTEMPTY */
 
 
-    //=> FAAD0 (Fabric Add 1) <=//
-    //Adding c_hi and ato_add to the hot, straight from DSP P2 result.
-    //Can't do anything while adding tho. Add is also pretty long path-wise.
-    //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
-    //Flipping bits is xoring with all 1s, and xoring with 0s does nothing, so
-    //here we are, with this beautiful expression. It is even more beautiful because
-    //Theoretically it is free, since this carry chain is implemented using
-    //CARRY4, and LUT6s, and LUT6s don't have their input full, thus adding
-    //xoring to the same carry chain should be free. Also DSFSH1_sub_mags
-    //should theoretically go into the carry in input of the first CARRY4, so it should
-    //be as one more carry chain input.
-    //Alright maybe its not that beautiful
-    logic [36:0] FAAD0_sum;
-    logic [36:1] FAAD0_sum_ff;
-    logic [8:0]  FAAD0_exp_base;
-    (* shreg_extract = "no" *) logic [5:0]  FAAD0_P2_hi; //hello
-    (* shreg_extract = "no" *) logic [18:0] FAAD0_acto;
-    (* shreg_extract = "no" *) logic [6:0]  FAAD0_P2_lo;
-    (* shreg_extract = "no" *) logic [16:0] FAAD0_P1_lo;
-    always_comb begin
-        FAAD0_sum = {P2[41:7], 1'b1} +
-            {DSFSH1_acto_add[12:0], DSFSH1_ato_add[21:0] ^
-            {22{DSFSH1_sub_mags}}, DSFSH1_sub_mags};
-        //end
-    end
-    always_ff @(posedge clk) begin : FAAD0_CRRY
-        FAAD0_sum_ff <= FAAD0_sum[36:1];
-        FAAD0_P2_hi  <= P2[47:42];
-        FAAD0_acto   <= DSFSH1_acto_add[31:13];
-        FAAD0_P2_lo  <= P2[6:0];
-        FAAD0_P1_lo  <= DSFSH1_P1_lo;
-        FAAD0_exp_base <= DSFSH1_exp_base;
-    end : FAAD0_CRRY
 
-
-    //=> FAAD1 (Fabric Add 1) <=//
-    //Well that didn't fit into 1 stage, as expected ngl. By about 0.2ns btw,
-    //which is better than I expected but still too slow. And yeah FAAD0 adds
-    //36bits (column 24:58, exact amount of CARRY4s too) and FAAD1 adds up the rest.
-    logic [19:0] FAAD1_sum;
-    logic [77:0] FAAD1_raw_result;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [77:0] FAAD1_raw_result_ff;
-    always_comb begin
-        FAAD1_sum = {{13{FAAD0_P2_hi[5]}}, FAAD0_P2_hi, 1'b1} +
-            {FAAD0_acto, FAAD0_sum_ff[36]};
-        FAAD1_raw_result = {FAAD1_sum[19:1], FAAD0_sum_ff[35:1],
-            FAAD0_P2_lo, FAAD0_P1_lo};
-        //end
-    end
-    always_ff @(posedge clk) begin
-        FAAD1_raw_result_ff <= FAAD1_raw_result;
-    end
 
     //syntax drafts for flare
     //parallel [u32 i : arr.len<()>] {
