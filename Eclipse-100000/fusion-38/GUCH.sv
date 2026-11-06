@@ -42,6 +42,15 @@ module GUCH (
     //Im planning to pipeline it like crazy, like 10-11 stages for GUCH
     //which means i've got like 1-2 logic levels per stage
 
+    //Also after quite a big of testing I realized that my original format is
+    //too heavy and doesn't have much use in graphic tasks. Therefore
+    //I decided to reformat it into gefp32 which is graphical efp32.
+    //The differences aren't huge, basically - flush subnormals(saves ~36LUTs
+    //on every GUCH) and do a saturating arithmetic instead of inf/undef
+    //stuff. This saves bunch of LUTs and doesn't really matter for graphics
+    //Because the worst thing that can happen is pixel would turn black(or white)
+    //Somewhere, which isn't a big deal.
+
     //=> PREA (Preamble) <=//
     //Moving longest stuff from STRT to here, for crit path ofc
     logic [32:0] PREA_a, PREA_b, PREA_c;
@@ -184,7 +193,7 @@ module GUCH (
         //Its two's comlimetn so top bit gotta be 0
         .A({6'b0, PREA_a[23:0]}),
         .B({1'b0, PREA_b[16:0]}),
-        .C(C_alig3[47:0]), //we're gonna need it at the third DSP cycle
+        .C({2'b00, C_alig3[45:0]}), //we're gonna need it at the third DSP cycle
         .CARRYIN(1'b0),
         //using D port here too, to save up some LUTs on mux for high bits
         //That whether it is ffma16_op or efp_op decide.
@@ -232,6 +241,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic [24:0] DGAF0_ato_add;
     (* shreg_extract = "no" *) logic DGAF0_c_sign;
     logic [27:0] C_alig0;
+    logic [6:0] in_grp; //any 1 in group
     (* dont_touch = "true" *) logic [8:0] DGAF0_exp_base;
 
     always_ff @(posedge clk) begin : DGAF0_CRRY
@@ -255,7 +265,6 @@ module GUCH (
     //The cool part is that instead of doing expensive tz, i realized that we just need to know
     //If 52 + ith bit of STRT_c < sh_exp, if it is, it is sticky. I also compute it in groups
     //Of 4bits to compute groups in parallel and just fit each group into LUT6.
-    logic [6:0] in_grp; //any 1 in group
     logic [7:1] below_grp; //if 1 in group below, its 7:1 bc nothing can be below first group
     logic [2:0] which1; //which one falls out exactly
 
@@ -326,14 +335,14 @@ module GUCH (
 
     //=> DSFSH0 (DSP Finish 0) <=//
     //Second DSP starts here
-    (* shreg_extract = "no" *) logic [23:0] DSFSH0_ato_add;
-    (* shreg_extract = "no" *) logic [29:0] DSFSH0_acto_add;
-    (* shreg_extract = "no" *) logic [29:0] DSFSH0_acto_ff;
+    (* shreg_extract = "no" *) logic [21:0] DSFSH0_ato_add;
+    (* shreg_extract = "no" *) logic [31:0] DSFSH0_acto_add;
+    (* shreg_extract = "no" *) logic [31:0] DSFSH0_acto_ff;
     (* shreg_extract = "no" *) logic DSFSH0_c_sign;
     (* shreg_extract = "no" *) logic DSFSH0_sub_mags;
 
     always_ff @(posedge clk) begin : DSFSH0_CRRY
-        DSFSH0_ato_add <= DGAF1_ato_add[23:0];
+        DSFSH0_ato_add <= DGAF1_ato_add[21:0];
         DSFSH0_c_sign <= DGAF1_c_sign;
         DSFSH0_sub_mags <= DGAF1_sub_mags;
     end : DSFSH0_CRRY
@@ -342,7 +351,7 @@ module GUCH (
     //a too(bc efp32 has one more mantissa bit). I solve this by a fabric
     //adder after DSP, and since ato_add and hi c is known rn, i just add them here.
     //Add c_hi to sub_mags(sign) extended last bit of ato_add basically just its top bit.
-    assign DSFSH0_acto_add = {1'b0, C_alig3[76:48]} + {{29{DGAF1_sub_mags}}, DGAF1_sub_mags ^ DGAF1_ato_add[24]};
+    assign DSFSH0_acto_add = {1'b0, C_alig3[76:46]} + {{29{DGAF1_sub_mags}}, DGAF1_sub_mags ^ DGAF1_ato_add[24], DGAF1_ato_add[23:22] ^ {2{DGAF1_sub_mags}}};
     always_ff @(posedge clk) begin
         DSFSH0_acto_ff <= DSFSH0_acto_add;
     end
@@ -432,13 +441,13 @@ module GUCH (
     //=> DSFSH1 (DSP Finish 1) <=//
     //Just waiting for the DSP result, while carrying operands for backend
     (* shreg_extract = "no" *) logic DSFSH1_sub_mags;
-    (* shreg_extract = "no" *) logic [23:0] DSFSH1_ato_add;
-    (* shreg_extract = "no" *) logic [29:0] DSFSH1_acto_add;
+    (* shreg_extract = "no" *) logic [21:0] DSFSH1_ato_add;
+    (* shreg_extract = "no" *) logic [31:0] DSFSH1_acto_add;
     (* shreg_extract = "no", dont_touch = "true" *) logic DSFSH1_c_sign;
     (* shreg_extract = "no" *) logic [16:0] DSFSH1_P1_lo;
 
     always_ff @(posedge clk) begin : DSFSH1_CRRY
-        DSFSH1_ato_add <= DSFSH0_ato_add[23:0]; //last bit already added
+        DSFSH1_ato_add <= DSFSH0_ato_add[21:0]; //last bit already added
         DSFSH1_c_sign <= DSFSH0_c_sign;
         DSFSH1_sub_mags <= DSFSH0_sub_mags;
         DSFSH1_P1_lo <= P1[16:0];
@@ -465,14 +474,14 @@ module GUCH (
     (* shreg_extract = "no" *) logic [16:0] FAAD0_P1_lo;
     always_comb begin
         FAAD0_sum = {P2[41:7], 1'b1} +
-            {DSFSH1_acto_add[10:0], DSFSH1_ato_add[23:0] ^
-            {24{DSFSH1_sub_mags}}, DSFSH1_sub_mags};
+            {DSFSH1_acto_add[12:0], DSFSH1_ato_add[21:0] ^
+            {22{DSFSH1_sub_mags}}, DSFSH1_sub_mags};
         //end
     end
     always_ff @(posedge clk) begin
         FAAD0_sum_ff <= FAAD0_sum[36:1];
         FAAD0_P2_hi  <= P2[47:42];
-        FAAD0_acto   <= DSFSH1_acto_add[29:11];
+        FAAD0_acto   <= DSFSH1_acto_add[31:13];
         FAAD0_P2_lo  <= P2[6:0];
         FAAD0_P1_lo  <= DSFSH1_P1_lo;
     end
