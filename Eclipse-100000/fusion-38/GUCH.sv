@@ -479,33 +479,50 @@ module GUCH (
     //So I use it here to do the final add of c_hi and a's highest bit.
     //unfortunately im still just short so I gotta have a small adder after.
     //And also ill use pattern detect here, which skips like 1check stage.
+    logic FIAD_ptrn_zeros, FIAD_ptrn_ones;
+    logic [12:0] FIAD_hi, FIAD_hi_crry;
+    logic [13:0] FIAD_hi_crry_sum;
+    logic [3:0] FIAD_carry;
+
+
+    //3rd dsp still can't quite reach hi bits still, so still gotta have
+    //a fabric adder, a small one, but nontheless.
+    //If Goodbye passes a carry - we already are ready, with FIAD_hi_crry.
+    assign FIAD_hi_crry_sum = {DSFSH1_acto_add[31:19], 1'b1} + {{13{P2[47]}}, 1'b1};
+    always_ff @(posedge clk) begin
+        FIAD_hi <= DSFSH1_acto_add[31:19] + {13{P2[47]}};
+        FIAD_hi_crry <= FIAD_hi_crry_sum[13:1];
+    end
 
     /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
-        .A_INPUT("CASCADE"), //from prev
+        .A_INPUT("DIRECT"), //from prev
         .B_INPUT("DIRECT"),
-        .USE_DPORT("TRUE"),
-        .USE_MULT("DYNAMIC"), //For both floats and integer ops
+        .USE_DPORT("FALSE"),
+        .USE_MULT("NONE"), //For both floats and integer ops
         .USE_SIMD("ONE48"),
         .AUTORESET_PATDET("NO_RESET"),
-        .MASK(48'h3fffffffffff),
+        .MASK(48'h00000FFFFFFF),
         .PATTERN(48'h000000000000),
         .SEL_MASK("MASK"),
         .SEL_PATTERN("PATTERN"),
-        .USE_PATTERN_DETECT("NO_PATDET"),
-        .ACASCREG(1),
-        .ADREG(1),
-        .ALUMODEREG(1),
-        .AREG(1),
-        .BCASCREG(1),
-        .BREG(2),
-        .CARRYINREG(1),
-        .CARRYINSELREG(1),
+        //I really do wonder what is xilinx doing? They are actually wasting
+        //so much letters right here. It can easily be something like:
+        //PTRNDET_E(1).
+        .USE_PATTERN_DETECT("PATDET"),
+        .ACASCREG(0),
+        .ADREG(0),
+        .ALUMODEREG(0),
+        .AREG(0),
+        .BCASCREG(0),
+        .BREG(0),
+        .CARRYINREG(0),
+        .CARRYINSELREG(0),
         .CREG(0),
-        .DREG(1),
-        .INMODEREG(1),
-        .MREG(1),
-        .OPMODEREG(1),
+        .DREG(0),
+        .INMODEREG(0),
+        .MREG(0),
+        .OPMODEREG(0),
         .PREG(1)
     )
     Goodbye (
@@ -515,12 +532,17 @@ module GUCH (
         .MULTSIGNOUT(),
         .PCOUT(),
         .OVERFLOW(),
-        .PATTERNBDETECT(),
-        .PATTERNDETECT(),
+        //The pattern detect literally checks for patterns after ALU.
+        //The lower port(holy letter waste btw) is checking for whether
+        //Unamsked result bits are eq to the PATTERN, which is top bits
+        //Being zero, and upper port checked whether it eqs to ~ptrn
+        //Which means its all ones. Thus it works for both positive and neg results
+        .PATTERNBDETECT(FIAD_ptrn_ones),
+        .PATTERNDETECT(FIAD_ptrn_zeros),
         .UNDERFLOW(),
-        .CARRYOUT(),
+        .CARRYOUT(FIAD_carry),
         .P(P3),
-        .ACIN(ACOUT0),
+        .ACIN(30'h0),
         .BCIN(18'h0),
         .CARRYCASCIN(1'b0),
         .MULTSIGNIN(1'b0),
@@ -528,18 +550,18 @@ module GUCH (
         .ALUMODE(4'b0000),
         .CARRYINSEL(3'b000),
         .CLK(clk),
-        .INMODE(INMODE2),
+        .INMODE(5'b00000),
         .OPMODE(7'b001_11_00),
         //Its two's comlimetn so top bit gotta be 0
         .A(30'h0),
-        .B({10'h0, STRT_b[24:17]}),
+        .B(18'h0),
         //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
         //Flipping bits is xoring with all 1s, and xoring with 0s does nothing, so
         //here we are, with this beautiful expression
-        .C({DSFSH1_acto_add[12:0], DSFSH1_ato_add[21:0] ^
-                {22{DSFSH1_sub_mags}}, DSFSH1_sub_mags}),
+        .C({DSFSH1_acto_add[18:0], DSFSH1_ato_add[21:0] ^
+                {22{DSFSH1_sub_mags}}, {7{DSFSH1_sub_mags}}}),
         .CARRYIN(DSFSH1_sub_mags), //thats so nice actually
-        .D({{9{STRT_a[32]}}, STRT_a[32], ~STRT_a[31], STRT_a[30:25], STRT_a[23:16]}), //for FFMA16
+        .D(25'h0), //for FFMA16
         .CEA1(1'b1),
         .CEA2(1'b1),
         .CEAD(1'b1),
