@@ -487,7 +487,7 @@ module GUCH (
     logic FIAD_ptrn_zeros, FIAD_ptrn_ones;
     logic [12:0] FIAD_hi, FIAD_hi_crry;
     logic [13:0] FIAD_hi_crry_sum;
-    logic [3:0] FIAD_carry;
+    logic [3:0] FIAD_crry;
     (* shreg_extract = "no", dont_touch = "true" *) logic [16:0] FIAD_P1_lo;
     (* shreg_extract = "no", dont_touch = "true" *) logic [8:0] FIAD_exp_base;
     (* shreg_extract = "no", dont_touch = "true" *) logic FIAD_c_sign, FIAD_sticky;
@@ -555,7 +555,7 @@ module GUCH (
         .PATTERNBDETECT(FIAD_ptrn_ones),
         .PATTERNDETECT(FIAD_ptrn_zeros),
         .UNDERFLOW(),
-        .CARRYOUT(FIAD_carry),
+        .CARRYOUT(FIAD_crry),
         .P(P3),
         .ACIN(30'h0),
         .BCIN(18'h0),
@@ -601,7 +601,65 @@ module GUCH (
         .RSTM(1'b0),
         .RSTP(1'b0)
     );
-    /* verilator lint_on PINCONNECTEMPTY */
+    /* verilator lint_on PINCONNECTEMPTY */ 
+
+    //=> PRENRM (Pre-Normalization) <=//
+    //So initially I thought that I had ~16 stages for the whole GPU. But now
+    //when I expanteded number of 'Warps' to 32, im not bounded by that number
+    //anymore. Also from my ultra scientific calculations im going to be
+    //memory bandwidth bounded, instead of latency bounded. So yeah this
+    //virtually removes any bounds from pipeline stages I can have. And so NORM0
+    //doesn't fit into 1 stage from my testing, so this one mainly registers operands
+    //And runs some hi checks.
+
+    //crry - as i said.
+    logic  [12:0] res_hi;
+    logic  res_neg;
+    assign res_hi = FIAD_crry[3] ? FIAD_hi_crry : FIAD_hi;
+    assign res_neg = res_hi[12];
+    //results, assemble
+    logic  [76:0] raw_res;
+    assign raw_res = {res_hi, P3, FIAD_P1_lo};
+
+    //I actually lied a lil bit I don't just do lzc, I do either lcz is lco
+    //Based on the sign of th result
+    logic  top32, next32.
+    assign top32 = res_neg ? (FIAD_ptrn_ones  &  &res_hi[11:0])
+                           : (FIAD_ptrn_zeros & ~|res_hi[11:0]);
+
+    assign next32  = neg ? &{P3[27:0], FIAD_P1_lo[16:13]}
+                         : ~|{P3[27:0], FIAD_P1_lo[16:13]};
+
+    logic  sh64, sh32;
+    assign sh64 = top32 & next32;
+    assign sh32 = top32 & ~next32;
+
+    //Just a check - I don't have much time here.
+    logic  PRENRM_sh64, PRENRM_sh32;
+    assign PRENRM_sh64 = 
+
+
+
+
+
+    //=> NORM0 (Normalization 0) <=//
+    //Finally a normalization. Basically since this is FMA, there is no way to
+    //know where the result will land in the 76bit window. And normalization's
+    //purpose is to shift it so highest bit is at bit 76(highest field). I do
+    //it without a dedicated lzc btw, which I find kinda cool. I do it by just shifting until top1 hits 76th bit.
+    //Also 77th bit is sign if ure wondering where it is, and 76th is hidden bit.
+
+    //=> NORM1 (Normalization 1) <=//
+    //Did you really expect the 76big ass shifter to fit into 1 stage?
+
+    //=> NORM2 (Normalization 1) <=//
+    //Did you really expect the 76big ass shifter to fit into 2 stages?
+
+    //=> NORM3 (Normalization 1) <=//
+    //Did you really expect the 76big ass shifter to fit into 3 stages?
+    //Worst part is that I can't really do anything with unnormalized value.
+    //To be frank it isn't even a worst part, it isn't really even bad, im
+    //fine with it. It still just fits into 3.33ns
 
 
 
