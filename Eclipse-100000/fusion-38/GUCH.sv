@@ -75,7 +75,6 @@ module GUCH (
     //Calc sh and start DSPs
     logic [32:0] STRT_a, STRT_b, STRT_c;
     logic [8:0] shexp;
-    logic [8:0] STRT_abexp, STRT_cexp; //exp of a and b
     logic STRT_prod_zero, STRT_shexp_neg;
 
     logic [6:0] sh_exp;
@@ -85,7 +84,6 @@ module GUCH (
         STRT_c <= PREA_c;
 
         STRT_abexp <= PREA_shexp;
-        STRT_cexp <= PREA_cexp;
 
         STRT_prod_zero <= PREA_a_zero | PREA_b_zero;
         STRT_shexp_neg <= shexp[8];
@@ -254,7 +252,14 @@ module GUCH (
 
     always_ff @(posedge clk) begin : DGAF0_C
         C_alig0 <= {STRT_c[24:0], 3'h0} >> STRT_shexp_lo;
-        DGAF0_exp_base <= ((STRT_shexp_neg | STRT_prod_zero) && |in_grp[6:0]) ? -STRT_cexp : STRT_abexp;
+        //The exponent is c's biased exponent if c takes over, or just a+b+92 exp
+        //if it doesn't. Takes over means that c is much bigger than a*b, and
+        //its so large that sh_exp literally becomes negative, and because
+        //this is impossible it sits at highest row. Whilst a*b power always
+        //sits at row 48. So c's exponent would have much more value and would take over.
+        //92 because field = exp + 64, top1_pos = 76 - lcz(shoudl be clear) and 
+        //exp = base + (top1 pos - 48) bc each column above 48 doubles the value.
+        DGAF0_exp_base <= ((STRT_shexp_neg | STRT_prod_zero) & STRT_c[24]) ? {2'b00, ~STRT_c[31], STRT_c[30:25]} : STRT_abexp + 9'd92;
         DGAF0_ato_add <= STRT_a[24] ? STRT_b[24:0] : 25'h0;
     end : DGAF0_C
 
@@ -305,6 +310,7 @@ module GUCH (
     logic DGAF1_sticky_comb;
     (* shreg_extract = "no" *) logic [24:0] DGAF1_ato_add;
     (* shreg_extract = "no" *) logic DGAF1_c_sign, DGAF1_sub_mags;
+    logic [8:0] DGAF1_exp_base;
 
     assign C_alig1 = {C_alig0, 12'h0} >> {DGAF0_shexp_lmid, 2'h0};
     assign C_alig2 = {C_alig1, 37'h0} >> {DGAF0_shexp_hmid, 4'h0};
@@ -316,6 +322,7 @@ module GUCH (
         DGAF1_ato_add <= DGAF0_ato_add;
         DGAF1_c_sign <= DGAF0_c_sign;
         DGAF1_sub_mags <= DGAF0_sub_mags;
+        DGAF1_exp_base <= DGAF0_exp_base - 9'h1;
     end : DGAF1_C
 
     always_comb begin : sticky_check
@@ -340,11 +347,13 @@ module GUCH (
     (* shreg_extract = "no" *) logic [31:0] DSFSH0_acto_ff;
     (* shreg_extract = "no" *) logic DSFSH0_c_sign;
     (* shreg_extract = "no" *) logic DSFSH0_sub_mags;
+    logic [8:0] DSFSH0_exp_base;
 
     always_ff @(posedge clk) begin : DSFSH0_CRRY
         DSFSH0_ato_add <= DGAF1_ato_add[21:0];
         DSFSH0_c_sign <= DGAF1_c_sign;
         DSFSH0_sub_mags <= DGAF1_sub_mags;
+        DSFSH0_exp_base <= DGAF1_exp_base;
     end : DSFSH0_CRRY
 
     //DSP can't fully add C to the product, and it can't multiply last bit of
@@ -356,6 +365,7 @@ module GUCH (
         DSFSH0_acto_ff <= DSFSH0_acto_add;
     end
 
+    logic [47:0] PCOUT1, P3;
     /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
         .A_INPUT("CASCADE"), //from prev
@@ -389,7 +399,7 @@ module GUCH (
         .BCOUT(),
         .CARRYCASCOUT(),
         .MULTSIGNOUT(),
-        .PCOUT(),
+        .PCOUT(PCOUT1),
         .OVERFLOW(),
         .PATTERNBDETECT(),
         .PATTERNDETECT(),
@@ -445,6 +455,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic [31:0] DSFSH1_acto_add;
     (* shreg_extract = "no", dont_touch = "true" *) logic DSFSH1_c_sign;
     (* shreg_extract = "no" *) logic [16:0] DSFSH1_P1_lo;
+    logic [8:0] DSFSH1_exp_base;
 
     always_ff @(posedge clk) begin : DSFSH1_CRRY
         DSFSH1_ato_add <= DSFSH0_ato_add[21:0]; //last bit already added
@@ -452,7 +463,109 @@ module GUCH (
         DSFSH1_sub_mags <= DSFSH0_sub_mags;
         DSFSH1_P1_lo <= P1[16:0];
         DSFSH1_acto_add <= DSFSH0_acto_ff;
+        DSFSH1_exp_base <= DSFSH0_exp_base;
     end : DSFSH1_CRRY
+
+    //=> FIAD (Final Add) <=//
+    //I've finally settled on 48GUCHes total for the GPU, per 4SMs(ill give SM
+    //name later). That means 12GUCHes per SM, and 144Read ports for the sustained
+    //FMA. That is really good because 144Read ports is plausible using
+    //BRAM18s which i've got 270 of. It does reduce the theoretical peak
+    //performance, but the thing is those 38.4GEOFLOPS were just theoretical,
+    //With 2read ports per stage it just wouldn't work out. However it does
+    //increase the average performance of sustained FMA, to about
+    //25.6GEOFLOPS. Additionally it of course saves LUTs that im really
+    //limited on. And also that allows me to use one more DSP per GUCH.
+    //So I use it here to do the final add of c_hi and a's highest bit.
+    //unfortunately im still just short so I gotta have a small adder after.
+    //And also ill use pattern detect here, which skips like 1check stage.
+
+    /* verilator lint_off PINCONNECTEMPTY */
+    DSP48E1 #(
+        .A_INPUT("CASCADE"), //from prev
+        .B_INPUT("DIRECT"),
+        .USE_DPORT("TRUE"),
+        .USE_MULT("DYNAMIC"), //For both floats and integer ops
+        .USE_SIMD("ONE48"),
+        .AUTORESET_PATDET("NO_RESET"),
+        .MASK(48'h3fffffffffff),
+        .PATTERN(48'h000000000000),
+        .SEL_MASK("MASK"),
+        .SEL_PATTERN("PATTERN"),
+        .USE_PATTERN_DETECT("NO_PATDET"),
+        .ACASCREG(1),
+        .ADREG(1),
+        .ALUMODEREG(1),
+        .AREG(1),
+        .BCASCREG(1),
+        .BREG(2),
+        .CARRYINREG(1),
+        .CARRYINSELREG(1),
+        .CREG(0),
+        .DREG(1),
+        .INMODEREG(1),
+        .MREG(1),
+        .OPMODEREG(1),
+        .PREG(1)
+    )
+    Goodbye (
+        .ACOUT(),
+        .BCOUT(),
+        .CARRYCASCOUT(),
+        .MULTSIGNOUT(),
+        .PCOUT(),
+        .OVERFLOW(),
+        .PATTERNBDETECT(),
+        .PATTERNDETECT(),
+        .UNDERFLOW(),
+        .CARRYOUT(),
+        .P(P3),
+        .ACIN(ACOUT0),
+        .BCIN(18'h0),
+        .CARRYCASCIN(1'b0),
+        .MULTSIGNIN(1'b0),
+        .PCIN(PCOUT1),
+        .ALUMODE(4'b0000),
+        .CARRYINSEL(3'b000),
+        .CLK(clk),
+        .INMODE(INMODE2),
+        .OPMODE(7'b001_11_00),
+        //Its two's comlimetn so top bit gotta be 0
+        .A(30'h0),
+        .B({10'h0, STRT_b[24:17]}),
+        //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
+        //Flipping bits is xoring with all 1s, and xoring with 0s does nothing, so
+        //here we are, with this beautiful expression
+        .C({DSFSH1_acto_add[12:0], DSFSH1_ato_add[21:0] ^
+                {22{DSFSH1_sub_mags}}, DSFSH1_sub_mags}),
+        .CARRYIN(DSFSH1_sub_mags), //thats so nice actually
+        .D({{9{STRT_a[32]}}, STRT_a[32], ~STRT_a[31], STRT_a[30:25], STRT_a[23:16]}), //for FFMA16
+        .CEA1(1'b1),
+        .CEA2(1'b1),
+        .CEAD(1'b1),
+        .CEALUMODE(1'b1),
+        .CEB1(1'b1),
+        .CEB2(1'b1),
+        .CEC(1'b1),
+        .CECARRYIN(1'b1),
+        .CECTRL(1'b1),
+        .CED(1'b1),
+        .CEINMODE(1'b1),
+        .CEM(1'b1),
+        .CEP(1'b1),
+        .RSTA(1'b0),
+        .RSTALLCARRYIN(1'b0),
+        .RSTALUMODE(1'b0),
+        .RSTB(1'b0),
+        .RSTC(1'b0),
+        .RSTCTRL(1'b0),
+        .RSTD(1'b0),
+        .RSTINMODE(1'b0),
+        .RSTM(1'b0),
+        .RSTP(1'b0)
+    );
+    /* verilator lint_on PINCONNECTEMPTY */
+
 
     //=> FAAD0 (Fabric Add 1) <=//
     //Adding c_hi and ato_add to the hot, straight from DSP P2 result.
@@ -468,6 +581,7 @@ module GUCH (
     //Alright maybe its not that beautiful
     logic [36:0] FAAD0_sum;
     logic [36:1] FAAD0_sum_ff;
+    logic [8:0]  FAAD0_exp_base;
     (* shreg_extract = "no" *) logic [5:0]  FAAD0_P2_hi; //hello
     (* shreg_extract = "no" *) logic [18:0] FAAD0_acto;
     (* shreg_extract = "no" *) logic [6:0]  FAAD0_P2_lo;
@@ -478,13 +592,14 @@ module GUCH (
             {22{DSFSH1_sub_mags}}, DSFSH1_sub_mags};
         //end
     end
-    always_ff @(posedge clk) begin
+    always_ff @(posedge clk) begin : FAAD0_CRRY
         FAAD0_sum_ff <= FAAD0_sum[36:1];
         FAAD0_P2_hi  <= P2[47:42];
         FAAD0_acto   <= DSFSH1_acto_add[31:13];
         FAAD0_P2_lo  <= P2[6:0];
         FAAD0_P1_lo  <= DSFSH1_P1_lo;
-    end
+        FAAD0_exp_base <= DSFSH1_exp_base;
+    end : FAAD0_CRRY
 
 
     //=> FAAD1 (Fabric Add 1) <=//
