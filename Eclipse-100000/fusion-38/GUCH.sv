@@ -656,7 +656,6 @@ module GUCH (
     //purpose is to shift it so highest bit is at bit 76(highest field). I do
     //it without a dedicated lzc btw, which I find kinda cool. I do it by just shifting until top1 hits 76th bit.
     //Also 77th bit is sign if ure wondering where it is, and 76th is hidden bit.
-
     logic  NORM0_top32, NORM0_next32, NORM0_sh64, NORM0_sh32;
 
     always_comb begin
@@ -680,10 +679,11 @@ module GUCH (
                             &PRENRM_raw_res[44:29] | ~|PRENRM_raw_res[44:29],
                             &PRENRM_raw_res[76:61] | ~|PRENRM_raw_res[76:61]})
                             &NORM0_still_sh;
-    assign NORM0_eq8hi = ({&PRENRM_raw_res[12:5] | ~|PRENRM_raw_res[12:5],
+    assign NORM0_eq8hi = ({ &PRENRM_raw_res[12:5]  | ~|PRENRM_raw_res[12:5],
                             &PRENRM_raw_res[44:37] | ~|PRENRM_raw_res[44:37],
                             &PRENRM_raw_res[76:69] | ~|PRENRM_raw_res[76:69]})
                             &NORM0_still_sh;
+
     //eq8lo doesn't need it bc its already checked in eq16
     assign NORM0_eq8lo = {1'b1,
                             &PRENRM_raw_res[29:21] | ~|PRENRM_raw_res[29:21],
@@ -705,11 +705,11 @@ module GUCH (
     (* extract_reset = "no" *) logic [76:20] NORM0_raw_res;
     (* shreg_extract = "no" *) logic [1:0]  NORM0_lzc;
     (* shreg_extract = "no" *) logic NORM0_fell_ff;
-    always_ff @(posedge clk) begin
+    always_ff @(posedge clk) begin : NORM0_REG
         NORM0_raw_res <= NORM0_sh[76:20];
         NORM0_lzc  <= {NORM0_sh64, NORM0_sh32};
         NORM0_fell_ff <= NORM0_fell | PRENRM_sticky;
-    end
+    end : NORM0_REG
 
     (* shreg_extract = "no" *) logic NORM0_neg, NORM0_c_sign;
     (* shreg_extract = "no" *) logic [8:0] NORM0_exp_base;
@@ -742,12 +742,11 @@ module GUCH (
     (* extract_reset = "no", dont_touch = "true" *) logic [76:44] NORM1_raw_res;
     (* shreg_extract = "no", dont_touch = "true" *) logic [3:0]   NORM1_lzc;
     (* shreg_extract = "no", dont_touch = "true" *) logic NORM1_fell_ff;
-
-    always_ff @(posedge clk) begin
+    always_ff @(posedge clk) begin : NORM1_REG
         NORM1_raw_res <= NORM1_sh[76:44];
         NORM1_lzc <= {NORM0_lzc, NORM1_sh16, NORM1_sh8};
         NORM1_fell_ff <= NORM1_fell | NORM0_fell_ff;
-    end
+    end : NORM1_REG
 
     (* shreg_extract = "no", dont_touch = "true" *) logic NORM1_neg, NORM1_c_sign;
     (* shreg_extract = "no", dont_touch = "true" *) logic [8:0] NORM1_exp_base;
@@ -757,10 +756,42 @@ module GUCH (
         NORM1_exp_base <= NORM0_exp_base;
     end : NORM1_CRRY
 
-
-
     //=> NORM2 (Normalization 1) <=//
     //Did you really expect the 76big ass shifter to fit into 2 stages?
+    //NORM2 is also clean bc it doesn't inherit and doesn't initialize any
+    //lookahead shenanigans. Simply bc it doesn't need to.
+    logic  NORM2_sh4, NORM2_sh2
+    assign NORM2_sh4 = NORM1_raw_res[76:73] == {4{NORM1_neg}};
+    assign NORM2_sh2 = NORM2_sh4 ? NORM1_raw_res[72:71] == {2{NORM1_neg}} : NORM1_raw_res[76:75] == {2{NORM1_neg}};
+
+    logic  [76:44] NORM2_sh;
+    assign NORM2_sh = NORM1_raw_res << {NORM2_sh4, NORM2_sh2, 1'b0};
+
+    logic NORM2_fell;
+    always_comb begin
+        unique case ({NORM2_sh4, NORM2_sh2})
+            2'b00: NORM2_fell = |NORM1_raw_res[49:44];
+            2'b01: NORM2_fell = |NORM1_raw_res[47:44];
+            2'b10: NORM2_fell = |NORM1_raw_res[45:44];
+            default: NORM2_fell = 1'b0;
+        endcase
+    end
+
+    logic [76:50] NORM2_raw_res;
+    logic NORM2_fell_ff;
+    always_ff @(posedge clk) begin : NORM2_REG
+        NORM2_raw_res <= NORM2_sh[76:50];
+        NORM2_fell_ff <= NORM1_fell_ff | NORM2_fell;
+        NORM2_lzc <= {NORM1_lzc, NORM2_sh4, NORM2_sh2};
+    end : NORM2_REG
+
+    (* shreg_extract = "no", dont_touch = "true" *) logic NORM2_neg, NORM2_c_sign;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [8:0] NORM2_exp_base;
+    always_ff @(posedge clk) begin : NORM2_CRRY
+        NORM2_neg      <= NORM1_neg;
+        NORM2_c_sign   <= NORM1_c_sign;
+        NORM2_exp_base <= NORM1_exp_base;
+    end : NORM2_CRRY
 
     //=> NORM3 (Normalization 1) <=//
     //Did you really expect the 76big ass shifter to fit into 3 stages?
