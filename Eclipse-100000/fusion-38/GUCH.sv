@@ -739,17 +739,17 @@ module GUCH (
     end
 
     //51 - 7
-    (* extract_reset = "no", dont_touch = "true" *) logic [76:44] NORM1_raw_res;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [3:0]   NORM1_lzc;
-    (* shreg_extract = "no", dont_touch = "true" *) logic NORM1_fell_ff;
+    (* extract_reset = "no" *) logic [76:44] NORM1_raw_res;
+    (* shreg_extract = "no" *) logic [3:0]   NORM1_lzc;
+    (* shreg_extract = "no" *) logic NORM1_fell_ff;
     always_ff @(posedge clk) begin : NORM1_REG
         NORM1_raw_res <= NORM1_sh[76:44];
         NORM1_lzc <= {NORM0_lzc, NORM1_sh16, NORM1_sh8};
         NORM1_fell_ff <= NORM1_fell | NORM0_fell_ff;
     end : NORM1_REG
 
-    (* shreg_extract = "no", dont_touch = "true" *) logic NORM1_neg, NORM1_c_sign;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [8:0] NORM1_exp_base;
+    (* shreg_extract = "no" *) logic NORM1_neg, NORM1_c_sign;
+    (* shreg_extract = "no" *) logic [8:0] NORM1_exp_base;
     always_ff @(posedge clk) begin : NORM1_CRRY
         NORM1_neg      <= NORM0_neg;
         NORM1_c_sign   <= NORM0_c_sign;
@@ -760,7 +760,7 @@ module GUCH (
     //Did you really expect the 76big ass shifter to fit into 2 stages?
     //NORM2 is also clean bc it doesn't inherit and doesn't initialize any
     //lookahead shenanigans. Simply bc it doesn't need to.
-    logic  NORM2_sh4, NORM2_sh2
+    logic  NORM2_sh4, NORM2_sh2;
     assign NORM2_sh4 = NORM1_raw_res[76:73] == {4{NORM1_neg}};
     assign NORM2_sh2 = NORM2_sh4 ? NORM1_raw_res[72:71] == {2{NORM1_neg}} : NORM1_raw_res[76:75] == {2{NORM1_neg}};
 
@@ -779,14 +779,15 @@ module GUCH (
 
     logic [76:50] NORM2_raw_res;
     logic NORM2_fell_ff;
+    (* shreg_extract = "no" *) logic [5:0]   NORM2_lzc;
     always_ff @(posedge clk) begin : NORM2_REG
         NORM2_raw_res <= NORM2_sh[76:50];
         NORM2_fell_ff <= NORM1_fell_ff | NORM2_fell;
         NORM2_lzc <= {NORM1_lzc, NORM2_sh4, NORM2_sh2};
     end : NORM2_REG
 
-    (* shreg_extract = "no", dont_touch = "true" *) logic NORM2_neg, NORM2_c_sign;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [8:0] NORM2_exp_base;
+    (* shreg_extract = "no" *) logic NORM2_neg, NORM2_c_sign;
+    (* shreg_extract = "no" *) logic [8:0] NORM2_exp_base;
     always_ff @(posedge clk) begin : NORM2_CRRY
         NORM2_neg      <= NORM1_neg;
         NORM2_c_sign   <= NORM1_c_sign;
@@ -797,14 +798,30 @@ module GUCH (
     //Did you really expect the 76big ass shifter to fit into 3 stages?
     //Worst part is that I can't really do anything with unnormalized value.
     //To be frank it isn't even a worst part, it isn't really even bad, im
-    //fine with it. It still just fits into 3.33ns
+    //fine with it. It still just fits into 3.33ns.
+    //Last shift btw
+    logic  NORM3_sh1;
+    assign NORM3_sh1 = NORM2_raw_res[76] == NORM2_neg;
 
+    //The final difference, in short before that moment exp assumed its
+    //the highest one, but for each bit shifted it decreases by 1, thats
+    //the reason we even need lcz.
+    logic [8:0] norm_diff;
+    assign norm_diff = NORM2_exp_base - {NORM2_lzc, NORM3_sh1};
 
+    (* dont_touch = "true" *) logic [76:51] norm_res; //hell yeahhhhh
+    (* dont_touch = "true" *) logic norm_fell;
+    (* dont_touch = "true" *) logic [8:0] norm_exp;
+    always_ff @(posedge clk) begin : NORM3_REG
+        norm_res  <= NORM3_sh1 ? NORM2_raw_res[75:50] : NORM2_raw_res[76:51]; //saves up lil bit of LUTs
+        norm_fell <= NORM2_fell_ff | (~NORM3_sh1 & NORM2_raw_res[50]);
+        norm_exp  <= norm_diff[8:0];
+    end : NORM3_REG
 
-
-    //syntax drafts for flare
-    //parallel [u32 i : arr.len<()>] {
-    //  arr[i].rgbpck<(var0, var1)>;
-    //}
+    (* shreg_extract = "no", dont_touch = "true" *) logic norm_neg, norm_c_sign;
+    always_ff @(posedge clk) begin : NORM3_CRRY
+        norm_neg    <= NORM2_neg;
+        norm_c_sign <= NORM2_c_sign;
+    end : NORM3_CRRY
 
 endmodule
