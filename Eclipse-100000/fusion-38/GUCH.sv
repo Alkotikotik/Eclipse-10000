@@ -657,11 +657,14 @@ module GUCH (
     //it without a dedicated lzc btw, which I find kinda cool. I do it by just shifting until top1 hits 76th bit.
     //Also 77th bit is sign if ure wondering where it is, and 76th is hidden bit.
 
-    logic NORM0_top32, NORM0_next32, NORM0_sh64, NORM0_sh32;
-    assign NORM0_top32  = PRENRM_cout ? PRENRM_top32_c1 : PRENRM_top32_c0;
-    assign NORM0_next32 = PRENRM_raw_res[77] ? PRENRM_next32_o : PRENRM_next32_z;
-    assign NORM0_sh64 = NORM0_top32 & NORM0_next32;
-    assign NORM0_sh32 = NORM0_top32 & ~NORM0_next32;
+    logic  NORM0_top32, NORM0_next32, NORM0_sh64, NORM0_sh32;
+
+    always_comb begin
+        NORM0_top32  = PRENRM_cout ? PRENRM_top32_c1 : PRENRM_top32_c0;
+        NORM0_next32 = PRENRM_raw_res[77] ? PRENRM_next32_o : PRENRM_next32_z;
+        NORM0_sh64   = NORM0_top32 & NORM0_next32;
+        NORM0_sh32   = NORM0_top32 & ~NORM0_next32;
+    end
 
     logic  [76:0] NORM0_sh;
     //Thats really is a nice line.
@@ -669,45 +672,92 @@ module GUCH (
 
     //thats basically a lookahead for NORM1, NORM0 checks bits are eq.
     //Then in NORM1 I check whether its sign or not, if it is - good shift, if
-    //it isn't - don't shift.
-    logic [2:0] NORM0_eq16, NORM0_eq8hi, NORM0_eq8lo;
-    assign NORM0_eq16 = {PRENRM_raw_res[12:0] == 13'h0,
+    //it isn't - don't shift. Actually I can check it rn after fix I made.
+    logic [2:0] NORM0_eq16, NORM0_eq8hi, NORM0_eq8lo, NORM0_still_sh;
+    assign NORM0_still_sh = {PRENRM_raw_res[12], PRENRM_raw_res[44], PRENRM_raw_res[76]} ~^ {3{PRENRM_raw_res[77]}};
+
+    assign NORM0_eq16  = ({PRENRM_raw_res[12:0] == 13'h0,
                             &PRENRM_raw_res[44:29] | ~|PRENRM_raw_res[44:29],
-                            &PRENRM_raw_res[76:61] | ~|PRENRM_raw_res[76:61]};
-    assign NORM0_eq8hi = {&PRENRM_raw_res[12:5] | ~|PRENRM_raw_res[12:5],
+                            &PRENRM_raw_res[76:61] | ~|PRENRM_raw_res[76:61]})
+                            &NORM0_still_sh;
+    assign NORM0_eq8hi = ({&PRENRM_raw_res[12:5] | ~|PRENRM_raw_res[12:5],
                             &PRENRM_raw_res[44:37] | ~|PRENRM_raw_res[44:37],
-                            &PRENRM_raw_res[76:69] | ~|PRENRM_raw_res[76:69]};
+                            &PRENRM_raw_res[76:69] | ~|PRENRM_raw_res[76:69]})
+                            &NORM0_still_sh;
+    //eq8lo doesn't need it bc its already checked in eq16
     assign NORM0_eq8lo = {1'b1,
                             &PRENRM_raw_res[29:21] | ~|PRENRM_raw_res[29:21],
                             &PRENRM_raw_res[61:53] | ~|PRENRM_raw_res[61:53]};
 
-    (* extract_reset = "no", dont_touch = "true" *) logic [76:0] NORM0_raw_res;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [1:0]  NORM0_lzc;
+    logic  NORM0_pk16, NORM0_pk8hi, NORM0_pk8lo;
+    assign NORM0_pk16  = NORM0_sh64 ? NORM0_eq16[2]  : NORM0_sh32 ? NORM0_eq16[1]  : NORM0_eq16[0];
+    assign NORM0_pk8hi = NORM0_sh64 ? NORM0_eq8hi[2] : NORM0_sh32 ? NORM0_eq8hi[1] : NORM0_eq8hi[0];
+    assign NORM0_pk8lo = NORM0_sh64 ? NORM0_eq8lo[2] : NORM0_sh32 ? NORM0_eq8lo[1] : NORM0_eq8lo[0];
+
+    //1 fell - later for rounding.
+    logic  NORM0_fell;
+    assign NORM0_fell = ~NORM0_sh64 & ~NORM0_sh32 & |PRENRM_raw_res[19:0];
+
+    //The so called "guard" bit is right after last mantissa bit, so at bit 51.
+    //The shifter can shift max 31bits away, therefore 51-31 = 20 is the lowest it can get
+    //Also I construct lcz bit by bit its kinda cool.
+    //Also original sticky did its job, press f its no loner carried
+    (* extract_reset = "no" *) logic [76:20] NORM0_raw_res;
+    (* shreg_extract = "no" *) logic [1:0]  NORM0_lzc;
+    (* shreg_extract = "no" *) logic NORM0_fell_ff;
     always_ff @(posedge clk) begin
-        NORM0_raw_res <= NORM0_sh;
-        //lzc is built from sh bits you are gonna see later.
-        NORM0_lzc <= {NORM0_sh64, NORM0_sh32};
+        NORM0_raw_res <= NORM0_sh[76:20];
+        NORM0_lzc  <= {NORM0_sh64, NORM0_sh32};
+        NORM0_fell_ff <= NORM0_fell | PRENRM_sticky;
     end
 
-    (* shreg_extract = "no", dont_touch = "true" *) logic NORM0_neg, NORM0_c_sign, NORM0_sticky;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [8:0] NORM0_exp_base;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [2:0] NORM0_eq16_ff, NORM0_eq8hi_ff, NORM0_eq8lo_ff;
+    (* shreg_extract = "no" *) logic NORM0_neg, NORM0_c_sign;
+    (* shreg_extract = "no" *) logic [8:0] NORM0_exp_base;
+    (* shreg_extract = "no" *) logic NORM1_sh16, NORM1_sh8;
     always_ff @(posedge clk) begin : NORM0_CRRY
-        //just carry everything neccessery
         //Sometimes I like aligned <=, something i don't
         NORM0_neg      <= PRENRM_raw_res[77];
         NORM0_c_sign   <= PRENRM_c_sign;
-        NORM0_sticky   <= PRENRM_sticky;
         NORM0_exp_base <= PRENRM_exp_base;
-        NORM0_eq16_ff  <= NORM0_eq16;
-        NORM0_eq8hi_ff <= NORM0_eq8hi;
-        NORM0_eq8lo_ff <= NORM0_eq8lo;
+        NORM1_sh16     <= NORM0_pk16; //thats lil bit confusing
+        NORM1_sh8      <= NORM0_pk16 ? NORM0_pk8lo : NORM0_pk8hi;
     end : NORM0_CRRY
-
-
 
     //=> NORM1 (Normalization 1) <=//
     //Did you really expect the 76big ass shifter to fit into 1 stage?
+    logic  [76:20] NORM1_sh;
+    assign NORM1_sh = NORM0_raw_res << {NORM1_sh16, NORM1_sh8, 3'b000};
+
+    logic  NORM1_fell;
+    always_comb begin
+        unique case ({NORM1_sh16, NORM1_sh8})
+            2'b00:   NORM1_fell = |NORM0_raw_res[43:20];
+            2'b01:   NORM1_fell = |NORM0_raw_res[35:20];
+            2'b10:   NORM1_fell = |NORM0_raw_res[27:20];
+            default: NORM1_fell = 1'b0;
+        endcase
+    end
+
+    //51 - 7
+    (* extract_reset = "no", dont_touch = "true" *) logic [76:44] NORM1_raw_res;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [3:0]   NORM1_lzc;
+    (* shreg_extract = "no", dont_touch = "true" *) logic NORM1_fell_ff;
+
+    always_ff @(posedge clk) begin
+        NORM1_raw_res <= NORM1_sh[76:44];
+        NORM1_lzc <= {NORM0_lzc, NORM1_sh16, NORM1_sh8};
+        NORM1_fell_ff <= NORM1_fell | NORM0_fell_ff;
+    end
+
+    (* shreg_extract = "no", dont_touch = "true" *) logic NORM1_neg, NORM1_c_sign;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [8:0] NORM1_exp_base;
+    always_ff @(posedge clk) begin : NORM1_CRRY
+        NORM1_neg      <= NORM0_neg;
+        NORM1_c_sign   <= NORM0_c_sign;
+        NORM1_exp_base <= NORM0_exp_base;
+    end : NORM1_CRRY
+
+
 
     //=> NORM2 (Normalization 1) <=//
     //Did you really expect the 76big ass shifter to fit into 2 stages?
