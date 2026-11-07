@@ -488,9 +488,9 @@ module GUCH (
     logic [12:0] FIAD_hi, FIAD_hi_crry;
     logic [13:0] FIAD_hi_crry_sum;
     logic [3:0] FIAD_crry;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [16:0] FIAD_P1_lo;
-    (* shreg_extract = "no", dont_touch = "true" *) logic [8:0] FIAD_exp_base;
-    (* shreg_extract = "no", dont_touch = "true" *) logic FIAD_c_sign, FIAD_sticky;
+    (* shreg_extract = "no" *) logic [16:0] FIAD_P1_lo;
+    (* shreg_extract = "no" *) logic [8:0] FIAD_exp_base;
+    (* shreg_extract = "no" *) logic FIAD_c_sign, FIAD_sticky;
 
 
     //3rd dsp still can't quite reach hi bits still, so still gotta have
@@ -502,12 +502,12 @@ module GUCH (
         FIAD_hi_crry <= FIAD_hi_crry_sum[13:1];
     end
 
-    always_ff @(posedge clk) begin : FIAD_CRRY
+    always_ff @(posedge clk) begin : FIAD_PASS
         FIAD_P1_lo <= DSFSH1_P1_lo;
         FIAD_exp_base <= DSFSH1_exp_base;
         FIAD_c_sign <= DSFSH1_c_sign;
         FIAD_sticky <= DSFSH1_sticky;
-    end : FIAD_CRRY
+    end : FIAD_PASS
 
     /* verilator lint_off PINCONNECTEMPTY */
     DSP48E1 #(
@@ -614,32 +614,40 @@ module GUCH (
 
     //crry - as i said.
     logic  [12:0] res_hi;
-    logic  res_neg;
     assign res_hi = FIAD_crry[3] ? FIAD_hi_crry : FIAD_hi;
-    assign res_neg = res_hi[12];
     //results, assemble
-    logic  [76:0] raw_res;
+    logic  [77:0] raw_res;
     assign raw_res = {res_hi, P3, FIAD_P1_lo};
 
     //I actually lied a lil bit I don't just do lzc, I do either lcz is lco
-    //Based on the sign of th result
-    logic  top32, next32.
-    assign top32 = res_neg ? (FIAD_ptrn_ones  &  &res_hi[11:0])
-                           : (FIAD_ptrn_zeros & ~|res_hi[11:0]);
+    //Based on the sign of th result. And im doing this check here instead of
+    //first NORM, just because I can, everything is known early here. I don't
+    //do anything more because other results arrive pretty late
+    logic  top32_c0, top32_c1, next32_z, next32_o;
+    assign top32_c0 = FIAD_hi[12] ? (FIAD_ptrn_ones  &  &FIAD_hi[11:0])
+                                  : (FIAD_ptrn_zeros & ~|FIAD_hi[11:0]);
+    assign top32_c1 = FIAD_hi_crry[12] ? (FIAD_ptrn_ones  &  &FIAD_hi_crry[11:0])
+                                       : (FIAD_ptrn_zeros & ~|FIAD_hi_crry[11:0]);
 
-    assign next32  = neg ? &{P3[27:0], FIAD_P1_lo[16:13]}
-                         : ~|{P3[27:0], FIAD_P1_lo[16:13]};
+    assign next32_z = ~|{P3[27:0], FIAD_P1_lo[16:13]};
+    assign next32_o = &{P3[27:0], FIAD_P1_lo[16:13]};
 
-    logic  sh64, sh32;
-    assign sh64 = top32 & next32;
-    assign sh32 = top32 & ~next32;
+    logic PRENRM_top32_c0, PRENRM_top32_c1, PRENRM_next32_z, PRENRM_next32_o, PRENRM_cout;
+    logic [77:0] PRENRM_raw_res;
+    (* shreg_extract = "no" *) logic PRENRM_c_sign, PRENRM_sticky;
+    (* shreg_extract = "no" *) logic [8:0] PRENRM_exp_base;
 
-    //Just a check - I don't have much time here.
-    logic  PRENRM_sh64, PRENRM_sh32;
-    assign PRENRM_sh64 = 
-
-
-
+    always_ff @(posedge clk) begin : PRENRM_CRRY
+        PRENRM_top32_c0 <= top32_c0;
+        PRENRM_top32_c1 <= top32_c1;
+        PRENRM_next32_z <= next32_z;
+        PRENRM_next32_o <= next32_o;
+        PRENRM_cout <= FIAD_crry[3];
+        PRENRM_raw_res <= raw_res;
+        PRENRM_c_sign <= FIAD_c_sign;
+        PRENRM_sticky <= FIAD_sticky;
+        PRENRM_exp_base <= FIAD_exp_base;
+    end : PRENRM_CRRY
 
 
     //=> NORM0 (Normalization 0) <=//
@@ -648,6 +656,55 @@ module GUCH (
     //purpose is to shift it so highest bit is at bit 76(highest field). I do
     //it without a dedicated lzc btw, which I find kinda cool. I do it by just shifting until top1 hits 76th bit.
     //Also 77th bit is sign if ure wondering where it is, and 76th is hidden bit.
+
+    logic NORM0_top32, NORM0_next32, NORM0_sh64, NORM0_sh32;
+    assign NORM0_top32  = PRENRM_cout ? PRENRM_top32_c1 : PRENRM_top32_c0;
+    assign NORM0_next32 = PRENRM_raw_res[77] ? PRENRM_next32_o : PRENRM_next32_z;
+    assign NORM0_sh64 = NORM0_top32 & NORM0_next32;
+    assign NORM0_sh32 = NORM0_top32 & ~NORM0_next32;
+
+    logic  [76:0] NORM0_sh;
+    //Thats really is a nice line.
+    assign NORM0_sh = PRENRM_raw_res[76:0] << {NORM0_sh64, NORM0_sh32, 5'b00000};
+
+    //thats basically a lookahead for NORM1, NORM0 checks bits are eq.
+    //Then in NORM1 I check whether its sign or not, if it is - good shift, if
+    //it isn't - don't shift.
+    logic [2:0] NORM0_eq16, NORM0_eq8hi, NORM0_eq8lo;
+    assign NORM0_eq16 = {PRENRM_raw_res[12:0] == 13'h0,
+                            &PRENRM_raw_res[44:29] | ~|PRENRM_raw_res[44:29],
+                            &PRENRM_raw_res[76:61] | ~|PRENRM_raw_res[76:61]};
+    assign NORM0_eq8hi = {&PRENRM_raw_res[12:5] | ~|PRENRM_raw_res[12:5],
+                            &PRENRM_raw_res[44:37] | ~|PRENRM_raw_res[44:37],
+                            &PRENRM_raw_res[76:69] | ~|PRENRM_raw_res[76:69]};
+    assign NORM0_eq8lo = {1'b1,
+                            &PRENRM_raw_res[29:21] | ~|PRENRM_raw_res[29:21],
+                            &PRENRM_raw_res[61:53] | ~|PRENRM_raw_res[61:53]};
+
+    (* extract_reset = "no", dont_touch = "true" *) logic [76:0] NORM0_raw_res;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [1:0]  NORM0_lzc;
+    always_ff @(posedge clk) begin
+        NORM0_raw_res <= NORM0_sh;
+        //lzc is built from sh bits you are gonna see later.
+        NORM0_lzc <= {NORM0_sh64, NORM0_sh32};
+    end
+
+    (* shreg_extract = "no", dont_touch = "true" *) logic NORM0_neg, NORM0_c_sign, NORM0_sticky;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [8:0] NORM0_exp_base;
+    (* shreg_extract = "no", dont_touch = "true" *) logic [2:0] NORM0_eq16_ff, NORM0_eq8hi_ff, NORM0_eq8lo_ff;
+    always_ff @(posedge clk) begin : NORM0_CRRY
+        //just carry everything neccessery
+        //Sometimes I like aligned <=, something i don't
+        NORM0_neg      <= PRENRM_raw_res[77];
+        NORM0_c_sign   <= PRENRM_c_sign;
+        NORM0_sticky   <= PRENRM_sticky;
+        NORM0_exp_base <= PRENRM_exp_base;
+        NORM0_eq16_ff  <= NORM0_eq16;
+        NORM0_eq8hi_ff <= NORM0_eq8hi;
+        NORM0_eq8lo_ff <= NORM0_eq8lo;
+    end : NORM0_CRRY
+
+
 
     //=> NORM1 (Normalization 1) <=//
     //Did you really expect the 76big ass shifter to fit into 1 stage?
