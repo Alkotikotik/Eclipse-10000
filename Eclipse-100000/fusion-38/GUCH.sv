@@ -632,7 +632,24 @@ module GUCH (
     assign next32_z = ~|{P3[27:0], FIAD_P1_lo[16:13]};
     assign next32_o = &{P3[27:0], FIAD_P1_lo[16:13]};
 
+    //thats basically a lookahead for NORM1, PRENRM checks bits are eq.
+    //Then in NORM1 I check whether its sign or not, if it is - good shift, if
+    //it isn't - don't shift. Actually I can check it rn after fix I made.
+    //It was in NORM0 previosely, but NORM0 didn't pass, and I realized it can
+    //be moved here.
+    logic [2:0] eq16, eq8hi, eq8lo;
+    assign eq16  = {raw_res[12:0] == 13'h0,
+                    &raw_res[44:29] | ~|raw_res[44:29],
+                    &raw_res[76:61] | ~|raw_res[76:61]};
+    assign eq8hi = {&raw_res[12:5]  | ~|raw_res[12:5],
+                    &raw_res[44:37] | ~|raw_res[44:37],
+                    &raw_res[76:69] | ~|raw_res[76:69]};
+    assign eq8lo = {1'b1,
+                    &raw_res[29:21] | ~|raw_res[29:21],
+                    &raw_res[61:53] | ~|raw_res[61:53]};
+
     logic PRENRM_top32_c0, PRENRM_top32_c1, PRENRM_next32_z, PRENRM_next32_o, PRENRM_cout;
+    logic [2:0] PRENRM_eq16, PRENRM_eq8hi, PRENRM_eq8lo;
     logic [77:0] PRENRM_raw_res;
     (* shreg_extract = "no" *) logic PRENRM_c_sign, PRENRM_sticky;
     (* shreg_extract = "no" *) logic [8:0] PRENRM_exp_base;
@@ -643,6 +660,9 @@ module GUCH (
         PRENRM_next32_z <= next32_z;
         PRENRM_next32_o <= next32_o;
         PRENRM_cout <= FIAD_crry[3];
+        PRENRM_eq16 <= eq16;
+        PRENRM_eq8hi <= eq8hi;
+        PRENRM_eq8lo <= eq8lo;
         PRENRM_raw_res <= raw_res;
         PRENRM_c_sign <= FIAD_c_sign;
         PRENRM_sticky <= FIAD_sticky;
@@ -657,7 +677,6 @@ module GUCH (
     //it without a dedicated lzc btw, which I find kinda cool. I do it by just shifting until top1 hits 76th bit.
     //Also 77th bit is sign if ure wondering where it is, and 76th is hidden bit.
     logic  NORM0_top32, NORM0_next32, NORM0_sh64, NORM0_sh32;
-
     always_comb begin
         NORM0_top32  = PRENRM_cout ? PRENRM_top32_c1 : PRENRM_top32_c0;
         NORM0_next32 = PRENRM_raw_res[77] ? PRENRM_next32_o : PRENRM_next32_z;
@@ -669,25 +688,15 @@ module GUCH (
     //Thats really is a nice line.
     assign NORM0_sh = PRENRM_raw_res[76:0] << {NORM0_sh64, NORM0_sh32, 5'b00000};
 
-    //thats basically a lookahead for NORM1, NORM0 checks bits are eq.
-    //Then in NORM1 I check whether its sign or not, if it is - good shift, if
-    //it isn't - don't shift. Actually I can check it rn after fix I made.
-    logic [2:0] NORM0_eq16, NORM0_eq8hi, NORM0_eq8lo, NORM0_still_sh;
+    //check continues
+    logic  [2:0] NORM0_eq16, NORM0_eq8hi, NORM0_eq8lo, NORM0_still_sh;
     assign NORM0_still_sh = {PRENRM_raw_res[12], PRENRM_raw_res[44], PRENRM_raw_res[76]} ~^ {3{PRENRM_raw_res[77]}};
 
-    assign NORM0_eq16  = ({PRENRM_raw_res[12:0] == 13'h0,
-                            &PRENRM_raw_res[44:29] | ~|PRENRM_raw_res[44:29],
-                            &PRENRM_raw_res[76:61] | ~|PRENRM_raw_res[76:61]})
-                            &NORM0_still_sh;
-    assign NORM0_eq8hi = ({ &PRENRM_raw_res[12:5]  | ~|PRENRM_raw_res[12:5],
-                            &PRENRM_raw_res[44:37] | ~|PRENRM_raw_res[44:37],
-                            &PRENRM_raw_res[76:69] | ~|PRENRM_raw_res[76:69]})
-                            &NORM0_still_sh;
+    assign NORM0_eq16  = PRENRM_eq16 & NORM0_still_sh;
+    assign NORM0_eq8hi = PRENRM_eq8hi & NORM0_still_sh;
 
     //eq8lo doesn't need it bc its already checked in eq16
-    assign NORM0_eq8lo = {1'b1,
-                            &PRENRM_raw_res[29:21] | ~|PRENRM_raw_res[29:21],
-                            &PRENRM_raw_res[61:53] | ~|PRENRM_raw_res[61:53]};
+    assign NORM0_eq8lo = PRENRM_eq8lo;
 
     logic  NORM0_pk16, NORM0_pk8hi, NORM0_pk8lo;
     assign NORM0_pk16  = NORM0_sh64 ? NORM0_eq16[2]  : NORM0_sh32 ? NORM0_eq16[1]  : NORM0_eq16[0];
@@ -807,7 +816,7 @@ module GUCH (
     //the highest one, but for each bit shifted it decreases by 1, thats
     //the reason we even need lcz.
     logic [8:0] norm_diff;
-    assign norm_diff = NORM2_exp_base - {NORM2_lzc, NORM3_sh1};
+    assign norm_diff = NORM2_exp_base - {2'b00, NORM2_lzc, NORM3_sh1};
 
     (* dont_touch = "true" *) logic [76:51] norm_res; //hell yeahhhhh
     (* dont_touch = "true" *) logic norm_fell;
