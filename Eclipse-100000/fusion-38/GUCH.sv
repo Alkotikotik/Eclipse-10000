@@ -814,7 +814,7 @@ module GUCH (
 
     //The final difference, in short before that moment exp assumed its
     //the highest one, but for each bit shifted it decreases by 1, thats
-    //the reason we even need lcz.
+    //the reason we even need lcz. 2'b00 is for Wall to not complain
     logic [8:0] norm_diff;
     assign norm_diff = NORM2_exp_base - {2'b00, NORM2_lzc, NORM3_sh1};
 
@@ -832,5 +832,48 @@ module GUCH (
         norm_neg    <= NORM2_neg;
         norm_c_sign <= NORM2_c_sign;
     end : NORM3_CRRY
+
+    //=> RND (Round) <=//
+    //Undo two's compliment, and round
+    logic  [23:0] RND_mant;
+    assign RND_mant = norm_res[75:52] ^ {24{norm_neg}};
+
+    logic  RND_guard, RND_lsb, RND_hidden, RND_zero;
+    assign RND_guard  = norm_res[51] ^ norm_neg;
+    assign RND_lsb    = norm_res[52] ^ norm_neg;
+    assign RND_hidden = norm_res[76] ^ norm_neg;
+
+    //So this is the flush i've talked before, it works bc norm_exp is exp-1,
+    //Thats why i carried norm_exp -1 all the way through. And yeah [8] works
+    //because flush test does exp <= 0, which is the same as exp - 1 <= which
+    //is msb in two's compliment.
+    assign RND_zero   = norm_exp[8]  | ~RND_hidden;
+
+    //final, whether to round up or down, all this rounding stuff just for list sig bit
+    //If it reaches the guard and goes beyond, we round up, if it doesn't but reaches sticky, round down
+    //If it just reaches the guard, i do LSB meaning if LSB is one I round up,
+    //if its zero i round down. Its how ties to even works you might think
+    //thats its kinda unfair, but in reality 50% of the times it would round
+    //up and 50% round down so error averages out.
+    logic  RND_inc;
+    assign RND_inc = RND_guard  ? (norm_fell | RND_lsb | norm_neg)
+                                : (norm_neg & ~norm_fell & RND_lsb);
+
+    logic [31:0] RND_a, RND_b;
+    logic [31:0] RND_res, RND_res_ff;
+
+    assign RND_a = {norm_exp[7:0], RND_mant}; //all zero on flush
+    assign RND_b = {7'h0, RND_hidden, 23'h0, RND_inc};
+    //Add that 1 to exp back and inc if round up.
+    assign RND_res = RND_a + RND_b;
+    always_ff @(posedge clk) begin
+        RND_res_ff <= RND_zero ? 32'h00000000 : {norm_neg ^ norm_c_sign, RND_res[31] ? 31'h7FFFFFFF : RND_res[30:0]};
+    end
+    assign result = RND_res_ff;
+
+    //=> PCK (Pack) <=//
+    //Well and so here we are - unbias exp and saturate
+
+
 
 endmodule
