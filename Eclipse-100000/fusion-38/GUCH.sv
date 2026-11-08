@@ -12,7 +12,7 @@ module GUCH (
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
     //First of all, all signals are computed in 1 SM because all GUCHes share them
     //But that I mean b becomes one or c becomes zero
-    input logic efp_op, neg_p, neg_c, ffma16_op,
+    input logic efp_op, neg_p, neg_c,
     input logic [1:0] cmp_code, //<=, <, ==, !=
     input logic [6:0] OPMODE1, OPMODE2,
     input logic [4:0] INMODE1, INMODE2,
@@ -886,7 +886,4 @@ module GUCH (
         FINALE <= {RND_sign, RND_res_ff[31] ? 31'h7FFFFFFF : RND_res_ff[30:0]};
     end
     assign result = FINALE;
-
-
-
 endmodule
