@@ -879,7 +879,6 @@ module GUCH (
         RND_sign <= RND_zero ? 1'b0 : norm_neg ^ norm_c_sign;
     end
 
-
     //=> PCK (Pack) <=//
     //Well well well and so here we are - final stage
     logic [31:0] FINALE;
