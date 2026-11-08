@@ -818,16 +818,16 @@ module GUCH (
     logic [8:0] norm_diff;
     assign norm_diff = NORM2_exp_base - {2'b00, NORM2_lzc, NORM3_sh1};
 
-    (* dont_touch = "true" *) logic [76:51] norm_res; //hell yeahhhhh
-    (* dont_touch = "true" *) logic norm_fell;
-    (* dont_touch = "true" *) logic [8:0] norm_exp;
+    logic [76:51] norm_res; //hell yeahhhhh
+    logic norm_fell;
+    logic [8:0] norm_exp;
     always_ff @(posedge clk) begin : NORM3_REG
         norm_res  <= NORM3_sh1 ? NORM2_raw_res[75:50] : NORM2_raw_res[76:51]; //saves up lil bit of LUTs
         norm_fell <= NORM2_fell_ff | (~NORM3_sh1 & NORM2_raw_res[50]);
         norm_exp  <= norm_diff[8:0];
     end : NORM3_REG
 
-    (* shreg_extract = "no", dont_touch = "true" *) logic norm_neg, norm_c_sign;
+    (* shreg_extract = "no" *) logic norm_neg, norm_c_sign;
     always_ff @(posedge clk) begin : NORM3_CRRY
         norm_neg    <= NORM2_neg;
         norm_c_sign <= NORM2_c_sign;
@@ -861,18 +861,23 @@ module GUCH (
 
     logic [31:0] RND_a, RND_b;
     logic [31:0] RND_res, RND_res_ff;
+    logic RND_sign;
 
     assign RND_a = {norm_exp[7:0], RND_mant}; //all zero on flush
     assign RND_b = {7'h0, RND_hidden, 23'h0, RND_inc};
     //Add that 1 to exp back and inc if round up.
     assign RND_res = RND_a + RND_b;
     always_ff @(posedge clk) begin
-        RND_res_ff <= RND_zero ? 32'h00000000 : {norm_neg ^ norm_c_sign, RND_res[31] ? 31'h7FFFFFFF : RND_res[30:0]};
+        RND_res_ff <= RND_zero ? 32'h0 : RND_res;
+        //So that elimitates -0 whatsoever, -0 just becomes regular zero, because I hate -0. Its like complete nonsense
+        RND_sign <= RND_zero ? 1'b0 : norm_neg ^ norm_c_sign;
     end
-    assign result = RND_res_ff;
+
 
     //=> PCK (Pack) <=//
-    //Well and so here we are - unbias exp and saturate
+    //Well well well and so here we are - final stage
+    //FINALE
+    assign result = {RND_sign, RND_res_ff[31] ? 31'h7FFFFFFF : RND_res_ff[30:0]};
 
 
 
