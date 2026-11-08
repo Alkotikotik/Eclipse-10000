@@ -55,20 +55,26 @@ module GUCH (
     //Moving longest stuff from STRT to here, for crit path ofc
     logic [32:0] PREA_a, PREA_b, PREA_c;
     logic [8:0]  PREA_shexp, PREA_cexp;
-    logic PREA_a_zero, PREA_b_zero;
+    logic PREA_prod_zero, PREA_efp_op;
+
+    //flush subnormals immediately
+    logic  PREA_a_fld0, PREA_b_fld0, PREA_c_fld0;
+    assign PREA_a_fld0 = ~|a[30:24];
+    assign PREA_b_fld0 = ~|b[30:24];
+    assign PREA_c_fld0 = ~|c[30:24];
     always_ff @(posedge clk) begin : PREA_EFP
         //unbias by inverting top bit, and put back hidden bit.
         //No need for reset, otherwise DSP wouldn't accept them immediately
-        PREA_a <= {a[31], ~a[30], a[29:24], |a[30:24], a[23:0]};
-        PREA_b <= {b[31], ~b[30], b[29:24], |b[30:24], b[23:0]};
-        PREA_c <= {c[31], ~c[30], c[29:24], |c[30:24], c[23:0]};
+        PREA_a <= {a[31], ~a[30], a[29:24], ~PREA_a_fld0, (efp_op & PREA_a_fld0) ? 24'h0 : a[23:0]};
+        PREA_b <= {b[31], ~b[30], b[29:24], ~PREA_b_fld0, (efp_op & PREA_b_fld0) ? 24'h0 : b[23:0]};
+        PREA_c <= {c[31], ~c[30], c[29:24], ~PREA_c_fld0, (efp_op & PREA_c_fld0) ? 24'h0 : c[23:0]};
 
-        PREA_shexp <= {{3{~a[30]}}, {a[29:25], a[24] | ~|a[30:24]}} + {{3{~b[30]}}, {b[29:25], b[24] | ~|b[30:24]}};
+        PREA_shexp <= {{3{~a[30]}}, a[29:24]} + {{3{~b[30]}}, b[29:24]};
         //So basically subtracting a number from const should be a little better.
-        PREA_cexp  <= 9'd28 - {{3{~c[30]}}, {c[29:25], c[24] | ~|c[30:24]}};
+        PREA_cexp  <= 9'd28 - {{3{~c[30]}}, c[29:24]};
 
-        PREA_a_zero <= ~|a[30:0];
-        PREA_b_zero <= ~|b[30:0];
+        PREA_prod_zero <= PREA_a_fld0 | PREA_b_fld0;
+        PREA_efp_op <= efp_op;
     end : PREA_EFP
 
     //=> STRT (Start) <=//
@@ -80,13 +86,13 @@ module GUCH (
 
     logic [6:0] sh_exp;
     always_ff @(posedge clk) begin : STRT_CRRY
-        STRT_a <= {PREA_a[32:25], PREA_a[24] & efp_op, PREA_a[23:0]};
+        STRT_a <= {PREA_a[32:25], PREA_a[24] & PREA_efp_op, PREA_a[23:0]};
         STRT_b <= PREA_b;
         STRT_c <= PREA_c;
 
         STRT_abexp <= PREA_shexp;
 
-        STRT_prod_zero <= PREA_a_zero | PREA_b_zero;
+        STRT_prod_zero <= PREA_prod_zero;
         STRT_shexp_neg <= shexp[8];
     end : STRT_CRRY
 
@@ -95,7 +101,7 @@ module GUCH (
     logic c_sign, sub_mags;
     always_ff @(posedge clk) begin : signs
         c_sign <= PREA_c[32] ^ neg_c; //FMS... etc
-        sub_mags <= efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
+        sub_mags <= PREA_efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
     end : signs
 
     //So exp(a) + exp(b) is self explanatory - we are multiplying them, but
@@ -114,7 +120,7 @@ module GUCH (
     //ALmost clamp of either a or b is 0, bc if they are result should just be
     //c, but, sh_exp still shifts c completely out of range sometimes, meaning
     //its result becomes just zero.
-    assign sh_exp = (shexp[8] | PREA_a_zero | PREA_b_zero) ? 0 : (shexp[7] ? 7'd127 : shexp[6:0]);
+    assign sh_exp = (shexp[8] | PREA_prod_zero) ? 0 : (shexp[7] ? 7'd127 : shexp[6:0]);
 
     //I need to align C to 77bits then add lower bits in first DSP, and rest
     //in fabric. I do it in 4 stages across 2 cycles parallel to first cycles of DSP so it
@@ -876,8 +882,11 @@ module GUCH (
 
     //=> PCK (Pack) <=//
     //Well well well and so here we are - final stage
-    //FINALE
-    assign result = {RND_sign, RND_res_ff[31] ? 31'h7FFFFFFF : RND_res_ff[30:0]};
+    logic [31:0] FINALE;
+    always_ff @(posedge clk) begin
+        FINALE <= {RND_sign, RND_res_ff[31] ? 31'h7FFFFFFF : RND_res_ff[30:0]};
+    end
+    assign result = FINALE;
 
 
 
