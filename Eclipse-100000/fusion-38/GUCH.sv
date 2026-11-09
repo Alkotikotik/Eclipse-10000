@@ -14,7 +14,7 @@ module GUCH (
     //But that I mean b becomes one or c becomes zero
     input logic efp_op, int_op, neg_p, neg_c,
     input logic [1:0] cmp_code, //<=, <, ==, !=
-    input logic [6:0] int_sh,
+    input logic [5:0] int_sh,
     input logic [6:0] OPMODE1, OPMODE2, OPMODE3,
     input logic [4:0] INMODE1, INMODE2,
     input logic [3:0] ALUMODE, ALUMODE3,
@@ -64,7 +64,7 @@ module GUCH (
     assign PREA_b_fld0 = ~|b[30:24];
     assign PREA_c_fld0 = ~|c[30:24];
     (* shreg_extract = "no" *) logic PREA_int;
-    (* shreg_extract = "no" *) logic [6:0] PREA_int_sh;
+    (* shreg_extract = "no" *) logic [5:0] PREA_int_sh;
     always_ff @(posedge clk) begin : PREA_EFP
         //Put back hidden bit. No unbias here: only shexp/cexp need the
         //unbiased value and they unbias themselfs. Rhe rest reads the field as is
@@ -92,7 +92,7 @@ module GUCH (
 
     logic [6:0] sh_exp;
     (* shreg_extract = "no" *) logic STRT_int;
-    (* shreg_extract = "no" *) logic [6:0] STRT_int_sh;
+    (* shreg_extract = "no" *) logic [5:0] STRT_int_sh;
     always_ff @(posedge clk) begin : STRT_CRRY
         STRT_a <= {PREA_a[32:25], PREA_a[24] & PREA_efp_op, PREA_a[23:0]};
         STRT_b <= PREA_b;
@@ -260,7 +260,7 @@ module GUCH (
     logic [8:0] DGAF0_exp_base;
 
     (* shreg_extract = "no" *) logic DGAF0_int;
-    (* shreg_extract = "no" *) logic [6:0] DGAF0_int_sh;
+    (* shreg_extract = "no" *) logic [5:0] DGAF0_int_sh;
     always_ff @(posedge clk) begin : DGAF0_CRRY
         DGAF0_shexp_lmid <= STRT_shexp_lmid;
         DGAF0_shexp_hmid <= STRT_shexp_hmid;
@@ -353,7 +353,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic [8:0] DGAF1_exp_base;
     (* shreg_extract = "no" *) logic [31:0] DGAF1_int_a, DGAF1_int_b;
     (* shreg_extract = "no" *) logic DGAF1_int;
-    (* shreg_extract = "no" *) logic [6:0] DGAF1_int_sh;
+    (* shreg_extract = "no" *) logic [5:0] DGAF1_int_sh;
     always_ff @(posedge clk) begin : DGAF1_CRRY
         DGAF1_ato_add  <= DGAF0_ato_add;
         DGAF1_c_sign   <= DGAF0_c_sign;
@@ -391,7 +391,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic DSFSH0_sticky;
 
     (* shreg_extract = "no" *) logic DSFSH0_int;
-    (* shreg_extract = "no" *) logic [6:0] DSFSH0_int_sh;
+    (* shreg_extract = "no" *) logic [5:0] DSFSH0_int_sh;
     always_ff @(posedge clk) begin : DSFSH0_CRRY
         DSFSH0_ato_add <= DGAF1_ato_add[21:0];
         DSFSH0_c_sign <= DGAF1_c_sign;
@@ -505,7 +505,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic DSFSH1_sticky;
 
     (* shreg_extract = "no" *) logic DSFSH1_int;
-    (* shreg_extract = "no" *) logic [6:0] DSFSH1_int_sh;
+    (* shreg_extract = "no" *) logic [5:0] DSFSH1_int_sh;
     always_ff @(posedge clk) begin : DSFSH1_CRRY
         DSFSH1_ato_add <= DSFSH0_ato_add[21:0]; //last bit already added
         DSFSH1_c_sign <= DSFSH0_c_sign;
@@ -550,7 +550,7 @@ module GUCH (
     end
 
     (* shreg_extract = "no" *) logic FIAD_int;
-    (* shreg_extract = "no" *) logic [6:0] FIAD_int_sh;
+    (* shreg_extract = "no" *) logic [5:0] FIAD_int_sh;
     always_ff @(posedge clk) begin : FIAD_PASS
         FIAD_P1_lo <= DSFSH1_P1_lo;
         FIAD_exp_base <= DSFSH1_exp_base;
@@ -693,32 +693,42 @@ module GUCH (
     //it isn't - don't shift. Actually I can check it rn after fix I made.
     //It was in NORM0 previosely, but NORM0 didn't pass, and I realized it can
     //be moved here.
-    logic [2:0] eq16, eq8hi, eq8lo;
+    logic [2:1] eq16, eq8hi;
+    logic [2:0] eq8lo;
+    logic eq16_c0, eq16_c1, eq8hi_c0, eq8hi_c1;
+    assign eq16_c0  = &{FIAD_hi[11:0], P3[47:44]} | ~|{FIAD_hi[11:0], P3[47:44]};
+    assign eq16_c1  = &{FIAD_hi_crry[11:0], P3[47:44]} | ~|{FIAD_hi_crry[11:0], P3[47:44]};
+    assign eq8hi_c0 = &FIAD_hi[11:4] | ~|FIAD_hi[11:4];
+    assign eq8hi_c1 = &FIAD_hi_crry[11:4] | ~|FIAD_hi_crry[11:4];
     assign eq16  = {raw_res[12:0] == 13'h0,
-                    &raw_res[44:29] | ~|raw_res[44:29],
-                    &raw_res[76:61] | ~|raw_res[76:61]};
+                    &raw_res[44:29] | ~|raw_res[44:29]};
     assign eq8hi = {&raw_res[12:5]  | ~|raw_res[12:5],
-                    &raw_res[44:37] | ~|raw_res[44:37],
-                    &raw_res[76:69] | ~|raw_res[76:69]};
+                    &raw_res[44:37] | ~|raw_res[44:37]};
     assign eq8lo = {1'b1,
                     &raw_res[29:21] | ~|raw_res[29:21],
                     &raw_res[61:53] | ~|raw_res[61:53]};
 
     logic PRENRM_top32_c0, PRENRM_top32_c1, PRENRM_next32_z, PRENRM_next32_o, PRENRM_cout;
-    logic [2:0] PRENRM_eq16, PRENRM_eq8hi, PRENRM_eq8lo;
+    logic [2:1] PRENRM_eq16, PRENRM_eq8hi;
+    logic [2:0] PRENRM_eq8lo;
+    logic PRENRM_eq16_c0, PRENRM_eq16_c1, PRENRM_eq8hi_c0, PRENRM_eq8hi_c1;
     logic [77:0] PRENRM_raw_res;
     (* shreg_extract = "no" *) logic PRENRM_c_sign, PRENRM_sticky;
     (* shreg_extract = "no" *) logic [8:0] PRENRM_exp_base;
 
     (* shreg_extract = "no" *) logic PRENRM_int;
-    (* shreg_extract = "no" *) logic [6:0] PRENRM_int_sh;
+    (* shreg_extract = "no" *) logic [4:0] PRENRM_int_sh;
     always_ff @(posedge clk) begin : PRENRM_CRRY
-        PRENRM_top32_c0 <= top32_c0;
-        PRENRM_top32_c1 <= top32_c1;
-        PRENRM_next32_z <= next32_z;
-        PRENRM_next32_o <= next32_o;
+        PRENRM_top32_c0 <= (FIAD_int & ~FIAD_int_sh[5]) ? 1'b0 : top32_c0 | FIAD_int_sh[5];
+        PRENRM_top32_c1 <= (FIAD_int & ~FIAD_int_sh[5]) ? 1'b0 : top32_c1 | FIAD_int_sh[5];
+        PRENRM_next32_z <= FIAD_int ? 1'b0 : next32_z;
+        PRENRM_next32_o <= FIAD_int ? 1'b0 : next32_o;
         PRENRM_cout <= FIAD_crry[3];
         PRENRM_eq16 <= eq16;
+        PRENRM_eq16_c0 <= eq16_c0;
+        PRENRM_eq16_c1 <= eq16_c1;
+        PRENRM_eq8hi_c0 <= eq8hi_c0;
+        PRENRM_eq8hi_c1 <= eq8hi_c1;
         PRENRM_eq8hi <= eq8hi;
         PRENRM_eq8lo <= eq8lo;
         PRENRM_raw_res <= raw_res;
@@ -726,7 +736,7 @@ module GUCH (
         PRENRM_sticky <= FIAD_sticky;
         PRENRM_exp_base <= FIAD_exp_base;
         PRENRM_int <= FIAD_int;
-        PRENRM_int_sh <= FIAD_int_sh;
+        PRENRM_int_sh <= FIAD_int_sh[4:0];
     end : PRENRM_CRRY
 
 
@@ -744,8 +754,8 @@ module GUCH (
         //I reuse C_alig for right shift, int_sh is all zeros if its not shift
         //left, so i should be good. Those calculations already use LUTs too,
         //so that mux is basically free.
-        NORM0_sh64 = PRENRM_int ? PRENRM_int_sh[6] : NORM0_top32 & NORM0_next32;
-        NORM0_sh32 = PRENRM_int ? PRENRM_int_sh[5] : NORM0_top32 & ~NORM0_next32;
+        NORM0_sh64 = NORM0_top32 & NORM0_next32;
+        NORM0_sh32 = NORM0_top32 & ~NORM0_next32;
     end
 
     logic  [76:0] NORM0_sh;
@@ -756,8 +766,8 @@ module GUCH (
     logic  [2:0] NORM0_eq16, NORM0_eq8hi, NORM0_eq8lo, NORM0_still_sh;
     assign NORM0_still_sh = {PRENRM_raw_res[12], PRENRM_raw_res[44], PRENRM_raw_res[76]} ~^ {3{PRENRM_raw_res[77]}};
 
-    assign NORM0_eq16  = PRENRM_eq16 & NORM0_still_sh;
-    assign NORM0_eq8hi = PRENRM_eq8hi & NORM0_still_sh;
+    assign NORM0_eq16  = {PRENRM_eq16, PRENRM_cout ? PRENRM_eq16_c1 : PRENRM_eq16_c0} & NORM0_still_sh;
+    assign NORM0_eq8hi = {PRENRM_eq8hi, PRENRM_cout ? PRENRM_eq8hi_c1 : PRENRM_eq8hi_c0} & NORM0_still_sh;
 
     //eq8lo doesn't need it bc its already checked in eq16
     assign NORM0_eq8lo = PRENRM_eq8lo;
@@ -794,8 +804,8 @@ module GUCH (
         NORM0_neg      <= PRENRM_raw_res[77];
         NORM0_c_sign   <= PRENRM_c_sign;
         NORM0_exp_base <= PRENRM_exp_base;
-        NORM1_sh16     <= PRENRM_int ? PRENRM_int_sh[4] : NORM0_pk16; //thats lil bit confusing
-        NORM1_sh8      <= PRENRM_int ? PRENRM_int_sh[3] : NORM0_pk16 ? NORM0_pk8lo : NORM0_pk8hi;
+        NORM1_sh16     <= (PRENRM_int & ~PRENRM_int_sh[4]) ? 1'b0 : NORM0_pk16 | PRENRM_int_sh[4]; //thats lil bit confusing
+        NORM1_sh8      <= (PRENRM_int & ~PRENRM_int_sh[3]) ? 1'b0 : (NORM0_pk16 ? NORM0_pk8lo : NORM0_pk8hi) | PRENRM_int_sh[3];
         NORM0_int      <= PRENRM_int;
         NORM0_int_sh   <= PRENRM_int_sh[2:0];
     end : NORM0_CRRY
@@ -828,13 +838,13 @@ module GUCH (
     (* shreg_extract = "no" *) logic NORM1_neg, NORM1_c_sign;
     (* shreg_extract = "no" *) logic [8:0] NORM1_exp_base;
     (* shreg_extract = "no" *) logic NORM1_int;
-    (* shreg_extract = "no" *) logic [2:0] NORM1_int_sh;
+    (* shreg_extract = "no" *) logic [1:0] NORM1_int_sh;
     always_ff @(posedge clk) begin : NORM1_CRRY
-        NORM1_neg      <= NORM0_neg;
+        NORM1_neg      <= NORM0_int ? NORM0_int_sh[2] : NORM0_neg;
         NORM1_c_sign   <= NORM0_c_sign;
         NORM1_exp_base <= NORM0_exp_base;
         NORM1_int      <= NORM0_int;
-        NORM1_int_sh   <= NORM0_int_sh;
+        NORM1_int_sh   <= NORM0_int_sh[1:0];
     end : NORM1_CRRY
 
     //=> NORM2 (Normalization 1) <=//
@@ -842,7 +852,7 @@ module GUCH (
     //NORM2 is also clean bc it doesn't inherit and doesn't initialize any
     //lookahead shenanigans. Simply bc it doesn't need to.
     logic  NORM2_sh4, NORM2_sh2;
-    assign NORM2_sh4 = NORM1_int ? NORM1_int_sh[2] : NORM1_raw_res[76:73] == {4{NORM1_neg}};
+    assign NORM2_sh4 = NORM1_int ? NORM1_neg : NORM1_raw_res[76:73] == {4{NORM1_neg}};
     assign NORM2_sh2 = NORM1_int ? NORM1_int_sh[1] : NORM2_sh4 ? NORM1_raw_res[72:71] == {2{NORM1_neg}} : NORM1_raw_res[76:75] == {2{NORM1_neg}};
 
     logic  [76:44] NORM2_sh;
