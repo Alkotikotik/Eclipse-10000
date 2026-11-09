@@ -688,14 +688,15 @@ module GUCH (
     assign next32_z = ~|{P3[27:0], FIAD_P1_lo[16:13]};
     assign next32_o = &{P3[27:0], FIAD_P1_lo[16:13]};
 
-    //thats basically a lookahead for NORM1, PRENRM checks bits are eq.
+    //thats basically a lookahead for NORM0, PRENRM checks bits are eq.
     //Then in NORM1 I check whether its sign or not, if it is - good shift, if
     //it isn't - don't shift. Actually I can check it rn after fix I made.
     //It was in NORM0 previosely, but NORM0 didn't pass, and I realized it can
-    //be moved here.
-    logic [2:1] eq16, eq8hi;
-    logic [2:0] eq8lo;
-    logic eq16_c0, eq16_c1, eq8hi_c0, eq8hi_c1;
+    //be moved here. Yeah so I moved bunch more stuff in here, but its
+    //essentially the same
+    logic  [2:1] eq16, eq8hi;
+    logic  [2:0] eq8lo;
+    logic  eq16_c0, eq16_c1, eq8hi_c0, eq8hi_c1;
     assign eq16_c0  = &{FIAD_hi[11:0], P3[47:44]} | ~|{FIAD_hi[11:0], P3[47:44]};
     assign eq16_c1  = &{FIAD_hi_crry[11:0], P3[47:44]} | ~|{FIAD_hi_crry[11:0], P3[47:44]};
     assign eq8hi_c0 = &FIAD_hi[11:4] | ~|FIAD_hi[11:4];
@@ -723,20 +724,20 @@ module GUCH (
         PRENRM_top32_c1 <= (FIAD_int & ~FIAD_int_sh[5]) ? 1'b0 : top32_c1 | FIAD_int_sh[5];
         PRENRM_next32_z <= FIAD_int ? 1'b0 : next32_z;
         PRENRM_next32_o <= FIAD_int ? 1'b0 : next32_o;
-        PRENRM_cout <= FIAD_crry[3];
-        PRENRM_eq16 <= eq16;
-        PRENRM_eq16_c0 <= eq16_c0;
-        PRENRM_eq16_c1 <= eq16_c1;
+        PRENRM_cout     <= FIAD_crry[3];
+        PRENRM_eq16     <= eq16;
+        PRENRM_eq16_c0  <= eq16_c0;
+        PRENRM_eq16_c1  <= eq16_c1;
         PRENRM_eq8hi_c0 <= eq8hi_c0;
         PRENRM_eq8hi_c1 <= eq8hi_c1;
-        PRENRM_eq8hi <= eq8hi;
-        PRENRM_eq8lo <= eq8lo;
-        PRENRM_raw_res <= raw_res;
-        PRENRM_c_sign <= FIAD_c_sign;
-        PRENRM_sticky <= FIAD_sticky;
+        PRENRM_eq8hi    <= eq8hi;
+        PRENRM_eq8lo    <= eq8lo;
+        PRENRM_raw_res  <= raw_res;
+        PRENRM_c_sign   <= FIAD_c_sign;
+        PRENRM_sticky   <= FIAD_sticky;
         PRENRM_exp_base <= FIAD_exp_base;
-        PRENRM_int <= FIAD_int;
-        PRENRM_int_sh <= FIAD_int_sh[4:0];
+        PRENRM_int      <= FIAD_int;
+        PRENRM_int_sh   <= FIAD_int_sh[4:0];
     end : PRENRM_CRRY
 
 
