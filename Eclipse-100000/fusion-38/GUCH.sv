@@ -12,7 +12,7 @@ module GUCH (
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
     //First of all, all signals are computed in 1 SM because all GUCHes share them
     //But that I mean b becomes one or c becomes zero
-    input logic efp_op, int_op, neg_p, neg_c,
+    input logic efp_op, int_op, int_mul, neg_p, neg_c,
     input logic [1:0] cmp_code, //<=, <, ==, !=
     input logic [5:0] int_sh,
     input logic [6:0] OPMODE1, OPMODE2, OPMODE3,
@@ -69,8 +69,9 @@ module GUCH (
         //Put back hidden bit. No unbias here: only shexp/cexp need the
         //unbiased value and they unbias themselfs. Rhe rest reads the field as is
         //No need for reset, otherwise DSP wouldn't accept them immediately
+        //As for B, we need it for int op in intense wallop
         PREA_a <= {a[31:24], ~PREA_a_fld0, (efp_op & PREA_a_fld0) ? 24'h0 : a[23:0]};
-        PREA_b <= {b[31:24], ~PREA_b_fld0, (efp_op & PREA_b_fld0) ? 24'h0 : b[23:0]};
+        PREA_b <= {b[31:24], efp_op ? ~PREA_b_fld0 : b[24], (efp_op & PREA_b_fld0) ? 24'h0 : b[23:0]};
         PREA_c <= {c[31:24], ~PREA_c_fld0, (efp_op & PREA_c_fld0) ? 24'h0 : c[23:0]};
 
         PREA_shexp <= {{3{~a[30]}}, a[29:24]} + {{3{~b[30]}}, b[29:24]};
@@ -86,8 +87,9 @@ module GUCH (
     //=> STRT (Start) <=//
     //Calc sh and start DSPs
     logic [32:0] STRT_a, STRT_b, STRT_c;
-    logic [8:0] STRT_abexp;
-    logic [8:0] shexp;
+    logic [6:0]  STRT_b_hi;
+    logic [8:0]  STRT_abexp;
+    logic [8:0]  shexp;
     logic STRT_prod_zero, STRT_shexp_neg;
 
     logic [6:0] sh_exp;
@@ -95,6 +97,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic [5:0] STRT_int_sh;
     always_ff @(posedge clk) begin : STRT_CRRY
         STRT_a <= {PREA_a[32:25], PREA_a[24] & PREA_efp_op, PREA_a[23:0]};
+        STRT_b_hi <= PREA_efp_op ? 7'h0 : PREA_b[32:26];
         STRT_b <= PREA_b;
         STRT_c <= PREA_c;
 
@@ -108,10 +111,12 @@ module GUCH (
 
     //Basically sub_sel bits govern the sign of products and c result
     //add or subtract. Subtract magnitudes
-    logic c_sign, sub_mags;
+    //Also dedicated signs always_ff is p funny
+    logic c_sign, sub_mags, STRT_b_sign;
     always_ff @(posedge clk) begin : signs
         c_sign <= PREA_c[32] ^ neg_c; //FMS... etc
         sub_mags <= PREA_efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
+        STRT_b_sign <= ~PREA_efp_op & PREA_b[32];
     end : signs
 
     //So exp(a) + exp(b) is self explanatory - we are multiplying them, but
@@ -349,9 +354,10 @@ module GUCH (
     end : DGAF1_C
 
     (* shreg_extract = "no" *) logic [24:0] DGAF1_ato_add;
-    (* shreg_extract = "no" *) logic DGAF1_c_sign, DGAF1_sub_mags;
+    (* shreg_extract = "no" *) logic DGAF1_c_sign, DGAF1_sub_mags, DGAF1_mul_op;
     (* shreg_extract = "no" *) logic [8:0] DGAF1_exp_base;
-    (* shreg_extract = "no" *) logic [31:0] DGAF1_int_a, DGAF1_int_b;
+    (* shreg_extract = "no" *) logic [31:0] DGAF1_int_a;
+    (* shreg_extract = "no" *) logic [31:15] DGAF1_int_b; //only hi is needed for Goodbye
     (* shreg_extract = "no" *) logic DGAF1_int;
     (* shreg_extract = "no" *) logic [5:0] DGAF1_int_sh;
     always_ff @(posedge clk) begin : DGAF1_CRRY
@@ -363,6 +369,9 @@ module GUCH (
         DGAF1_int_b    <= DGAF0_int_b;
         DGAF1_int      <= DGAF0_int;
         DGAF1_int_sh   <= DGAF0_int_sh;
+        //its mul_operands btw - im a god of unreadable code. int_op is
+        //delayed to DGAF0 in SM btw
+        DGAF1_mul_op   <= int_op ? {{3{DGAF0_int_a[31]}}, DGAF0_int_a[31:24], 7'h0} : {DGAF0_int_b[14:0], 3'h0};
     end : DGAF1_CRRY
 
     always_comb begin : sticky_check
@@ -463,10 +472,16 @@ module GUCH (
         .OPMODE(OPMODE2),
         //Its two's comlimetn so top bit gotta be 0
         .A(30'h0),
-        .B({10'h0, STRT_b[24:17]}),
+        //Im doing integer mul through 3DSPs to get lower 48bit of the
+        //product. And the SM's existing int_sh can govern which 32bit window
+        //gets written to a register. theoretically its useful for various
+        //Fixed point formats like Q16.16 or Q24.8, however atp im just doing
+        //stuff because i like doing it. Also not atp im always doing stuff
+        //because I like doing it.
+        .B({{3{STRT_b_sgn}}, STRT_b_top, STRT_b[24:17]}),
         .C({13'h0, DGAF1_int_a, 3'h0}), //int op
         .CARRYIN(1'b0),
-        .D({{9{STRT_a[32]}}, STRT_a[32:25], STRT_a[23:16]}), //for FFMA16
+        .D({17'h0, STRT_a[32:25]}),
         .CEA1(1'b1),
         .CEA2(1'b1),
         .CEAD(1'b1),
@@ -563,8 +578,8 @@ module GUCH (
     DSP48E1 #(
         .A_INPUT("DIRECT"),
         .B_INPUT("DIRECT"),
-        .USE_DPORT("FALSE"),
-        .USE_MULT("NONE"),
+        .USE_DPORT("TRUE"),
+        .USE_MULT("DYNAMIC"),
         .USE_SIMD("ONE48"),
         .AUTORESET_PATDET("NO_RESET"),
         .MASK(48'h00000FFFFFFF),
@@ -578,7 +593,7 @@ module GUCH (
         //Those regs set how much ffs for each operand sit at DSP, so how many
         //cycles it takes. The way I set it would make result arrive at FIAD.
         .ACASCREG(2),
-        .ADREG(0),
+        .ADREG(1),
         .ALUMODEREG(1),
         .AREG(2),
         .BCASCREG(2),
@@ -586,9 +601,9 @@ module GUCH (
         .CARRYINREG(1),
         .CARRYINSELREG(0),
         .CREG(1),
-        .DREG(0),
+        .DREG(1),
         .INMODEREG(0),
-        .MREG(0),
+        .MREG(1),
         .OPMODEREG(1),
         .PREG(1)
     )
@@ -620,7 +635,7 @@ module GUCH (
         .ALUMODE(ALUMODE3),
         .CARRYINSEL(3'b000),
         .CLK(clk),
-        .INMODE(5'b00000),
+        .INMODE(5'b10110),
         .OPMODE(OPMODE3),
         //Its two's comlimetn so top bit gotta be 0
         .A({13'h0, DGAF1_int_b[31:15]}),
@@ -631,7 +646,7 @@ module GUCH (
         .C({DSFSH0_acto_ff[18:0], DSFSH0_ato_add[21:0] ^
                 {22{DSFSH0_sub_mags}}, {7{DSFSH0_sub_mags}}}),
         .CARRYIN(DSFSH0_sub_mags), //thats so nice actually
-        .D(25'h0),
+        .D({1'b0, DGAF0_int_b[23:0]}),
         .CEA1(1'b1),
         .CEA2(1'b1),
         .CEAD(1'b1),
@@ -913,7 +928,9 @@ module GUCH (
     end : NORM3_REG
 
     (* shreg_extract = "no" *) logic norm_neg, norm_c_sign;
-    (* shreg_extract = "no" *) logic NORM3_int;
+    //max fanout would make vivado duplicate ffs and put them closer to
+    //a reader. that path failed btw
+    (* shreg_extract = "no" *) (* max_fanout = 12 *) logic NORM3_int;
     always_ff @(posedge clk) begin : NORM3_CRRY
         norm_neg    <= NORM2_neg;
         norm_c_sign <= NORM2_c_sign;
