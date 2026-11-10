@@ -217,7 +217,7 @@ module GUCH (
         .CARRYIN(1'b0),
         //using D port here too, to save up some LUTs on mux for high bits
         //That whether it is ffma16_op or efp_op decide.
-        .D({{9{PREA_a[15]}}, PREA_a[15:0]}),
+        .D({17'h0, PREA_a[32:25]}),
         .CEA1(1'b1),
         .CEA2(1'b1),
         .CEAD(1'b1),
@@ -354,7 +354,8 @@ module GUCH (
     end : DGAF1_C
 
     (* shreg_extract = "no" *) logic [24:0] DGAF1_ato_add;
-    (* shreg_extract = "no" *) logic DGAF1_c_sign, DGAF1_sub_mags, DGAF1_mul_op;
+    (* shreg_extract = "no" *) logic DGAF1_c_sign, DGAF1_sub_mags;
+    (* shreg_extract = "no" *) logic [17:0] DGAF1_mul_op;
     (* shreg_extract = "no" *) logic [8:0] DGAF1_exp_base;
     (* shreg_extract = "no" *) logic [31:0] DGAF1_int_a;
     (* shreg_extract = "no" *) logic [31:15] DGAF1_int_b; //only hi is needed for Goodbye
@@ -366,12 +367,12 @@ module GUCH (
         DGAF1_sub_mags <= DGAF0_sub_mags;
         DGAF1_exp_base <= DGAF0_exp_base - 9'h1;
         DGAF1_int_a    <= DGAF0_int_a;
-        DGAF1_int_b    <= DGAF0_int_b;
+        DGAF1_int_b    <= DGAF0_int_b[31:15];
         DGAF1_int      <= DGAF0_int;
         DGAF1_int_sh   <= DGAF0_int_sh;
         //its mul_operands btw - im a god of unreadable code. int_op is
         //delayed to DGAF0 in SM btw
-        DGAF1_mul_op   <= int_op ? {{3{DGAF0_int_a[31]}}, DGAF0_int_a[31:24], 7'h0} : {DGAF0_int_b[14:0], 3'h0};
+        DGAF1_mul_op   <= int_mul ? {{3{DGAF0_int_a[31]}}, DGAF0_int_a[31:24], 7'h0} : {DGAF0_int_b[14:0], 3'h0};
     end : DGAF1_CRRY
 
     always_comb begin : sticky_check
@@ -478,7 +479,7 @@ module GUCH (
         //Fixed point formats like Q16.16 or Q24.8, however atp im just doing
         //stuff because i like doing it. Also not atp im always doing stuff
         //because I like doing it.
-        .B({{3{STRT_b_sgn}}, STRT_b_top, STRT_b[24:17]}),
+        .B({{3{STRT_b_sign}}, STRT_b_hi, STRT_b[24:17]}),
         .C({13'h0, DGAF1_int_a, 3'h0}), //int op
         .CARRYIN(1'b0),
         .D({17'h0, STRT_a[32:25]}),
@@ -639,7 +640,7 @@ module GUCH (
         .OPMODE(OPMODE3),
         //Its two's comlimetn so top bit gotta be 0
         .A({13'h0, DGAF1_int_b[31:15]}),
-        .B({DGAF1_int_b[14:0], 3'h0}),
+        .B(DGAF1_mul_op),
         //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
         //Flipping bits is xoring with all 1s, and xoring with 0s does nothing, so
         //here we are, with this beautiful expression
@@ -800,12 +801,15 @@ module GUCH (
     //The shifter can shift max 31bits away, therefore 51-31 = 20 is the lowest it can get
     //Also I construct lcz bit by bit its kinda cool.
     //Also original sticky did its job, press f its no loner carried
-    (* extract_reset = "no" *) logic [76:20] NORM0_raw_res;
+    //Also for int ops shifter acts as a literal position shifter of 32bit
+    //window. The problem is that it can be any window of the 48bit result, so
+    //I have to consider that and expand NORM ffs
+    (* extract_reset = "no" *) logic [76:14] NORM0_raw_res;
     (* shreg_extract = "no" *) logic [1:0]  NORM0_lzc;
     (* shreg_extract = "no" *) logic NORM0_fell_ff;
     always_ff @(posedge clk) begin : NORM0_REG
-        NORM0_raw_res <= NORM0_sh[76:20];
-        NORM0_lzc  <= {NORM0_sh64, NORM0_sh32};
+        NORM0_raw_res <= {NORM0_sh[76:20], PRENRM_raw_res[19:14]};
+        NORM0_lzc <= {NORM0_sh64, NORM0_sh32};
         NORM0_fell_ff <= NORM0_fell | PRENRM_sticky;
     end : NORM0_REG
 
@@ -827,7 +831,7 @@ module GUCH (
 
     //=> NORM1 (Normalization 1) <=//
     //Did you really expect the 76big ass shifter to fit into 1 stage?
-    logic  [76:20] NORM1_sh;
+    logic  [76:14] NORM1_sh;
     assign NORM1_sh = NORM0_raw_res << {NORM1_sh16, NORM1_sh8, 3'b000};
 
     logic  NORM1_fell;
@@ -841,11 +845,11 @@ module GUCH (
     end
 
     //51 - 7
-    (* extract_reset = "no" *) logic [76:44] NORM1_raw_res;
+    (* extract_reset = "no" *) logic [76:38] NORM1_raw_res;
     (* shreg_extract = "no" *) logic [3:0]   NORM1_lzc;
     (* shreg_extract = "no" *) logic NORM1_fell_ff;
     always_ff @(posedge clk) begin : NORM1_REG
-        NORM1_raw_res <= NORM1_sh[76:44];
+        NORM1_raw_res[76:38] <= NORM1_sh[76:38];
         NORM1_lzc <= {NORM0_lzc, NORM1_sh16, NORM1_sh8};
         NORM1_fell_ff <= NORM1_fell | NORM0_fell_ff;
     end : NORM1_REG
@@ -870,7 +874,7 @@ module GUCH (
     assign NORM2_sh4 = NORM1_int ? NORM1_neg : NORM1_raw_res[76:73] == {4{NORM1_neg}};
     assign NORM2_sh2 = NORM1_int ? NORM1_int_sh[1] : NORM2_sh4 ? NORM1_raw_res[72:71] == {2{NORM1_neg}} : NORM1_raw_res[76:75] == {2{NORM1_neg}};
 
-    logic  [76:44] NORM2_sh;
+    logic  [76:38] NORM2_sh;
     assign NORM2_sh = NORM1_raw_res << {NORM2_sh4, NORM2_sh2, 1'b0};
 
     logic NORM2_fell;
