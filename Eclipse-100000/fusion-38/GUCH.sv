@@ -379,7 +379,6 @@ module GUCH (
         endcase
     end : sticky_check
 
-
     //=> DSFSH0 (DSP Finish 0) <=//
     //Second DSP starts here
     (* shreg_extract = "no" *) logic [21:0] DSFSH0_ato_add;
