@@ -566,7 +566,14 @@ module GUCH (
 
     (* shreg_extract = "no" *) logic FIAD_int;
     (* shreg_extract = "no" *) logic [5:0] FIAD_int_sh;
+    //In case I never told, the most effective optimization sheme is
+    //precomputaion. Just merge/precompute known values cycle(s) before using
+    //them. It usually saves LUT levels and ends up using same amount of LUTs
+    //overall, i use it everywhere, eg here with p1_zero and p1_one.
+    logic FIAD_p1_zero, FIAD_p1_one;
     always_ff @(posedge clk) begin : FIAD_PASS
+        FIAD_p1_zero <= ~DSFSH1_int & ~|DSFSH1_P1_lo[16:13];
+        FIAD_p1_one <= ~DSFSH1_int &  &DSFSH1_P1_lo[16:13];
         FIAD_P1_lo <= DSFSH1_P1_lo;
         FIAD_exp_base <= DSFSH1_exp_base;
         FIAD_c_sign <= DSFSH1_c_sign;
@@ -694,14 +701,14 @@ module GUCH (
     //Based on the sign of th result. And im doing this check here instead of
     //first NORM, just because I can, everything is known early here. I don't
     //do anything more because other results arrive pretty late
-    logic  top32_c0, top32_c1, next32_z, next32_o;
+    logic  top32_c0, top32_c1, next32_zero, next32_one;
     assign top32_c0 = FIAD_hi[12] ? (FIAD_ptrn_ones  &  &FIAD_hi[11:0])
                                   : (FIAD_ptrn_zeros & ~|FIAD_hi[11:0]);
     assign top32_c1 = FIAD_hi_crry[12] ? (FIAD_ptrn_ones  &  &FIAD_hi_crry[11:0])
                                        : (FIAD_ptrn_zeros & ~|FIAD_hi_crry[11:0]);
 
-    assign next32_z = ~|{P3[27:0], FIAD_P1_lo[16:13]};
-    assign next32_o = &{P3[27:0], FIAD_P1_lo[16:13]};
+    assign next32_zero = ~|P3[27:0] & FIAD_p1_zero;
+    assign next32_one =  &P3[27:0] & FIAD_p1_one;
 
     //thats basically a lookahead for NORM0, PRENRM checks bits are eq.
     //Then in NORM1 I check whether its sign or not, if it is - good shift, if
@@ -724,7 +731,7 @@ module GUCH (
                     &raw_res[29:21] | ~|raw_res[29:21],
                     &raw_res[61:53] | ~|raw_res[61:53]};
 
-    logic PRENRM_top32_c0, PRENRM_top32_c1, PRENRM_next32_z, PRENRM_next32_o, PRENRM_cout;
+    logic PRENRM_top32_c0, PRENRM_top32_c1, PRENRM_next32_zero, PRENRM_next32_one, PRENRM_cout;
     logic [2:1] PRENRM_eq16, PRENRM_eq8hi;
     logic [2:0] PRENRM_eq8lo;
     logic PRENRM_eq16_c0, PRENRM_eq16_c1, PRENRM_eq8hi_c0, PRENRM_eq8hi_c1;
@@ -737,8 +744,8 @@ module GUCH (
     always_ff @(posedge clk) begin : PRENRM_CRRY
         PRENRM_top32_c0 <= (FIAD_int & ~FIAD_int_sh[5]) ? 1'b0 : top32_c0 | FIAD_int_sh[5];
         PRENRM_top32_c1 <= (FIAD_int & ~FIAD_int_sh[5]) ? 1'b0 : top32_c1 | FIAD_int_sh[5];
-        PRENRM_next32_z <= FIAD_int ? 1'b0 : next32_z;
-        PRENRM_next32_o <= FIAD_int ? 1'b0 : next32_o;
+        PRENRM_next32_zero <= next32_zero;
+        PRENRM_next32_one <= next32_one;
         PRENRM_cout     <= FIAD_crry[3];
         PRENRM_eq16     <= eq16;
         PRENRM_eq16_c0  <= eq16_c0;
@@ -765,7 +772,7 @@ module GUCH (
     logic  NORM0_top32, NORM0_next32, NORM0_sh64, NORM0_sh32;
     always_comb begin
         NORM0_top32  = PRENRM_cout ? PRENRM_top32_c1 : PRENRM_top32_c0;
-        NORM0_next32 = PRENRM_raw_res[77] ? PRENRM_next32_o : PRENRM_next32_z;
+        NORM0_next32 = PRENRM_raw_res[77] ? PRENRM_next32_one : PRENRM_next32_zero;
         //also im reusing that NORM shifter for left shift, in similar way
         //I reuse C_alig for right shift, int_sh is all zeros if its not shift
         //left, so i should be good. Those calculations already use LUTs too,
