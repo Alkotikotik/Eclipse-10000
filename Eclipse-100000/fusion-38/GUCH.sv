@@ -114,11 +114,18 @@ module GUCH (
     //Basically sub_sel bits govern the sign of products and c result
     //add or subtract. Subtract magnitudes
     //Also dedicated signs always_ff is p funny
+    //As for hi_mul i do 2 instructions for them - PREMUL that computers a[32:24]
+    //* 2^24 * b[24:0] and then HIMUL that multiplies the rest. HIMUL needs
+    //result of PREMUL so whole sequence takes 2*whole_gpu_pipeline but it
+    //isn't as bad because of warps and scheduling that are literally made for
+    //this. Nice side effect that PREMUL can be useful on its own e.g. for
+    //Q24.8 that actually is gonna be aura using it. The main work oh HIMUL
+    //happens in SM hence its just one line change in GUCH.
     logic c_sign, sub_mags, STRT_b_sign;
     always_ff @(posedge clk) begin : signs
         c_sign <= PREA_c[32] ^ neg_c; //FMS... etc
         sub_mags <= PREA_efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
-        STRT_b_sign <= ~PREA_efp_op & PREA_b[32];
+        STRT_b_sign <= (~PREA_efp_op & PREA_b[32]) & ~neg_p; //for unsigned himul
     end : signs
 
     //So exp(a) + exp(b) is self explanatory - we are multiplying them, but
