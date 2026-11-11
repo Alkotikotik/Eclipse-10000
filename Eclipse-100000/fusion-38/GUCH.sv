@@ -15,6 +15,7 @@ module GUCH (
     input logic efp_op, int_op, int_mul, neg_p, neg_c,
     input logic [1:0] cmp_code, //<=, <, ==, !=
     input logic [5:0] int_sh,
+    input logic [8:0] cexp_const, //28 for efp 52 - k for int fma
     input logic [6:0] OPMODE1, OPMODE2, OPMODE3,
     input logic [4:0] INMODE1, INMODE2,
     input logic [3:0] ALUMODE, ALUMODE3,
@@ -72,13 +73,13 @@ module GUCH (
         //As for B, we need it for int op in intense wallop
         PREA_a <= {a[31:24], ~PREA_a_fld0, (efp_op & PREA_a_fld0) ? 24'h0 : a[23:0]};
         PREA_b <= {b[31:24], efp_op ? ~PREA_b_fld0 : b[24], (efp_op & PREA_b_fld0) ? 24'h0 : b[23:0]};
-        PREA_c <= {c[31:24], ~PREA_c_fld0, (efp_op & PREA_c_fld0) ? 24'h0 : c[23:0]};
+        PREA_c <= {c[31:24], efp_op ? ~PREA_c_fld0 : c[24], (efp_op & PREA_c_fld0) ? 24'h0 : c[23:0]};
 
-        PREA_shexp <= {{3{~a[30]}}, a[29:24]} + {{3{~b[30]}}, b[29:24]};
+        PREA_shexp <= efp_op ? {{3{~a[30]}}, a[29:24]} + {{3{~b[30]}}, b[29:24]} : 9'h0;
         //So basically subtracting a number from const should be a little better.
-        PREA_cexp  <= 9'd28 - {{3{~c[30]}}, c[29:24]};
+        PREA_cexp  <= cexp_const - (efp_op ? {{3{~c[30]}}, c[29:24]} : 9'h0);
 
-        PREA_prod_zero <= PREA_a_fld0 | PREA_b_fld0;
+        PREA_prod_zero <= efp_op & (PREA_a_fld0 | PREA_b_fld0);
         PREA_efp_op <= efp_op;
         PREA_int <= int_op;
         PREA_int_sh <= int_sh;
@@ -87,7 +88,7 @@ module GUCH (
     //=> STRT (Start) <=//
     //Calc sh and start DSPs
     logic [32:0] STRT_a, STRT_b, STRT_c;
-    logic [6:0]  STRT_b_hi;
+    logic [6:0]  STRT_b_hi, STRT_c_hi;
     logic [8:0]  STRT_abexp;
     logic [8:0]  shexp;
     logic STRT_prod_zero, STRT_shexp_neg;
@@ -98,6 +99,7 @@ module GUCH (
     always_ff @(posedge clk) begin : STRT_CRRY
         STRT_a <= {PREA_a[32:25], PREA_a[24] & PREA_efp_op, PREA_a[23:0]};
         STRT_b_hi <= PREA_efp_op ? 7'h0 : PREA_b[32:26];
+        STRT_c_hi <= PREA_efp_op ? 7'h0 : PREA_c[32:26];
         STRT_b <= PREA_b;
         STRT_c <= PREA_c;
 
@@ -142,6 +144,17 @@ module GUCH (
     //arrives just in time. The split is 2-2-2-1 bits per stage.
     //So vivado assigned a reset to those guys without any permission ofc,
     //thus messing up the path, so it might fix it.
+
+    //Now as for int fma(IFMA inst) im just gonna reuse the existing datapath,
+    //because mantissa multiply is essentially a integer multiple, the only
+    //diff is that exp decides the shift in efp. Here k decides the shift,
+    //k is a immediate encoded into an instruction because as I said earlier,
+    //but actually later within that file, dsps can compute 48bit result and
+    //k is gonna decide which 32bit window is gonna be written. The IFMA is
+    //gonna look someting like that.
+    //IFMA rw0 <- (rw1 * rw2 + (rw3 << k)) >> k.
+    //And yeah ofc it costs a little bit of muxes on those paths, like alig
+    //muxes, sign muxes, hidden bits and allat.
     (* extract_reset = "no" *) logic [1:0] STRT_shexp_lo, STRT_shexp_lmid, STRT_shexp_hmid;
     (* extract_reset = "no" *) logic STRT_shexp_hi;
     always_ff @(posedge clk) begin : STRT_SH
@@ -154,6 +167,7 @@ module GUCH (
 
     logic DGAF0_sub_mags;
     logic [76:0] C_alig2, C_alig3;
+    logic [1:0]  C_alig3_int;
     logic [47:0] P1, PCOUT0, P2;
     logic [29:0] ACOUT0;
 
@@ -213,7 +227,7 @@ module GUCH (
         //Its two's comlimetn so top bit gotta be 0
         .A({6'b0, PREA_a[23:0]}),
         .B({1'b0, PREA_b[16:0]}),
-        .C({2'b00, C_alig3[45:0]}), //we're gonna need it at the third DSP cycle
+        .C({C_alig3_int, C_alig3[45:0]}), //we're gonna need it at the third DSP cycle
         .CARRYIN(1'b0),
         //using D port here too, to save up some LUTs on mux for high bits
         //That whether it is ffma16_op or efp_op decide.
@@ -260,7 +274,7 @@ module GUCH (
     //1LUT. However idgaf about ffs, and i gaf about LUTs, so i just don't do it.
     (* shreg_extract = "no" *) logic [24:0] DGAF0_ato_add;
     (* shreg_extract = "no" *) logic DGAF0_c_sign;
-    logic [27:0] C_alig0;
+    logic [46:0] C_alig0;
     logic [6:0] in_grp; //any 1 in group
     logic [8:0] DGAF0_exp_base;
 
@@ -277,7 +291,7 @@ module GUCH (
     end : DGAF0_CRRY
 
     always_ff @(posedge clk) begin : DGAF0_C
-        C_alig0 <= {STRT_c[24:0], 3'h0} >> STRT_shexp_lo;
+        C_alig0 <= {STRT_c_hi, STRT_c[24:0], 15'h0} >> {STRT_shexp_lmid, STRT_shexp_lo};
         //The exponent is c's biased exponent if c takes over, or just a+b+92 exp
         //if it doesn't. Takes over means that c is much bigger than a*b, and
         //its so large that sh_exp literally becomes negative, and because
@@ -339,16 +353,17 @@ module GUCH (
 
     //=> DGAF1 (Digital Signal Proccesing / Guard / Aligment / Float Prep) <=//
     //Finishing alignment(2-2-1) and starting second DSP
-    logic [39:0] C_alig1; // aligned C
+    logic [83:0] C_alig1; // aligned C
     logic [3:0]  DGAF1_ALUMODE;
     (* shreg_extract = "no" *) logic DGAF1_sticky;
     logic DGAF1_sticky_comb;
 
-    assign C_alig1 = {C_alig0, 12'h0} >> {DGAF0_shexp_lmid, 2'h0};
-    assign C_alig2 = {C_alig1, 37'h0} >> {DGAF0_shexp_hmid, 4'h0};
+    assign C_alig1 = {C_alig0, 37'h0} >> {DGAF0_shexp_hmid, 4'h0};
+    assign C_alig2 = C_alig1[76:0] >> {DGAF0_shexp_hi, 6'h0};
 
     always_ff @(posedge clk) begin : DGAF1_C
-        C_alig3 <= C_alig2 >> {DGAF0_shexp_hi, 6'h0};
+        C_alig3 <= C_alig2;
+        C_alig3_int <= DGAF0_int ? C_alig1[47:46] : 2'b00;
         DGAF1_ALUMODE <= {ALUMODE[3:2], ALUMODE[1:0] | {2{DGAF0_sub_mags}}};
         DGAF1_sticky <= DGAF1_sticky_comb;
     end : DGAF1_C
@@ -569,7 +584,8 @@ module GUCH (
     //In case I never told, the most effective optimization sheme is
     //precomputaion. Just merge/precompute known values cycle(s) before using
     //them. It usually saves LUT levels and ends up using same amount of LUTs
-    //overall, i use it everywhere, eg here with p1_zero and p1_one.
+    //overall, i use it everywhere, eg here with p1_zero and p1_one. Hello
+    //world blah blah blah hello world no way
     logic FIAD_p1_zero, FIAD_p1_one;
     always_ff @(posedge clk) begin : FIAD_PASS
         FIAD_p1_zero <= ~DSFSH1_int & ~|DSFSH1_P1_lo[16:13];
