@@ -12,7 +12,7 @@ module GUCH (
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
     //First of all, all signals are computed in 1 SM because all GUCHes share them
     //But that I mean b becomes one or c becomes zero
-    input logic efp_op, int_op, int_mul, neg_p, neg_c,
+    input logic efp_op, int_op, int_mul, cmp_op, cmp_signed, neg_p, neg_c,
     input logic [1:0] cmp_code, //<=, <, ==, !=
     input logic [5:0] int_sh,
     input logic [8:0] cexp_const, //28 for efp 52 - k for int fma
@@ -22,7 +22,8 @@ module GUCH (
 
     input logic [31:0] a, b, c,
 
-    output logic [31:0] result
+    output logic [31:0] result,
+    output logic cmp_tru;
 );
     //So efp32 is Eclipsing Floating (Point/Precision word-play) 32bits
     //Its a custom floating format I designed, I actually spent a little while
@@ -93,14 +94,17 @@ module GUCH (
     logic [8:0]  shexp;
     logic STRT_prod_zero, STRT_shexp_neg;
 
+    //The cmp for int happens as usual - sub operands, check the result.
+    //But flip the sign for signed using xor. Also main cmp logic happens in
+    //SM - it sends opmode and alumode for dsps so changes here aren't massive.
     logic [6:0] sh_exp;
     (* shreg_extract = "no" *) logic STRT_int;
     (* shreg_extract = "no" *) logic [5:0] STRT_int_sh;
     always_ff @(posedge clk) begin : STRT_CRRY
-        STRT_a <= {PREA_a[32:25], PREA_a[24] & PREA_efp_op, PREA_a[23:0]};
+        STRT_a <= {PREA_a[31] ^ (cmp_op & cmp_signed), PREA_a[31:25], PREA_a[24] & PREA_efp_op, PREA_a[23:0]};
         STRT_b_hi <= PREA_efp_op ? 7'h0 : PREA_b[32:26];
         STRT_c_hi <= PREA_efp_op ? 7'h0 : PREA_c[32:26];
-        STRT_b <= PREA_b;
+        STRT_b <= {PREA_b[31] ^ (cmp_op & cmp_signed), PREA_b[31:0]};
         STRT_c <= PREA_c;
 
         STRT_abexp <= PREA_shexp;
@@ -1001,7 +1005,7 @@ module GUCH (
     assign RND_inc = RND_guard  ? (norm_fell | RND_lsb | norm_neg)
                                 : (norm_neg & ~norm_fell & RND_lsb);
 
-    logic [31:0] RND_a, RND_b;
+    logic [31:0] RND_a, RND_b, RND_cmp;
     logic [31:0] RND_res, RND_res_ff;
     logic RND_sign, RND_int;
 
@@ -1014,6 +1018,32 @@ module GUCH (
         RND_int <= NORM3_int;
         //So that elimitates -0 whatsoever, -0 just becomes regular zero, because I hate -0. Its like complete nonsense
         RND_sign <= RND_zero ? 1'b0 : norm_neg ^ norm_c_sign;
+    end
+
+    //classic cmp, SM only reads cmp result if its actually cmp op, so there
+    //is no need to carry flag here.
+    logic cmp_eq, cmp_less;
+    logic [1:0] cmp_vec;
+    always_comb begin
+        if (RND_int) begin
+            //idk if im overthinking but i feel like compacting it into one
+            //signal would use only 1 LUT for the whole compares, whereas
+            //doing cmp for every case would use 1 LUT for each one.
+            cmp_eq = ~|norm_res[75:45];
+            cmp_less = norm_res[75];
+        end else begin
+            //efp cmp is very nice because u'll see;
+            cmp_eq = !RND_hidden;
+            cmp_less = norm_neg ^ norm_c_sign;
+        end
+        cmp_vec = {cmp_eq, !cmp_eq, cmp_less, cmp_less & cmp_eq};
+            unique case (cmp_code)
+                1'b00: cmp_tru = cmp_vec[0]; // ==
+                1'b01: cmp_tru = cmp_vec[1]; // !=
+                1'b10: cmp_tru = cmp_vec[2]; // <
+                1'b11: cmp_tru = cmp_vec[3]; // <=
+            endcase
+        end
     end
 
     //=> PCK (Pack) <=//
