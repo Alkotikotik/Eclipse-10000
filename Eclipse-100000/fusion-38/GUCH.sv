@@ -98,7 +98,7 @@ module GUCH (
     //Main cmp logic happens in
     //SM - it sends opmode and alumode for dsps so changes here aren't massive.
     logic [6:0] sh_exp;
-    (* shreg_extract = "no" *) logic STRT_int;
+    (* shreg_extract = "no" *) logic STRT_int, STRT_c_int;
     (* shreg_extract = "no" *) logic [5:0] STRT_int_sh;
     always_ff @(posedge clk) begin : STRT_CRRY
         STRT_a <= {PREA_a[32:25], PREA_a[24] & PREA_efp_op, PREA_a[23:0]};
@@ -107,11 +107,13 @@ module GUCH (
         STRT_b <= PREA_b;
         STRT_c <= PREA_c;
 
-        STRT_abexp <= PREA_shexp;
+        //this is for i2f(int to float), so it aligns.
+        STRT_abexp <= PREA_efp_op ? PREA_shexp : {3'b0, PREA_int_sh};
 
         STRT_prod_zero <= PREA_prod_zero;
         STRT_shexp_neg <= shexp[8];
         STRT_int <= PREA_int;
+        STRT_c_int <= ~PREA_efp_op;
         STRT_int_sh <= PREA_int_sh;
     end : STRT_CRRY
 
@@ -130,7 +132,7 @@ module GUCH (
     logic c_sign, sub_mags, STRT_b_sign;
     (* shreg_extract = "no" *) logic STRT_cmp_signed;
     always_ff @(posedge clk) begin : STRT_signs
-        c_sign <= PREA_c[32] ^ neg_c; //FMS... etc
+        c_sign <= (PREA_c[32] & PREA_efp_op) ^ neg_c; //FMS... etc
         sub_mags <= PREA_efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
         STRT_b_sign <= (~PREA_efp_op & PREA_b[32]) & ~neg_p; //for unsigned himul
         STRT_cmp_signed <= cmp_signed;
@@ -293,7 +295,7 @@ module GUCH (
     logic [6:0] in_grp; //any 1 in group
     logic [8:0] DGAF0_exp_base;
 
-    (* shreg_extract = "no" *) logic DGAF0_int;
+    (* shreg_extract = "no" *) logic DGAF0_int, DGAF0_c_int;
     (* shreg_extract = "no" *) logic [5:0] DGAF0_int_sh;
     (* shreg_extract = "no" *) logic DGAF0_cmp_signed;
     always_ff @(posedge clk) begin : DGAF0_CRRY
@@ -303,6 +305,7 @@ module GUCH (
         DGAF0_sub_mags <= sub_mags;
         DGAF0_c_sign <= c_sign;
         DGAF0_int <= STRT_int;
+        DGAF0_c_int <= STRT_c_int;
         DGAF0_int_sh <= STRT_int_sh;
         DGAF0_cmp_signed <= STRT_cmp_signed;
     end : DGAF0_CRRY
@@ -380,7 +383,7 @@ module GUCH (
 
     always_ff @(posedge clk) begin : DGAF1_C
         C_alig3 <= C_alig2;
-        C_alig3_int <= DGAF0_int ? C_alig1[47:46] : 2'b00;
+        C_alig3_int <= DGAF0_c_int ? C_alig1[47:46] : 2'b00;
         DGAF1_ALUMODE <= {ALUMODE[3:2], ALUMODE[1:0] | {2{DGAF0_sub_mags}}};
         DGAF1_sticky <= DGAF1_sticky_comb;
     end : DGAF1_C
@@ -777,8 +780,8 @@ module GUCH (
     (* shreg_extract = "no" *) logic PRENRM_int;
     (* shreg_extract = "no" *) logic [4:0] PRENRM_int_sh;
     always_ff @(posedge clk) begin : PRENRM_CRRY
-        PRENRM_top32_c0 <= (FIAD_int & ~FIAD_int_sh[5]) ? 1'b0 : top32_c0 | FIAD_int_sh[5];
-        PRENRM_top32_c1 <= (FIAD_int & ~FIAD_int_sh[5]) ? 1'b0 : top32_c1 | FIAD_int_sh[5];
+        PRENRM_top32_c0 <= FIAD_int ? FIAD_int_sh[5] : top32_c0;
+        PRENRM_top32_c1 <= FIAD_int ? FIAD_int_sh[5] : top32_c1;
         PRENRM_next32_zero <= next32_zero;
         PRENRM_next32_one <= next32_one;
         PRENRM_cout     <= FIAD_crry[3];
@@ -855,6 +858,9 @@ module GUCH (
         NORM0_fell_ff <= NORM0_fell | PRENRM_sticky;
     end : NORM0_REG
 
+    //The beauty of the GUCH is that its genuinly whole ass infrastructure.
+    //Like i can just add int to float reusing existing shifters and gates,
+    //and LUTs, just couple of muxes and im good to go.
     (* shreg_extract = "no" *) logic NORM0_neg, NORM0_c_sign;
     (* shreg_extract = "no" *) logic [8:0] NORM0_exp_base;
     (* shreg_extract = "no" *) logic NORM1_sh16, NORM1_sh8;
@@ -865,8 +871,8 @@ module GUCH (
         NORM0_neg      <= PRENRM_raw_res[77];
         NORM0_c_sign   <= PRENRM_c_sign;
         NORM0_exp_base <= PRENRM_exp_base;
-        NORM1_sh16     <= (PRENRM_int & ~PRENRM_int_sh[4]) ? 1'b0 : NORM0_pk16 | PRENRM_int_sh[4]; //thats lil bit confusing
-        NORM1_sh8      <= (PRENRM_int & ~PRENRM_int_sh[3]) ? 1'b0 : (NORM0_pk16 ? NORM0_pk8lo : NORM0_pk8hi) | PRENRM_int_sh[3];
+        NORM1_sh16     <= PRENRM_int ? PRENRM_int_sh[4] : NORM0_pk16; //thats lil bit confusing, goddamnit it actually is lmao
+        NORM1_sh8      <= PRENRM_int ? PRENRM_int_sh[3] : (NORM0_pk16 ? NORM0_pk8lo : NORM0_pk8hi);
         NORM0_int      <= PRENRM_int;
         NORM0_int_sh   <= PRENRM_int_sh[2:0];
     end : NORM0_CRRY
