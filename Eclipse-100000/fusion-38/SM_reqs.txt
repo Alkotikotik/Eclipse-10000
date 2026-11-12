@@ -1,0 +1,48 @@
+What GUCH needs from SM, reqs so i don't forget
+
+//Offsets
+offset in cycles of sm ports after operands arrival
+0  : a, b, c, efp_op, int_op, int_sh, cexp_const
+1  : neg_p, neg_c, cmp_signed, INMODE1
+2  : INMODE2
+3  : int_mul
+4  : OPMODE2
+5  : OPMODE3, ALUMODE3
+12 : cmp_code
+14 : result, cmp_tru come out
+
+OPMODE1 = 0110101 and ALUMODE = 0000 for every op.
+
+//Float
+FMA a*b + c     int_sh 0   cexp 28   INMODE 00000/00000   OPMODE2 1010101   OPMODE3 0011100   ALUMODE3 0000
+    neg_c = 1 : a*b - c
+    neg_p = 1 : -a*b + c
+FCMP a cmp c same as FMA, b = 1.0 (0x40000000), neg_c = 1   //only cmp_tru counts
+
+//Int ALU
+ADD a + b: int_sh 25  cexp 28   INMODE 00000/00000   OPMODE2 0001100   OPMODE3 0010011   ALUMODE3 0000
+SUB a - b: int_sh 25  cexp 28   INMODE 00000/00000   OPMODE2 0001100   OPMODE3 0010011   ALUMODE3 0011
+AND a & b: int_sh 25  cexp 28   INMODE 00000/00000   OPMODE2 0001100   OPMODE3 0010011   ALUMODE3 1100
+OR  a | b: int_sh 25  cexp 28   INMODE 00000/00000   OPMODE2 0001100   OPMODE3 0011011   ALUMODE3 1100
+XOR a ^ b: int_sh 25  cexp 28   INMODE 00000/00000   OPMODE2 0001100   OPMODE3 0010011   ALUMODE3 0100
+ICMP a cmp b: int_sh 24  cexp 28   INMODE 00000/00000   OPMODE2 0001100   OPMODE3 0010011   ALUMODE3 0011
+                    cmp_signed = 1 : signed, 0 : unsigned   //only cmp_tru counts
+
+//Compare codes
+00 : ==
+01 : !=
+10 : <
+11 : <=
+
+//Mul
+LOMUL   (a*b) >> k           int_sh 45-k  cexp 127    INMODE 00000/00000   OPMODE2 1010101   OPMODE3 0010101   ALUMODE3 0000   int_mul 1   //k 0..16
+IFMA    (a*b + (c<<k)) >> k  int_sh 45-k  cexp 52-k   INMODE 00000/00000   OPMODE2 1010101   OPMODE3 0010101   ALUMODE3 0000   int_mul 1   //k 0..16
+PREMUL  (a[23:0]*b) >> 24    int_sh 21    cexp 127    INMODE 00000/00000   OPMODE2 1010101   OPMODE3 0010000   ALUMODE3 0000   neg_p 1
+HIMUL   (a[31:24]*b + c) >> 8  int_sh 37  cexp 52     INMODE 00110/00110   OPMODE2 1010101   OPMODE3 0010000   ALUMODE3 0000   neg_p 1
+PREMUL and HIMUL are unsigned (neg_p = 1 means b unsigned), HIMUL's c is PREMUL's result.
+
+//Shifts
+SHL     a << k      int_sh 25+k  cexp 127   INMODE 00010/00010   OPMODE2 0001100   OPMODE3 0010000   ALUMODE3 0000   //k 0..31
+SHR     c >> k      int_sh 45-k  cexp 52    INMODE 00010/00010   OPMODE2 1010101   OPMODE3 0010000   ALUMODE3 0000   //k 0..31
+SRA     c >> k      int_sh 29-k  cexp 36    INMODE 00010/00010   OPMODE2 1010101   OPMODE3 0010000   ALUMODE3 0000   //k 0..29
+SHR and SRA take the value from c, not a.

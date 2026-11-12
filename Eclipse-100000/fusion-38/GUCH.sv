@@ -12,7 +12,7 @@ module GUCH (
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
     //First of all, all signals are computed in 1 SM because all GUCHes share them
     //But that I mean b becomes one or c becomes zero
-    input logic efp_op, int_op, int_mul, cmp_op, cmp_signed, neg_p, neg_c,
+    input logic efp_op, int_op, int_mul, cmp_signed, neg_p, neg_c,
     input logic [1:0] cmp_code, //<=, <, ==, !=
     input logic [5:0] int_sh,
     input logic [8:0] cexp_const, //28 for efp 52 - k for int fma
@@ -23,7 +23,7 @@ module GUCH (
     input logic [31:0] a, b, c,
 
     output logic [31:0] result,
-    output logic cmp_tru;
+    output logic cmp_tru
 );
     //So efp32 is Eclipsing Floating (Point/Precision word-play) 32bits
     //Its a custom floating format I designed, I actually spent a little while
@@ -95,16 +95,16 @@ module GUCH (
     logic STRT_prod_zero, STRT_shexp_neg;
 
     //The cmp for int happens as usual - sub operands, check the result.
-    //But flip the sign for signed using xor. Also main cmp logic happens in
+    //Main cmp logic happens in
     //SM - it sends opmode and alumode for dsps so changes here aren't massive.
     logic [6:0] sh_exp;
     (* shreg_extract = "no" *) logic STRT_int;
     (* shreg_extract = "no" *) logic [5:0] STRT_int_sh;
     always_ff @(posedge clk) begin : STRT_CRRY
-        STRT_a <= {PREA_a[31] ^ (cmp_op & cmp_signed), PREA_a[31:25], PREA_a[24] & PREA_efp_op, PREA_a[23:0]};
+        STRT_a <= {PREA_a[32:25], PREA_a[24] & PREA_efp_op, PREA_a[23:0]};
         STRT_b_hi <= PREA_efp_op ? 7'h0 : PREA_b[32:26];
         STRT_c_hi <= PREA_efp_op ? 7'h0 : PREA_c[32:26];
-        STRT_b <= {PREA_b[31] ^ (cmp_op & cmp_signed), PREA_b[31:0]};
+        STRT_b <= PREA_b;
         STRT_c <= PREA_c;
 
         STRT_abexp <= PREA_shexp;
@@ -128,10 +128,12 @@ module GUCH (
     //Also kinda same thing for shifts - shr, shl and asr signals are sent by
     //SM's cexp_const and int_sh, so its free in GUCH literally no code change.
     logic c_sign, sub_mags, STRT_b_sign;
+    (* shreg_extract = "no" *) logic STRT_cmp_signed;
     always_ff @(posedge clk) begin : STRT_signs
         c_sign <= PREA_c[32] ^ neg_c; //FMS... etc
         sub_mags <= PREA_efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
         STRT_b_sign <= (~PREA_efp_op & PREA_b[32]) & ~neg_p; //for unsigned himul
+        STRT_cmp_signed <= cmp_signed;
     end : STRT_signs
 
     //So exp(a) + exp(b) is self explanatory - we are multiplying them, but
@@ -293,6 +295,7 @@ module GUCH (
 
     (* shreg_extract = "no" *) logic DGAF0_int;
     (* shreg_extract = "no" *) logic [5:0] DGAF0_int_sh;
+    (* shreg_extract = "no" *) logic DGAF0_cmp_signed;
     always_ff @(posedge clk) begin : DGAF0_CRRY
         DGAF0_shexp_lmid <= STRT_shexp_lmid;
         DGAF0_shexp_hmid <= STRT_shexp_hmid;
@@ -301,6 +304,7 @@ module GUCH (
         DGAF0_c_sign <= c_sign;
         DGAF0_int <= STRT_int;
         DGAF0_int_sh <= STRT_int_sh;
+        DGAF0_cmp_signed <= STRT_cmp_signed;
     end : DGAF0_CRRY
 
     always_ff @(posedge clk) begin : DGAF0_C
@@ -389,6 +393,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic [31:15] DGAF1_int_b; //only hi is needed for Goodbye
     (* shreg_extract = "no" *) logic DGAF1_int;
     (* shreg_extract = "no" *) logic [5:0] DGAF1_int_sh;
+    (* shreg_extract = "no" *) logic DGAF1_cmp_signed;
     always_ff @(posedge clk) begin : DGAF1_CRRY
         DGAF1_ato_add  <= DGAF0_ato_add;
         DGAF1_c_sign   <= DGAF0_c_sign;
@@ -398,6 +403,7 @@ module GUCH (
         DGAF1_int_b    <= DGAF0_int_b[31:15];
         DGAF1_int      <= DGAF0_int;
         DGAF1_int_sh   <= DGAF0_int_sh;
+        DGAF1_cmp_signed <= DGAF0_cmp_signed;
         //its mul_operands btw - im a god of unreadable code. int_op is
         //delayed to DGAF0 in SM btw
         DGAF1_mul_op   <= int_mul ? {{3{DGAF0_int_a[31]}}, DGAF0_int_a[31:24], 7'h0} : {DGAF0_int_b[14:0], 3'h0};
@@ -508,7 +514,7 @@ module GUCH (
         //stuff because i like doing it. Also not atp im always doing stuff
         //because I like doing it.
         .B({{3{STRT_b_sign}}, STRT_b_hi, STRT_b[24:17]}),
-        .C({13'h0, DGAF1_int_a, 3'h0}), //int op
+        .C({{13{DGAF1_int_a[31] & DGAF1_cmp_signed}}, DGAF1_int_a, 3'h0}), //int op
         .CARRYIN(1'b0),
         .D({17'h0, STRT_a[32:25]}),
         .CEA1(1'b1),
@@ -675,7 +681,7 @@ module GUCH (
         .INMODE(5'b10110),
         .OPMODE(OPMODE3),
         //Its two's comlimetn so top bit gotta be 0
-        .A({13'h0, DGAF1_int_b[31:15]}),
+        .A({{13{DGAF1_int_b[31] & DGAF1_cmp_signed}}, DGAF1_int_b[31:15]}),
         .B(DGAF1_mul_op),
         //Also if sub_mags we have to negate the ato_add, negating is flipping bits + 1.
         //Flipping bits is xoring with all 1s, and xoring with 0s does nothing, so
@@ -959,12 +965,13 @@ module GUCH (
     assign norm_diff = NORM2_exp_base - {2'b00, NORM2_lzc, NORM3_sh1};
 
     logic [76:45] norm_res; //hell yeahhhhh
-    logic norm_fell;
+    logic norm_fell, norm_cmp_lsb;
     logic [8:0] norm_exp;
     always_ff @(posedge clk) begin : NORM3_REG
         norm_res  <= NORM3_sh1 ? NORM2_raw_res[75:44] : NORM2_raw_res[76:45]; //saves up lil bit of LUTs
         norm_fell <= NORM2_fell_ff | (~NORM3_sh1 & NORM2_raw_res[50]);
         norm_exp  <= norm_diff[8:0];
+        norm_cmp_lsb <= NORM2_raw_res[44];
     end : NORM3_REG
 
     (* shreg_extract = "no" *) logic norm_neg, norm_c_sign;
@@ -1005,9 +1012,9 @@ module GUCH (
     assign RND_inc = RND_guard  ? (norm_fell | RND_lsb | norm_neg)
                                 : (norm_neg & ~norm_fell & RND_lsb);
 
-    logic [31:0] RND_a, RND_b, RND_cmp;
+    logic [31:0] RND_a, RND_b;
     logic [31:0] RND_res, RND_res_ff;
-    logic RND_sign, RND_int;
+    logic RND_sign, RND_int, RND_cmp, RND_cmp_ff;
 
     assign RND_a = NORM3_int ? norm_res[76:45] : {norm_exp[7:0], RND_mant}; //all zero on flush
     assign RND_b = {7'h0, RND_hidden & ~NORM3_int, 23'h0, RND_inc & ~NORM3_int};
@@ -1016,6 +1023,7 @@ module GUCH (
     always_ff @(posedge clk) begin
         RND_res_ff <= RND_zero ? 32'h0 : RND_res;
         RND_int <= NORM3_int;
+        RND_cmp_ff <= RND_cmp;
         //So that elimitates -0 whatsoever, -0 just becomes regular zero, because I hate -0. Its like complete nonsense
         RND_sign <= RND_zero ? 1'b0 : norm_neg ^ norm_c_sign;
     end
@@ -1023,27 +1031,26 @@ module GUCH (
     //classic cmp, SM only reads cmp result if its actually cmp op, so there
     //is no need to carry flag here.
     logic cmp_eq, cmp_less;
-    logic [1:0] cmp_vec;
+    logic [3:0] cmp_vec;
     always_comb begin
-        if (RND_int) begin
-            //idk if im overthinking but i feel like compacting it into one
-            //signal would use only 1 LUT for the whole compares, whereas
-            //doing cmp for every case would use 1 LUT for each one.
-            cmp_eq = ~|norm_res[75:45];
-            cmp_less = norm_res[75];
+        if (NORM3_int) begin
+            cmp_eq = ~|{norm_res[75:45], norm_cmp_lsb};
+            cmp_less = norm_res[76];
         end else begin
             //efp cmp is very nice because u'll see;
             cmp_eq = !RND_hidden;
-            cmp_less = norm_neg ^ norm_c_sign;
+            cmp_less = (norm_neg ^ norm_c_sign) & RND_hidden;
         end
-        cmp_vec = {cmp_eq, !cmp_eq, cmp_less, cmp_less & cmp_eq};
-            unique case (cmp_code)
-                1'b00: cmp_tru = cmp_vec[0]; // ==
-                1'b01: cmp_tru = cmp_vec[1]; // !=
-                1'b10: cmp_tru = cmp_vec[2]; // <
-                1'b11: cmp_tru = cmp_vec[3]; // <=
-            endcase
-        end
+        //idk if im overthinking but i feel like compacting it into one
+        //signal would use only 1 LUT for the whole compares, whereas
+        //doing cmp for every case would use 1 LUT for each one.
+        cmp_vec = {cmp_eq, !cmp_eq, cmp_less, cmp_less | cmp_eq};
+        unique case (cmp_code)
+            2'b00: RND_cmp = cmp_vec[3]; // ==
+            2'b01: RND_cmp = cmp_vec[2]; // !=
+            2'b10: RND_cmp = cmp_vec[1]; // <
+            2'b11: RND_cmp = cmp_vec[0]; // <=
+        endcase
     end
 
     //=> PCK (Pack) <=//
@@ -1051,6 +1058,7 @@ module GUCH (
     logic [31:0] FINALE;
     always_ff @(posedge clk) begin
         FINALE <= {RND_int ? RND_res_ff[31] : RND_sign, (RND_res_ff[31] & ~RND_int) ? 31'h7FFFFFFF : RND_res_ff[30:0]};
+        cmp_tru <= RND_cmp_ff;
     end
     assign result = FINALE;
 endmodule
