@@ -75,7 +75,7 @@ module GUCH (
         //No need for reset, otherwise DSP wouldn't accept them immediately
         //As for B, we need it for int op in intense wallop
         PREA_a <= {a[31:24], ~PREA_a_fld0, (ab_efp & PREA_a_fld0) ? 24'h0 : a[23:0]};
-        PREA_b <= {b[31:24], efp_op ? ~PREA_b_fld0 : b[24], (ab_efp & PREA_b_fld0) ? 24'h0 : b[23:0]};
+        PREA_b <= {b[31:24], ab_efp ? ~PREA_b_fld0 : b[24], (ab_efp & PREA_b_fld0) ? 24'h0 : b[23:0]};
         PREA_c <= {c[31:24], efp_op ? ~PREA_c_fld0 : c[24], (efp_op & PREA_c_fld0) ? 24'h0 : c[23:0]};
 
         PREA_shexp <= ab_efp ? {{3{~a[30]}}, a[29:24]} + {{3{~b[30]}}, b[29:24]} : 9'h0;
@@ -898,11 +898,12 @@ module GUCH (
     //51 - 7
     (* extract_reset = "no" *) logic [76:38] NORM1_raw_res;
     (* shreg_extract = "no" *) logic [3:0]   NORM1_lzc;
-    (* shreg_extract = "no" *) logic NORM1_fell_ff;
+    (* shreg_extract = "no" *) logic NORM1_fell_ff, NORM1_sticky;
     always_ff @(posedge clk) begin : NORM1_REG
         NORM1_raw_res[76:38] <= NORM1_sh[76:38];
         NORM1_lzc <= {NORM0_lzc, NORM1_sh16, NORM1_sh8};
         NORM1_fell_ff <= NORM1_fell | NORM0_fell_ff;
+        NORM1_sticky <= NORM0_fell_ff;
     end : NORM1_REG
 
     (* shreg_extract = "no" *) logic NORM1_neg, NORM1_c_sign;
@@ -940,10 +941,12 @@ module GUCH (
 
     logic [76:44] NORM2_raw_res;
     logic NORM2_fell_ff;
+    (* shreg_extract = "no" *) logic NORM2_sticky;
     (* shreg_extract = "no" *) logic [5:0]   NORM2_lzc;
     always_ff @(posedge clk) begin : NORM2_REG
         NORM2_raw_res <= NORM2_sh[76:44];
         NORM2_fell_ff <= NORM1_fell_ff | NORM2_fell;
+        NORM2_sticky <= NORM1_sticky;
         NORM2_lzc <= {NORM1_lzc, NORM2_sh4, NORM2_sh2};
     end : NORM2_REG
 
@@ -981,7 +984,7 @@ module GUCH (
         //usually for int mode it was fine, however for f2i it doesn't work, it shifts too much.
         //Oh yeah also integer part of efp32 is mantissa shifted by exp, and it works because:
         //format is 1.mant * 2^exp, and 2^value is literally shift by that value left.
-        norm_fell <= NORM2_int ? NORM2_sticky : (NORM2_fell_ff | (~NORM3_sh1 & NORM2_raw_res[50]))
+        norm_fell <= NORM2_int ? NORM2_sticky : (NORM2_fell_ff | (~NORM3_sh1 & NORM2_raw_res[50]));
         norm_exp  <= norm_diff[8:0];
         norm_cmp_lsb <= NORM2_raw_res[44];
     end : NORM3_REG
@@ -1028,8 +1031,16 @@ module GUCH (
     logic [31:0] RND_res, RND_res_ff;
     logic RND_sign, RND_int, RND_cmp, RND_cmp_ff, up;
 
-    //ceil, ill do rest later
-    assign up = secret_code == 2'b01;
+    //Btw f2i and f2i operand comes as C from SM, and a and b are both 0, additionally
+    //INMODE is set so they are 100% 0. 
+    always_comb begin
+        unique case (secret_code)
+            2'b00: up = 1'b0; //trunc
+            2'b01: up = norm_c_sign & (norm_cmp_lsb | norm_fell); //floor
+            2'b10: up = ~norm_c_sign & (norm_cmp_lsb | norm_fell);
+            2'b11: up = norm_cmp_lsb & (norm_fell | norm_res[45]); //round(ties to even)
+        endcase
+    end
     assign RND_a = NORM3_int ? norm_res[76:45] ^ {32{norm_c_sign}} : {norm_exp[7:0], RND_mant}; //all zero on flush
     assign RND_b = {7'h0, RND_hidden & ~NORM3_int, 23'h0, NORM3_int ? (norm_c_sign ^ up) : RND_inc & ~NORM3_int};
     //Add that 1 to exp back and inc if round up.
