@@ -1,9 +1,12 @@
 module GUCH (
     //GUCH - Graphical Unified Computing Heart
     //Well well finally starting the GPU im so excited for it.
-    //So first one is ofc smallest core its the basic GPU contruct.
-    //The heart is efp32 FMA that is done through 2DSPs, it also has integer mode,
-    //16bit fma, float to int conversion and min/max/abs.
+    //The GUCH is able to perform gefp32 FMA and all subsequent opperations
+    //that flow out of it: FNMA, FMS, Addition, Subtraction and others, along with
+    //cmp/icmp, built-in saturate(), abs() and converter between gefp32 <-> int.
+    //Every listed operation can be performed on integers with additional shift by
+    //either runtime register or a compile-time constant.
+    //GUCH utilizes 599LUTs, 1414FFs, 3DSPs and meets 300MHz constraint.
 
     //Also I don't need resets here, bc its just pipeline computations
     //And it would give vivado jsut a little more room for placement
@@ -412,7 +415,7 @@ module GUCH (
         DGAF1_ato_add  <= DGAF0_ato_add;
         DGAF1_c_sign   <= DGAF0_c_sign;
         DGAF1_sub_mags <= DGAF0_sub_mags;
-        DGAF1_exp_base <= DGAF0_exp_base - 9'h1;
+        DGAF1_exp_base <= DGAF0_exp_base;
         DGAF1_int_a    <= DGAF0_int_a;
         DGAF1_int_b    <= DGAF0_int_b[31:15];
         DGAF1_int      <= DGAF0_int;
@@ -990,7 +993,7 @@ module GUCH (
     //the highest one, but for each bit shifted it decreases by 1, thats
     //the reason we even need lcz. 2'b00 is for Wall to not complain
     logic [8:0] norm_diff;
-    assign norm_diff = NORM2_exp_base - {2'b00, NORM2_lzc, NORM3_sh1};
+    assign norm_diff = NORM2_exp_base + ~{2'b00, NORM2_lzc, NORM3_sh1};
 
     logic [76:45] norm_res; //hell yeahhhhh
     logic norm_cin, norm_cmp_lsb, up;
