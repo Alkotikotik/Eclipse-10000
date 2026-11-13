@@ -12,7 +12,7 @@ module GUCH (
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
     //First of all, all signals are computed in 1 SM because all GUCHes share them
     //But that I mean b becomes one or c becomes zero
-    input logic efp_op, int_op, int_mul, cmp_signed, neg_p, neg_c, sat_01,
+    input logic efp_op, int_op, int_mul, cmp_signed, neg_p, neg_c, sat_01, abs_int, abs_efp, sh_shr, sh_var,
     input logic [1:0] secret_code, //rounding and cmp uses same signal to choose mode
     input logic [5:0] int_sh,
     input logic [8:0] cexp_const, //28 for efp 52 - k for int fma
@@ -121,7 +121,10 @@ module GUCH (
         STRT_int <= PREA_int;
         STRT_sat <= PREA_sat;
         STRT_c_int <= ~PREA_efp_op;
-        STRT_int_sh <= PREA_int_sh;
+        //shift of int_sh(0) by low 5bits of b, in other words variable shift.
+        //gated by sh_var, and its subbed if its shr/sra and added if shl.
+        //Thats literally all there is to it in GUCH, other logic in SM
+        STRT_int_sh <= PREA_int_sh + (({1'b0, PREA_b[4:0]} & {6{sh_var}}) ^ {6{sh_shr}}) + {5'b0, sh_shr};
     end : STRT_CRRY
 
     //Basically sub_sel bits govern the sign of products and c result
@@ -139,7 +142,7 @@ module GUCH (
     logic c_sign, sub_mags, STRT_b_sign;
     (* shreg_extract = "no" *) logic STRT_cmp_signed;
     always_ff @(posedge clk) begin : STRT_signs
-        c_sign <= (PREA_c[32] & PREA_efp_op) ^ neg_c; //FMS... etc
+        c_sign <= (PREA_c[32] & (PREA_efp_op | abs_int)) ^ neg_c; //FMS... etc
         sub_mags <= PREA_ab_efp & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
         STRT_b_sign <= (~PREA_efp_op & PREA_b[32]) & ~neg_p; //for unsigned himul
         STRT_cmp_signed <= cmp_signed;
@@ -1072,7 +1075,8 @@ module GUCH (
         RND_c_sign <= norm_c_sign;
         RND_cmp_ff <= RND_cmp;
         //So that elimitates -0 whatsoever, -0 just becomes regular zero, because I hate -0. Its like complete nonsense
-        RND_sign <= RND_zero ? 1'b0 : norm_neg ^ norm_c_sign;
+        //and yeah abs is self-explanatory
+        RND_sign <= (RND_zero | abs_efp) ? 1'b0 : norm_neg ^ norm_c_sign;
     end
 
     //classic cmp, SM only reads cmp result if its actually cmp op, so there

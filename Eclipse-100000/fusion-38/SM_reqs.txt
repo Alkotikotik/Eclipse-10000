@@ -3,12 +3,13 @@ What GUCH needs from SM, reqs so i don't forget
 //Offsets
 offset in cycles of sm ports after operands arrival
 0  : a, b, c, efp_op, int_op, int_sh, cexp_const
-1  : neg_p, neg_c, cmp_signed, INMODE1
+1  : neg_p, neg_c, cmp_signed, INMODE1, abs_int, sh_shr, sh_var
 2  : INMODE2
 3  : int_mul
 4  : OPMODE2
 5  : OPMODE3, ALUMODE3
 11 : secret_code
+12 : abs_efp
 13 : sat_01
 14 : result, cmp_tru come out
 
