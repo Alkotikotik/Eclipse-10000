@@ -12,7 +12,7 @@ module GUCH (
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
     //First of all, all signals are computed in 1 SM because all GUCHes share them
     //But that I mean b becomes one or c becomes zero
-    input logic efp_op, int_op, int_mul, cmp_signed, neg_p, neg_c,
+    input logic efp_op, int_op, int_mul, cmp_signed, neg_p, neg_c, sat_01,
     input logic [1:0] secret_code, //rounding and cmp uses same signal to choose mode
     input logic [5:0] int_sh,
     input logic [8:0] cexp_const, //28 for efp 52 - k for int fma
@@ -1100,9 +1100,23 @@ module GUCH (
 
     //=> PCK (Pack) <=//
     //Well well well and so here we are - final stage
+    //saturate() is one of the most useful functions in the shaders, and i can
+    //get it almost for free actually. Because it changes the value to either
+    //0 or 1, and 0 is just ff's rst port, whilst 1 is rst on every port but 30th(also rst sign).
+    //rst trick goes crazy btw, ff's R port is just a regular ass port so anything can drive it.
+    //So it literally costs 1LUT and nothing else
+    logic  lo_rst, hi_rst;
+    assign lo_rst = sat_01 & (RND_sign | RND_res_ff[31] | RND_res_ff[30]);
+    assign hi_rst = sat_01 & RND_sign;
+
     logic [31:0] FINALE;
     always_ff @(posedge clk) begin
         FINALE <= RND_sat ? {RND_c_sign, {31{~RND_c_sign}}} : {RND_int ? RND_res_ff[31] : RND_sign, (RND_res_ff[31] & ~RND_int) ? 31'h7FFFFFFF : RND_res_ff[30:0]};
+        if (hi_rst) begin
+            FINALE[31:30] <= 2'b00;
+        end if (lo_rst) begin
+            FINALE[29:0]  <= 30'h0;
+        end
         cmp_tru <= RND_cmp_ff;
     end
     assign result = FINALE;
