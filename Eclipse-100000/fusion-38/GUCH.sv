@@ -990,7 +990,7 @@ module GUCH (
     assign norm_diff = NORM2_exp_base - {2'b00, NORM2_lzc, NORM3_sh1};
 
     logic [76:45] norm_res; //hell yeahhhhh
-    logic norm_fell, norm_cmp_lsb, norm_f2i_inc, up;
+    logic norm_cin, norm_cmp_lsb, up;
     logic [1:0] norm_code;
     //Btw f2i and f2i operand comes as C from SM, and a and b are both 0, additionally
     //INMODE is set so they are 100% 0.
@@ -1002,16 +1002,30 @@ module GUCH (
             2'b11: up = NORM2_raw_res[44] & (NORM2_sticky | NORM2_raw_res[45]); //round(ties to even)
         endcase
     end
+    //yeah yeah precomputing flags again
+    //final, whether to round up or down, all this rounding stuff just for list sig bit
+    //If it reaches the guard and goes beyond, we round up, if it doesn't but reaches sticky, round down
+    //If it just reaches the guard, i do LSB meaning if LSB is one I round up,
+    //if its zero i round down. Its how ties to even works you might think
+    //thats its kinda unfair, but in reality 50% of the times it would round
+    //up and 50% round down so error averages out.
+    logic  NORM3_fsh1, NORM3_guard, NORM3_lsb, NORM3_fell, NORM3_inc;
+    assign NORM3_fsh1  = NORM2_raw_res[76] == NORM2_neg;
+    assign NORM3_guard = (NORM3_fsh1 ? NORM2_raw_res[50] : NORM2_raw_res[51]) ^ NORM2_neg;
+    assign NORM3_lsb   = (NORM3_fsh1 ? NORM2_raw_res[51] : NORM2_raw_res[52]) ^ NORM2_neg;
+    //usually for int mode it was fine, however for f2i it doesn't work, it shifts too much.
+    //Oh yeah also integer part of efp32 is mantissa shifted by exp, and it works because:
+    //format is 1.mant * 2^exp, and 2^value is literally shift by that value left.
+    assign NORM3_fell  = NORM2_fell_ff | (~NORM3_fsh1 & NORM2_raw_res[50]);
+    assign NORM3_inc   = NORM3_guard ? (NORM3_fell | NORM3_lsb | NORM2_neg)
+                                     : (NORM2_neg & ~NORM3_fell & NORM3_lsb);
+
     logic [8:0] norm_exp;
     always_ff @(posedge clk) begin : NORM3_REG
         norm_res  <= NORM3_sh1 ? NORM2_raw_res[75:44] : NORM2_raw_res[76:45]; //saves up lil bit of LUTs
-        //usually for int mode it was fine, however for f2i it doesn't work, it shifts too much.
-        //Oh yeah also integer part of efp32 is mantissa shifted by exp, and it works because:
-        //format is 1.mant * 2^exp, and 2^value is literally shift by that value left.
-        norm_fell <= NORM2_int ? NORM2_sticky : (NORM2_fell_ff | (~NORM3_sh1 & NORM2_raw_res[50]));
+        norm_cin  <= NORM2_int ? NORM2_c_sign ^ up : NORM3_inc;
         norm_exp  <= norm_diff[8:0];
         norm_cmp_lsb <= NORM2_raw_res[44];
-        norm_f2i_inc <= NORM2_c_sign ^ up;
         norm_code <= secret_code;
     end : NORM3_REG
 
@@ -1032,9 +1046,7 @@ module GUCH (
     logic  [23:0] RND_mant;
     assign RND_mant = norm_res[75:52] ^ {24{norm_neg}};
 
-    logic  RND_guard, RND_lsb, RND_hidden, RND_zero;
-    assign RND_guard  = norm_res[51] ^ norm_neg;
-    assign RND_lsb    = norm_res[52] ^ norm_neg;
+    logic  RND_hidden, RND_zero;
     assign RND_hidden = norm_res[76] ^ norm_neg;
 
     //So this is the flush i've talked before, it works bc norm_exp is exp-1,
@@ -1045,16 +1057,6 @@ module GUCH (
     //for several hours.
     assign RND_zero = ~NORM3_int & (norm_exp[8] | ~RND_hidden);
 
-    //final, whether to round up or down, all this rounding stuff just for list sig bit
-    //If it reaches the guard and goes beyond, we round up, if it doesn't but reaches sticky, round down
-    //If it just reaches the guard, i do LSB meaning if LSB is one I round up,
-    //if its zero i round down. Its how ties to even works you might think
-    //thats its kinda unfair, but in reality 50% of the times it would round
-    //up and 50% round down so error averages out.
-    logic  RND_inc;
-    assign RND_inc = RND_guard  ? (norm_fell | RND_lsb | norm_neg)
-                                : (norm_neg & ~norm_fell & RND_lsb);
-
     logic [31:0] RND_a, RND_b;
     logic [31:0] RND_res, RND_res_ff;
     logic RND_sign, RND_int, RND_cmp, RND_cmp_ff, RND_sat, RND_c_sign;
@@ -1062,7 +1064,7 @@ module GUCH (
     assign RND_a = NORM3_int ? norm_res[76:45] ^ {32{norm_c_sign}} : {norm_exp[7:0], RND_mant}; //all zero on flush
     assign RND_b = {7'h0, RND_hidden & ~NORM3_int, 24'h0};
     //Add that 1 to exp back and inc if round up.
-    assign RND_res = RND_a + RND_b + {31'h0, NORM3_int ? norm_f2i_inc : RND_inc};
+    assign RND_res = RND_a + RND_b + {31'h0, norm_cin};
     always_ff @(posedge clk) begin
         RND_res_ff <= RND_zero ? 32'h0 : RND_res;
         RND_int <= NORM3_int;
