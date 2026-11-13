@@ -67,7 +67,7 @@ module GUCH (
     assign PREA_a_fld0 = ~|a[30:24];
     assign PREA_b_fld0 = ~|b[30:24];
     assign PREA_c_fld0 = ~|c[30:24];
-    (* shreg_extract = "no" *) logic PREA_int;
+    (* shreg_extract = "no" *) logic PREA_int, PREA_sat;
     (* shreg_extract = "no" *) logic [5:0] PREA_int_sh;
     always_ff @(posedge clk) begin : PREA_EFP
         //Put back hidden bit. No unbias here: only shexp/cexp need the
@@ -85,6 +85,9 @@ module GUCH (
         PREA_prod_zero <= ab_efp & (PREA_a_fld0 | PREA_b_fld0);
         PREA_efp_op <= efp_op;
         PREA_int <= int_op;
+        //saturate f2i to max value if exponent is more than 30(its bias here
+        //64+31 = 95)
+        PREA_sat <= efp_op & int_op & (c[30:24] >= 7'd95);
         PREA_int_sh <= int_sh;
         PREA_ab_efp <= ab_efp;
     end : PREA_EFP
@@ -101,7 +104,7 @@ module GUCH (
     //Main cmp logic happens in
     //SM - it sends opmode and alumode for dsps so changes here aren't massive.
     logic [6:0] sh_exp;
-    (* shreg_extract = "no" *) logic STRT_int, STRT_c_int;
+    (* shreg_extract = "no" *) logic STRT_int, STRT_c_int, STRT_sat;
     (* shreg_extract = "no" *) logic [5:0] STRT_int_sh;
     always_ff @(posedge clk) begin : STRT_CRRY
         STRT_a <= {PREA_a[32:25], PREA_a[24] & PREA_ab_efp, PREA_a[23:0]};
@@ -116,6 +119,7 @@ module GUCH (
         STRT_prod_zero <= PREA_prod_zero;
         STRT_shexp_neg <= shexp[8];
         STRT_int <= PREA_int;
+        STRT_sat <= PREA_sat;
         STRT_c_int <= ~PREA_efp_op;
         STRT_int_sh <= PREA_int_sh;
     end : STRT_CRRY
@@ -298,7 +302,7 @@ module GUCH (
     logic [6:0] in_grp; //any 1 in group
     logic [8:0] DGAF0_exp_base;
 
-    (* shreg_extract = "no" *) logic DGAF0_int, DGAF0_c_int;
+    (* shreg_extract = "no" *) logic DGAF0_int, DGAF0_c_int, DGAF0_sat;
     (* shreg_extract = "no" *) logic [5:0] DGAF0_int_sh;
     (* shreg_extract = "no" *) logic DGAF0_cmp_signed;
     always_ff @(posedge clk) begin : DGAF0_CRRY
@@ -308,6 +312,7 @@ module GUCH (
         DGAF0_sub_mags <= sub_mags;
         DGAF0_c_sign <= c_sign;
         DGAF0_int <= STRT_int;
+        DGAF0_sat <= STRT_sat;
         DGAF0_c_int <= STRT_c_int;
         DGAF0_int_sh <= STRT_int_sh;
         DGAF0_cmp_signed <= STRT_cmp_signed;
@@ -397,7 +402,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic [8:0] DGAF1_exp_base;
     (* shreg_extract = "no" *) logic [31:0] DGAF1_int_a;
     (* shreg_extract = "no" *) logic [31:15] DGAF1_int_b; //only hi is needed for Goodbye
-    (* shreg_extract = "no" *) logic DGAF1_int;
+    (* shreg_extract = "no" *) logic DGAF1_int, DGAF1_sat;
     (* shreg_extract = "no" *) logic [5:0] DGAF1_int_sh;
     (* shreg_extract = "no" *) logic DGAF1_cmp_signed;
     always_ff @(posedge clk) begin : DGAF1_CRRY
@@ -408,6 +413,7 @@ module GUCH (
         DGAF1_int_a    <= DGAF0_int_a;
         DGAF1_int_b    <= DGAF0_int_b[31:15];
         DGAF1_int      <= DGAF0_int;
+        DGAF1_sat      <= DGAF0_sat;
         DGAF1_int_sh   <= DGAF0_int_sh;
         DGAF1_cmp_signed <= DGAF0_cmp_signed;
         //its mul_operands btw - im a god of unreadable code. int_op is
@@ -439,7 +445,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic [8:0] DSFSH0_exp_base;
     (* shreg_extract = "no" *) logic DSFSH0_sticky;
 
-    (* shreg_extract = "no" *) logic DSFSH0_int;
+    (* shreg_extract = "no" *) logic DSFSH0_int, DSFSH0_sat;
     (* shreg_extract = "no" *) logic [5:0] DSFSH0_int_sh;
     always_ff @(posedge clk) begin : DSFSH0_CRRY
         DSFSH0_ato_add <= DGAF1_ato_add[21:0];
@@ -448,6 +454,7 @@ module GUCH (
         DSFSH0_exp_base <= DGAF1_exp_base;
         DSFSH0_sticky <= DGAF1_sticky;
         DSFSH0_int <= DGAF1_int;
+        DSFSH0_sat <= DGAF1_sat;
         DSFSH0_int_sh <= DGAF1_int_sh;
     end : DSFSH0_CRRY
 
@@ -559,7 +566,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic [8:0] DSFSH1_exp_base;
     (* shreg_extract = "no" *) logic DSFSH1_sticky;
 
-    (* shreg_extract = "no" *) logic DSFSH1_int;
+    (* shreg_extract = "no" *) logic DSFSH1_int, DSFSH1_sat;
     (* shreg_extract = "no" *) logic [5:0] DSFSH1_int_sh;
     always_ff @(posedge clk) begin : DSFSH1_CRRY
         DSFSH1_ato_add <= DSFSH0_ato_add[21:0]; //last bit already added
@@ -570,6 +577,7 @@ module GUCH (
         DSFSH1_exp_base <= DSFSH0_exp_base;
         DSFSH1_sticky <= DSFSH0_sticky;
         DSFSH1_int <= DSFSH0_int;
+        DSFSH1_sat <= DSFSH0_sat;
         DSFSH1_int_sh <= DSFSH0_int_sh;
     end : DSFSH1_CRRY
 
@@ -604,7 +612,7 @@ module GUCH (
         FIAD_hi_crry <= FIAD_hi_crry_sum[13:1];
     end
 
-    (* shreg_extract = "no" *) logic FIAD_int;
+    (* shreg_extract = "no" *) logic FIAD_int, FIAD_sat;
     (* shreg_extract = "no" *) logic [5:0] FIAD_int_sh;
     //In case I never told, the most effective optimization sheme is
     //precomputaion. Just merge/precompute known values cycle(s) before using
@@ -620,6 +628,7 @@ module GUCH (
         FIAD_c_sign <= DSFSH1_c_sign;
         FIAD_sticky <= DSFSH1_sticky;
         FIAD_int <= DSFSH1_int;
+        FIAD_sat <= DSFSH1_sat;
         FIAD_int_sh <= DSFSH1_int_sh;
     end : FIAD_PASS
 
@@ -780,7 +789,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic PRENRM_c_sign, PRENRM_sticky;
     (* shreg_extract = "no" *) logic [8:0] PRENRM_exp_base;
 
-    (* shreg_extract = "no" *) logic PRENRM_int;
+    (* shreg_extract = "no" *) logic PRENRM_int, PRENRM_sat;
     (* shreg_extract = "no" *) logic [4:0] PRENRM_int_sh;
     always_ff @(posedge clk) begin : PRENRM_CRRY
         PRENRM_top32_c0 <= FIAD_int ? FIAD_int_sh[5] : top32_c0;
@@ -800,6 +809,7 @@ module GUCH (
         PRENRM_sticky   <= FIAD_sticky;
         PRENRM_exp_base <= FIAD_exp_base;
         PRENRM_int      <= FIAD_int;
+        PRENRM_sat      <= FIAD_sat;
         PRENRM_int_sh   <= FIAD_int_sh[4:0];
     end : PRENRM_CRRY
 
@@ -867,7 +877,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic NORM0_neg, NORM0_c_sign;
     (* shreg_extract = "no" *) logic [8:0] NORM0_exp_base;
     (* shreg_extract = "no" *) logic NORM1_sh16, NORM1_sh8;
-    (* shreg_extract = "no" *) logic NORM0_int;
+    (* shreg_extract = "no" *) logic NORM0_int, NORM0_sat;
     (* shreg_extract = "no" *) logic [2:0] NORM0_int_sh;
     always_ff @(posedge clk) begin : NORM0_CRRY
         //Sometimes I like aligned <=, something i don't
@@ -877,6 +887,7 @@ module GUCH (
         NORM1_sh16     <= PRENRM_int ? PRENRM_int_sh[4] : NORM0_pk16; //thats lil bit confusing, goddamnit it actually is lmao
         NORM1_sh8      <= PRENRM_int ? PRENRM_int_sh[3] : (NORM0_pk16 ? NORM0_pk8lo : NORM0_pk8hi);
         NORM0_int      <= PRENRM_int;
+        NORM0_sat      <= PRENRM_sat;
         NORM0_int_sh   <= PRENRM_int_sh[2:0];
     end : NORM0_CRRY
 
@@ -908,13 +919,14 @@ module GUCH (
 
     (* shreg_extract = "no" *) logic NORM1_neg, NORM1_c_sign;
     (* shreg_extract = "no" *) logic [8:0] NORM1_exp_base;
-    (* shreg_extract = "no" *) logic NORM1_int;
+    (* shreg_extract = "no" *) logic NORM1_int, NORM1_sat;
     (* shreg_extract = "no" *) logic [1:0] NORM1_int_sh;
     always_ff @(posedge clk) begin : NORM1_CRRY
         NORM1_neg      <= NORM0_int ? NORM0_int_sh[2] : NORM0_neg;
         NORM1_c_sign   <= NORM0_c_sign;
         NORM1_exp_base <= NORM0_exp_base;
         NORM1_int      <= NORM0_int;
+        NORM1_sat      <= NORM0_sat;
         NORM1_int_sh   <= NORM0_int_sh[1:0];
     end : NORM1_CRRY
 
@@ -952,12 +964,13 @@ module GUCH (
 
     (* shreg_extract = "no" *) logic NORM2_neg, NORM2_c_sign;
     (* shreg_extract = "no" *) logic [8:0] NORM2_exp_base;
-    (* shreg_extract = "no" *) logic NORM2_int, NORM2_int_sh;
+    (* shreg_extract = "no" *) logic NORM2_int, NORM2_int_sh, NORM2_sat;
     always_ff @(posedge clk) begin : NORM2_CRRY
         NORM2_neg      <= NORM1_neg;
         NORM2_c_sign   <= NORM1_c_sign;
         NORM2_exp_base <= NORM1_exp_base;
         NORM2_int      <= NORM1_int;
+        NORM2_sat      <= NORM1_sat;
         NORM2_int_sh   <= NORM1_int_sh[0];
     end : NORM2_CRRY
 
@@ -977,7 +990,18 @@ module GUCH (
     assign norm_diff = NORM2_exp_base - {2'b00, NORM2_lzc, NORM3_sh1};
 
     logic [76:45] norm_res; //hell yeahhhhh
-    logic norm_fell, norm_cmp_lsb;
+    logic norm_fell, norm_cmp_lsb, norm_f2i_inc, up;
+    logic [1:0] norm_code;
+    //Btw f2i and f2i operand comes as C from SM, and a and b are both 0, additionally
+    //INMODE is set so they are 100% 0. 
+    always_comb begin
+        unique case (secret_code)
+            2'b00: up = 1'b0; //trunc
+            2'b01: up = NORM2_c_sign & (NORM2_raw_res[44] | NORM2_sticky); //floor
+            2'b10: up = ~NORM2_c_sign & (NORM2_raw_res[44] | NORM2_sticky);
+            2'b11: up = NORM2_raw_res[44] & (NORM2_sticky | NORM2_raw_res[45]); //round(ties to even)
+        endcase
+    end
     logic [8:0] norm_exp;
     always_ff @(posedge clk) begin : NORM3_REG
         norm_res  <= NORM3_sh1 ? NORM2_raw_res[75:44] : NORM2_raw_res[76:45]; //saves up lil bit of LUTs
@@ -987,16 +1011,20 @@ module GUCH (
         norm_fell <= NORM2_int ? NORM2_sticky : (NORM2_fell_ff | (~NORM3_sh1 & NORM2_raw_res[50]));
         norm_exp  <= norm_diff[8:0];
         norm_cmp_lsb <= NORM2_raw_res[44];
+        norm_f2i_inc <= NORM2_c_sign ^ up;
+        norm_code <= secret_code;
     end : NORM3_REG
 
     (* shreg_extract = "no" *) logic norm_neg, norm_c_sign;
     //max fanout would make vivado duplicate ffs and put them closer to
     //a reader. that path failed btw
     (* shreg_extract = "no" *) (* max_fanout = 12 *) logic NORM3_int;
+    (* shreg_extract = "no" *) logic NORM3_sat;
     always_ff @(posedge clk) begin : NORM3_CRRY
         norm_neg    <= NORM2_neg;
         norm_c_sign <= NORM2_c_sign;
         NORM3_int   <= NORM2_int;
+        NORM3_sat   <= NORM2_sat;
     end : NORM3_CRRY
 
     //=> RND (Round) <=//
@@ -1029,25 +1057,17 @@ module GUCH (
 
     logic [31:0] RND_a, RND_b;
     logic [31:0] RND_res, RND_res_ff;
-    logic RND_sign, RND_int, RND_cmp, RND_cmp_ff, up;
+    logic RND_sign, RND_int, RND_cmp, RND_cmp_ff, RND_sat, RND_c_sign;
 
-    //Btw f2i and f2i operand comes as C from SM, and a and b are both 0, additionally
-    //INMODE is set so they are 100% 0. 
-    always_comb begin
-        unique case (secret_code)
-            2'b00: up = 1'b0; //trunc
-            2'b01: up = norm_c_sign & (norm_cmp_lsb | norm_fell); //floor
-            2'b10: up = ~norm_c_sign & (norm_cmp_lsb | norm_fell);
-            2'b11: up = norm_cmp_lsb & (norm_fell | norm_res[45]); //round(ties to even)
-        endcase
-    end
     assign RND_a = NORM3_int ? norm_res[76:45] ^ {32{norm_c_sign}} : {norm_exp[7:0], RND_mant}; //all zero on flush
-    assign RND_b = {7'h0, RND_hidden & ~NORM3_int, 23'h0, NORM3_int ? (norm_c_sign ^ up) : RND_inc & ~NORM3_int};
+    assign RND_b = {7'h0, RND_hidden & ~NORM3_int, 24'h0};
     //Add that 1 to exp back and inc if round up.
-    assign RND_res = RND_a + RND_b;
+    assign RND_res = RND_a + RND_b + {31'h0, NORM3_int ? norm_f2i_inc : RND_inc};
     always_ff @(posedge clk) begin
         RND_res_ff <= RND_zero ? 32'h0 : RND_res;
         RND_int <= NORM3_int;
+        RND_sat <= NORM3_sat;
+        RND_c_sign <= norm_c_sign;
         RND_cmp_ff <= RND_cmp;
         //So that elimitates -0 whatsoever, -0 just becomes regular zero, because I hate -0. Its like complete nonsense
         RND_sign <= RND_zero ? 1'b0 : norm_neg ^ norm_c_sign;
@@ -1070,7 +1090,7 @@ module GUCH (
         //signal would use only 1 LUT for the whole compares, whereas
         //doing cmp for every case would use 1 LUT for each one.
         cmp_vec = {cmp_eq, !cmp_eq, cmp_less, cmp_less | cmp_eq};
-        unique case (secret_code)
+        unique case (norm_code)
             2'b00: RND_cmp = cmp_vec[3]; // ==
             2'b01: RND_cmp = cmp_vec[2]; // !=
             2'b10: RND_cmp = cmp_vec[1]; // <
@@ -1082,7 +1102,7 @@ module GUCH (
     //Well well well and so here we are - final stage
     logic [31:0] FINALE;
     always_ff @(posedge clk) begin
-        FINALE <= {RND_int ? RND_res_ff[31] : RND_sign, (RND_res_ff[31] & ~RND_int) ? 31'h7FFFFFFF : RND_res_ff[30:0]};
+        FINALE <= RND_sat ? {RND_c_sign, {31{~RND_c_sign}}} : {RND_int ? RND_res_ff[31] : RND_sign, (RND_res_ff[31] & ~RND_int) ? 31'h7FFFFFFF : RND_res_ff[30:0]};
         cmp_tru <= RND_cmp_ff;
     end
     assign result = FINALE;

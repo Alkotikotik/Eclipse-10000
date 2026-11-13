@@ -8,7 +8,7 @@ offset in cycles of sm ports after operands arrival
 3  : int_mul
 4  : OPMODE2
 5  : OPMODE3, ALUMODE3
-12 : cmp_code
+11 : secret_code
 14 : result, cmp_tru come out
 
 OPMODE1 = 0110101 and ALUMODE = 0000 for every op.
