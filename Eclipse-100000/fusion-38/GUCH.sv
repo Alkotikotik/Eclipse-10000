@@ -13,7 +13,7 @@ module GUCH (
     //First of all, all signals are computed in 1 SM because all GUCHes share them
     //But that I mean b becomes one or c becomes zero
     input logic efp_op, int_op, int_mul, cmp_signed, neg_p, neg_c,
-    input logic [1:0] cmp_code, //<=, <, ==, !=
+    input logic [1:0] secret_code, //rounding and cmp uses same signal to choose mode
     input logic [5:0] int_sh,
     input logic [8:0] cexp_const, //28 for efp 52 - k for int fma
     input logic [6:0] OPMODE1, OPMODE2, OPMODE3,
@@ -58,7 +58,9 @@ module GUCH (
     //Moving longest stuff from STRT to here, for crit path ofc
     logic [32:0] PREA_a, PREA_b, PREA_c;
     logic [8:0]  PREA_shexp, PREA_cexp;
-    logic PREA_prod_zero, PREA_efp_op;
+    logic PREA_prod_zero, PREA_efp_op, ab_efp, PREA_ab_efp;
+    //for f2i
+    assign ab_efp = efp_op & ~int_op;
 
     //flush subnormals immediately
     logic  PREA_a_fld0, PREA_b_fld0, PREA_c_fld0;
@@ -72,18 +74,19 @@ module GUCH (
         //unbiased value and they unbias themselfs. Rhe rest reads the field as is
         //No need for reset, otherwise DSP wouldn't accept them immediately
         //As for B, we need it for int op in intense wallop
-        PREA_a <= {a[31:24], ~PREA_a_fld0, (efp_op & PREA_a_fld0) ? 24'h0 : a[23:0]};
-        PREA_b <= {b[31:24], efp_op ? ~PREA_b_fld0 : b[24], (efp_op & PREA_b_fld0) ? 24'h0 : b[23:0]};
+        PREA_a <= {a[31:24], ~PREA_a_fld0, (ab_efp & PREA_a_fld0) ? 24'h0 : a[23:0]};
+        PREA_b <= {b[31:24], efp_op ? ~PREA_b_fld0 : b[24], (ab_efp & PREA_b_fld0) ? 24'h0 : b[23:0]};
         PREA_c <= {c[31:24], efp_op ? ~PREA_c_fld0 : c[24], (efp_op & PREA_c_fld0) ? 24'h0 : c[23:0]};
 
-        PREA_shexp <= efp_op ? {{3{~a[30]}}, a[29:24]} + {{3{~b[30]}}, b[29:24]} : 9'h0;
+        PREA_shexp <= ab_efp ? {{3{~a[30]}}, a[29:24]} + {{3{~b[30]}}, b[29:24]} : 9'h0;
         //So basically subtracting a number from const should be a little better.
         PREA_cexp  <= cexp_const - (efp_op ? {{3{~c[30]}}, c[29:24]} : 9'h0);
 
-        PREA_prod_zero <= efp_op & (PREA_a_fld0 | PREA_b_fld0);
+        PREA_prod_zero <= ab_efp & (PREA_a_fld0 | PREA_b_fld0);
         PREA_efp_op <= efp_op;
         PREA_int <= int_op;
         PREA_int_sh <= int_sh;
+        PREA_ab_efp <= ab_efp;
     end : PREA_EFP
 
     //=> STRT (Start) <=//
@@ -101,8 +104,8 @@ module GUCH (
     (* shreg_extract = "no" *) logic STRT_int, STRT_c_int;
     (* shreg_extract = "no" *) logic [5:0] STRT_int_sh;
     always_ff @(posedge clk) begin : STRT_CRRY
-        STRT_a <= {PREA_a[32:25], PREA_a[24] & PREA_efp_op, PREA_a[23:0]};
-        STRT_b_hi <= PREA_efp_op ? 7'h0 : PREA_b[32:26];
+        STRT_a <= {PREA_a[32:25], PREA_a[24] & PREA_ab_efp, PREA_a[23:0]};
+        STRT_b_hi <= PREA_ab_efp ? 7'h0 : PREA_b[32:26];
         STRT_c_hi <= PREA_efp_op ? 7'h0 : PREA_c[32:26];
         STRT_b <= PREA_b;
         STRT_c <= PREA_c;
@@ -133,7 +136,7 @@ module GUCH (
     (* shreg_extract = "no" *) logic STRT_cmp_signed;
     always_ff @(posedge clk) begin : STRT_signs
         c_sign <= (PREA_c[32] & PREA_efp_op) ^ neg_c; //FMS... etc
-        sub_mags <= PREA_efp_op & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
+        sub_mags <= PREA_ab_efp & (PREA_a[32] ^ PREA_b[32] ^ PREA_c[32] ^ neg_p ^ neg_c); //Whether to add or sub magnitudes, only for efp, bc other are two's compliment
         STRT_b_sign <= (~PREA_efp_op & PREA_b[32]) & ~neg_p; //for unsigned himul
         STRT_cmp_signed <= cmp_signed;
     end : STRT_signs
@@ -975,7 +978,10 @@ module GUCH (
     logic [8:0] norm_exp;
     always_ff @(posedge clk) begin : NORM3_REG
         norm_res  <= NORM3_sh1 ? NORM2_raw_res[75:44] : NORM2_raw_res[76:45]; //saves up lil bit of LUTs
-        norm_fell <= NORM2_fell_ff | (~NORM3_sh1 & NORM2_raw_res[50]);
+        //usually for int mode it was fine, however for f2i it doesn't work, it shifts too much.
+        //Oh yeah also integer part of efp32 is mantissa shifted by exp, and it works because:
+        //format is 1.mant * 2^exp, and 2^value is literally shift by that value left.
+        norm_fell <= NORM2_int ? NORM2_sticky : (NORM2_fell_ff | (~NORM3_sh1 & NORM2_raw_res[50]))
         norm_exp  <= norm_diff[8:0];
         norm_cmp_lsb <= NORM2_raw_res[44];
     end : NORM3_REG
@@ -1020,10 +1026,12 @@ module GUCH (
 
     logic [31:0] RND_a, RND_b;
     logic [31:0] RND_res, RND_res_ff;
-    logic RND_sign, RND_int, RND_cmp, RND_cmp_ff;
+    logic RND_sign, RND_int, RND_cmp, RND_cmp_ff, up;
 
-    assign RND_a = NORM3_int ? norm_res[76:45] : {norm_exp[7:0], RND_mant}; //all zero on flush
-    assign RND_b = {7'h0, RND_hidden & ~NORM3_int, 23'h0, RND_inc & ~NORM3_int};
+    //ceil, ill do rest later
+    assign up = secret_code == 2'b01;
+    assign RND_a = NORM3_int ? norm_res[76:45] ^ {32{norm_c_sign}} : {norm_exp[7:0], RND_mant}; //all zero on flush
+    assign RND_b = {7'h0, RND_hidden & ~NORM3_int, 23'h0, NORM3_int ? (norm_c_sign ^ up) : RND_inc & ~NORM3_int};
     //Add that 1 to exp back and inc if round up.
     assign RND_res = RND_a + RND_b;
     always_ff @(posedge clk) begin
@@ -1051,7 +1059,7 @@ module GUCH (
         //signal would use only 1 LUT for the whole compares, whereas
         //doing cmp for every case would use 1 LUT for each one.
         cmp_vec = {cmp_eq, !cmp_eq, cmp_less, cmp_less | cmp_eq};
-        unique case (cmp_code)
+        unique case (secret_code)
             2'b00: RND_cmp = cmp_vec[3]; // ==
             2'b01: RND_cmp = cmp_vec[2]; // !=
             2'b10: RND_cmp = cmp_vec[1]; // <
