@@ -993,12 +993,12 @@ module GUCH (
     logic norm_fell, norm_cmp_lsb, norm_f2i_inc, up;
     logic [1:0] norm_code;
     //Btw f2i and f2i operand comes as C from SM, and a and b are both 0, additionally
-    //INMODE is set so they are 100% 0. 
+    //INMODE is set so they are 100% 0.
     always_comb begin
         unique case (secret_code)
             2'b00: up = 1'b0; //trunc
             2'b01: up = NORM2_c_sign & (NORM2_raw_res[44] | NORM2_sticky); //floor
-            2'b10: up = ~NORM2_c_sign & (NORM2_raw_res[44] | NORM2_sticky);
+            2'b10: up = ~NORM2_c_sign & (NORM2_raw_res[44] | NORM2_sticky); //ceil
             2'b11: up = NORM2_raw_res[44] & (NORM2_sticky | NORM2_raw_res[45]); //round(ties to even)
         endcase
     end
