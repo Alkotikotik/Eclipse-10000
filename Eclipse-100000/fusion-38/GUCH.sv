@@ -6,14 +6,15 @@ module GUCH (
     //cmp/icmp, built-in saturate(), abs() and converter between gefp32 <-> int.
     //Every listed operation can be performed on integers with additional shift by
     //either runtime register or a compile-time constant.
-    //GUCH utilizes 599LUTs, 1414FFs, 3DSPs and meets 300MHz constraint.
+    //GUCH utilizes 599LUTs, 1414FFs, 3DSPs and meets 300MHz constraint with
+    //total of 14 pipeline stages.
 
     //Also I don't need resets here, bc its just pipeline computations
     //And it would give vivado jsut a little more room for placement
     input logic clk,
 
     //So my encoding/decoding scheme is pretty cool, ill explain it later prolly
-    //First of all, all signals are computed in 1 SM because all GUCHes share them
+    //First of all, all signals are computed in 1 SAM because all GUCHes share them
     //But that I mean b becomes one or c becomes zero
     input logic efp_op, int_op, int_mul, cmp_signed, neg_p, neg_c, sat_01, abs_int, abs_efp, sh_shr, sh_var,
     input logic [1:0] secret_code, //rounding and cmp uses same signal to choose mode
@@ -105,7 +106,7 @@ module GUCH (
 
     //The cmp for int happens as usual - sub operands, check the result.
     //Main cmp logic happens in
-    //SM - it sends opmode and alumode for dsps so changes here aren't massive.
+    //SAM - it sends opmode and alumode for dsps so changes here aren't massive.
     logic [6:0] sh_exp;
     (* shreg_extract = "no" *) logic STRT_int, STRT_c_int, STRT_sat;
     (* shreg_extract = "no" *) logic [5:0] STRT_int_sh;
@@ -126,7 +127,7 @@ module GUCH (
         STRT_c_int <= ~PREA_efp_op;
         //shift of int_sh(0) by low 5bits of b, in other words variable shift.
         //gated by sh_var, and its subbed if its shr/sra and added if shl.
-        //Thats literally all there is to it in GUCH, other logic in SM
+        //Thats literally all there is to it in GUCH, other logic in SAM
         STRT_int_sh <= PREA_int_sh + (({1'b0, PREA_b[4:0]} & {6{sh_var}}) ^ {6{sh_shr}}) + {5'b0, sh_shr};
     end : STRT_CRRY
 
@@ -139,9 +140,9 @@ module GUCH (
     //isn't as bad because of warps and scheduling that are literally made for
     //this. Nice side effect that PREMUL can be useful on its own e.g. for
     //Q8.24 that actually is gonna be aura using it. The main work oh HIMUL
-    //happens in SM hence its just one line change in GUCH.
+    //happens in SAM hence its just one line change in GUCH.
     //Also kinda same thing for shifts - shr, shl and asr signals are sent by
-    //SM's cexp_const and int_sh, so its free in GUCH literally no code change.
+    //SAM's cexp_const and int_sh, so its free in GUCH literally no code change.
     logic c_sign, sub_mags, STRT_b_sign;
     (* shreg_extract = "no" *) logic STRT_cmp_signed;
     always_ff @(posedge clk) begin : STRT_signs
@@ -423,7 +424,7 @@ module GUCH (
         DGAF1_int_sh   <= DGAF0_int_sh;
         DGAF1_cmp_signed <= DGAF0_cmp_signed;
         //its mul_operands btw - im a god of unreadable code. int_op is
-        //delayed to DGAF0 in SM btw
+        //delayed to DGAF0 in SAM btw
         DGAF1_mul_op   <= int_mul ? {{3{DGAF0_int_a[31]}}, DGAF0_int_a[31:24], 7'h0} : {DGAF0_int_b[14:0], 3'h0};
     end : DGAF1_CRRY
 
@@ -527,7 +528,7 @@ module GUCH (
         //Its two's comlimetn so top bit gotta be 0
         .A(30'h0),
         //Im doing integer mul through 3DSPs to get lower 48bit of the
-        //product. And the SM's existing int_sh can govern which 32bit window
+        //product. And the SAM's existing int_sh can govern which 32bit window
         //gets written to a register. theoretically its useful for various
         //Fixed point formats like Q16.16 or Q24.8, however atp im just doing
         //stuff because i like doing it. Also not atp im always doing stuff
@@ -588,8 +589,8 @@ module GUCH (
     end : DSFSH1_CRRY
 
     //=> FIAD (Final Add) <=//
-    //I've finally settled on 48GUCHes total for the GPU, per 4SMs(ill give SM
-    //name later). That means 12GUCHes per SM, and 144Read ports for the sustained
+    //I've finally settled on 48GUCHes total for the GPU, per 4SMs(ill give SAM
+    //name later). That means 12GUCHes per SAM, and 144Read ports for the sustained
     //FMA. That is really good because 144Read ports is plausible using
     //BRAM18s which i've got 270 of. It does reduce the theoretical peak
     //performance, but the thing is those 38.4GEOFLOPS were just theoretical,
@@ -694,7 +695,7 @@ module GUCH (
         .MULTSIGNIN(1'b0),
         .PCIN(PCOUT1),
         //ALUMODE and OPMODE set what operations are actually performed by the
-        //DSP, they are sent by SM, because every GUCH performs same one on
+        //DSP, they are sent by SAM, because every GUCH performs same one on
         //every lane.
         .ALUMODE(ALUMODE3),
         .CARRYINSEL(3'b000),
@@ -998,7 +999,7 @@ module GUCH (
     logic [76:45] norm_res; //hell yeahhhhh
     logic norm_cin, norm_cmp_lsb, up;
     logic [1:0] norm_code;
-    //Btw f2i and f2i operand comes as C from SM, and a and b are both 0, additionally
+    //Btw f2i and f2i operand comes as C from SAM, and a and b are both 0, additionally
     //INMODE is set so they are 100% 0.
     always_comb begin
         unique case (secret_code)
@@ -1082,7 +1083,7 @@ module GUCH (
         RND_sign <= (RND_zero | abs_efp) ? 1'b0 : norm_neg ^ norm_c_sign;
     end
 
-    //classic cmp, SM only reads cmp result if its actually cmp op, so there
+    //classic cmp, SAM only reads cmp result if its actually cmp op, so there
     //is no need to carry flag here.
     logic cmp_eq, cmp_less;
     logic [3:0] cmp_vec;
