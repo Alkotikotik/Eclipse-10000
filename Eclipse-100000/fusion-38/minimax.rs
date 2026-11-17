@@ -1,57 +1,71 @@
 //A script to compute values for XMU-T ROM
 
 use std::f64::consts::PI;
-
 fn main(){
     //thats chebyshev extrema, im not even gonna lie i don't know what it is i just copied the
     //formula. It acts as a starting guess
-    let mut extrema : [f64; 4];
-    for i in extrema.iter() {
-        extrema[i] = ((PI*(i as f64) / 4).cos()).powi(i);
+    let mut extrema = [0.0f64; 5];
+    for i in 0..5 {
+        extrema[i] = (PI*(i as f64) / 4.0).cos();
     }
+    let test = coeffs(rcp, 1.5, 1.567, extrema);
+    print!("{:?}\n", test);
 }
+fn rcp(x: f64) -> f64 { 1.0 / x }
 
 //runs one time for every x and returns array of 5 elems
 //Im using degree 3 polynomial aka cubic, bc otherwise i just waste BRAM space which under
 //No circumstances im doing, im just like that. That buys me a 2^-35 maximum error which is a
 //massive overkill but that supposed to simplify other steps hardware-wise i would be able to trunc
 //or crude process some values. Also cubic is cool asf
-fn rcp(x : f64, extrema : [f64; 4]) -> [f64; 4] {
+fn coeffs(f: fn(f64) -> f64, mid: f64, half_w: f64, extrema: [f64; 5]) -> [f64; 5] { //passing fns is cool ngl
     //alright its 2:25am and im watching The Organic Chemistry tutor on Gaussian elimination.
     //So its pretty clear actually nice method gj Gauss
     //So augumented matrix:
     //c0, c1, c2, c3, c4 | f(t_i)
     let mut gauss = [[0.0f64; 6]; 5];
     for i in 0..5 {
+        for k in 0..4 {
+            gauss[i][k] = extrema[i].powi(k as i32);
+        }
         let sign = if i % 2 == 0 { 1.0 } else { -1.0 }; // nooooo ternaryyyy
-        gauss[i] = [extrema, sign, 1/x];
+        gauss[i][4] = sign;
+        let x = mid + extrema[i] * half_w;
+        //aura
+        gauss[i][5] = f(x);
     }
     //Gaussian elimination pivot or something.
     //Basically put the row with largest value in largest value left
     //And then execute gaussian elimination - clear everything below the pivot
     //so we're gonna be left with someting like that
-    //0, 0, 0, c3, E | f(x)
-    //0, 0, 0, 0,  E | f(x) bottom
+    //0, 0, 0, coeff3, E | f(x)
+    //0, 0, 0, 0,      E | f(x) bottom
     //So from the lowest column we can calculate E, then working our way up we can compute c3, c2,
     //c1 and c0 thats just bigass simoltanoes equation
-    for col in (gauss.iter() - 1) {
+    for col in 0..5 {
         let mut largest = col;
-        for (row = col) in col {
-            if (col[row].abs() > largest){
-                largest = col[row];
+        for row in col..5 {
+            if gauss[row][col].abs() > gauss[largest][col].abs() {
+                largest = row;
             }
         }
         gauss.swap(col, largest);
-        for (row = (col + 1)) { //ignoring pivot
+        for row in col + 1..5 { //ignoring pivot
             //row_belowpivot - factor * row_pivot = 0
             //factor = row_belowpivot / row_pivot
-            let factor = gauss[col][row] / gauss[col][largest];
-            for i in 0..4 { //for every row element below the pivot row is just happens to be col here
-                gauss[row][i] -= factor * gauss[col][largest]; //something ain't right
+            let factor = gauss[row][col] / gauss[col][col];
+            for i in col..6 { //for every row element below the pivot row is just happens to be col here
+                gauss[row][i] -= factor * gauss[col][i]; //now its good
             }
         }
     }
-
-
-
+    let mut coeffs = [0.0f64; 5];
+    for i in (0..5).rev() {
+        let mut sum = 0.0;
+        for j in i + 1..5 {
+            sum += gauss[i][j]*coeffs[j];
+        }
+        coeffs[i] = (gauss[i][5] - sum) / gauss[i][i];
+    }
+    coeffs //this still feels weird
 }
