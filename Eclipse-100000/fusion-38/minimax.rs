@@ -9,8 +9,6 @@ fn main(){
     for i in extrema.iter() {
         extrema[i] = ((PI*(i as f64) / 4).cos()).powi(i);
     }
-
-
 }
 
 //runs one time for every x and returns array of 5 elems
@@ -27,6 +25,31 @@ fn rcp(x : f64, extrema : [f64; 4]) -> [f64; 4] {
     for i in 0..5 {
         let sign = if i % 2 == 0 { 1.0 } else { -1.0 }; // nooooo ternaryyyy
         gauss[i] = [extrema, sign, 1/x];
+    }
+    //Gaussian elimination pivot or something.
+    //Basically put the row with largest value in largest value left
+    //And then execute gaussian elimination - clear everything below the pivot
+    //so we're gonna be left with someting like that
+    //0, 0, 0, c3, E | f(x)
+    //0, 0, 0, 0,  E | f(x) bottom
+    //So from the lowest column we can calculate E, then working our way up we can compute c3, c2,
+    //c1 and c0 thats just bigass simoltanoes equation
+    for col in (gauss.iter() - 1) {
+        let mut largest = col;
+        for (row = col) in col {
+            if (col[row].abs() > largest){
+                largest = col[row];
+            }
+        }
+        gauss.swap(col, largest);
+        for (row = (col + 1)) { //ignoring pivot
+            //row_belowpivot - factor * row_pivot = 0
+            //factor = row_belowpivot / row_pivot
+            let factor = gauss[col][row] / gauss[col][largest];
+            for i in 0..4 { //for every row element below the pivot row is just happens to be col here
+                gauss[row][i] -= factor * gauss[col][largest]; //something ain't right
+            }
+        }
     }
 
 
