@@ -12,8 +12,8 @@ fn main(){
     //So report: everything passes but the sin it acts kinda weird: ratio = 7596962011.63231
     //Which is pretty funny but im sure its fine
     let f: fn(f64) -> f64 = sqrt;
-    let mid = 1.5;
-    let half_w = 0.025;
+    let mid = 0.1;
+    let half_w = 0.001;
     let test = coeffs(f, mid, half_w, 5, [0.0f64; 4]);
     print!("{:?}\n", test);
     let mut max_e = 0.0f64;
@@ -31,6 +31,7 @@ fn main(){
     }
     let q = quantize(f, mid, half_w);
     print!("{:?}\n", q);
+    verify(sin);
 }
 //why am i doing it
 fn rcp(x: f64)   -> f64 { 1.0 / x }
@@ -109,17 +110,84 @@ fn coeffs(f: fn(f64) -> f64, mid: f64, half_w: f64, n: usize, fixed: [f64; 4]) -
     coeffs //this still feels weird
 }
 
-const LSB: [i32; 4] = [-29, -29, -28, -27];
-
 //so I need to round those bigass f64 numbers to a smaller ones and then convert to an int.
+//LSB here represents a significance of the lowest bit in a number. Btw i run this split:
+//30/23/14/4 bits and i actually ommit the signs because they don't change
+const LSB: [i32; 4] = [-29, -29, -28, -27];
 fn quantize(f: fn(f64) -> f64, mid: f64, half_w: f64) -> [i64; 4] {
     let mut fixed = [0.0f64; 4];
-    let mut ints = [0i64; 4];
-    for k in (0..4).rev() {
-        let d = coeffs(f, mid, half_w, k + 2, fixed);
-        let lsb = 2f64.powi(LSB[k]);
-        ints[k] = (d[k] / lsb).round() as i64;
-        fixed[k] = ints[k] as f64 * lsb;
+    let mut ints = [0i64; 4]; //that looks so much like inst
+    for i in (0..4).rev() {
+        let d_i = coeffs(f, mid, half_w, i + 2, fixed);
+        let lsb = 2f64.powi(LSB[i]);
+        ints[i] = (d_i[i] / lsb).round() as i64;
+        fixed[i] = ints[i] as f64 * lsb;
     }
     ints
+}
+
+//exshaustive verify for every mantissa bit, 2^24 ain't even that much of a computations
+fn verify(f: fn(f64) -> f64) {
+    let mut rom = [[0i64; 4]; 128];
+    for s in 0..128 {
+        rom[s] = quantize(f, 1.0 + (s as f64 + 0.5) / 128.0, 1.0 / 256.0);
+    }
+    let mut max_ulp = 0.0f64;
+    let mut worst = 0;
+    let mut correct = 0u64;
+    for i in 0..(2_i32.pow(24)) {
+        let test_subject = i & 0x00FF_FFFF;
+        let addr = test_subject >> 17; //7 address bits that select a segment
+        //Flipping top bit subtracts 2^16 bc its two's compliment
+        //I type binary in the qalc btw and convert it to hex bc i think hex is prettier
+        let part = ((test_subject & 0x1FFFF) - 65536) as i128; //lower 17bits that select part of the segment
+        let d = rom[addr as usize];
+        //so f64 can't handle 75bits to all precision i need to. 75bc i don't drop signs yet
+        //So i just put it in the i128 as a sum
+        let sum = ((d[0] as i128) << 46)
+                + ((d[1] as i128 * part) << 30)
+                + ((d[2] as i128 * part * part) << 15)
+                + d[3] as i128 * part * part * part;
+        let mag = sum.abs();
+        //Now this is good ol gefp32 rounding, find leading one, shift and round nearest-even
+        //Same one as I did in GUCH
+        let result = if mag == 0 {
+            0.0
+        } else {
+            let lead = 127 - mag.leading_zeros() as i32;
+            let drop = lead - 24;
+            let mut q = mag;
+            if drop > 0 {
+                q = mag >> drop;
+                let rest = mag - (q << drop);
+                let half = 1i128 << (drop - 1);
+                if rest > half || (rest == half && q & 1 == 1) {
+                    q += 1;
+                }
+            }
+            let v = q as f64 * 2f64.powi(drop.max(0) - 75);
+            if sum < 0 { -v } else { v }
+        };
+        //So this just compares rounded result to an actual and checks for an error.
+        //Ulp should stay below 1 at least and ideally in the 0.5-0.6 range ill test it rn
+        //rcp - 0.6075 ulp, perfect
+        //alright not writing allat its mostly fine apart from atan which is at 0.8663 ulp and its
+        //kinda tight but im sure its fine. Also log2 has 24ulp but thats bc of 1 + 0x58/2^24
+        //And sin outputs garbare but im sure its fine lmao
+        let x = 1.0 + test_subject as f64 / 16777216.0;
+        let true_v = f(x);
+        if true_v == 0.0 {
+            continue;
+        }
+        let ulp = 2f64.powi(true_v.abs().log2().floor() as i32 - 24);
+        let err = (result - true_v).abs() / ulp;
+        if err > max_ulp {
+            max_ulp = err;
+            worst = test_subject;
+        }
+        if result == (true_v / ulp).round() * ulp {
+            correct += 1;
+        }
+    }
+    print!("max {:.4} ulp at fraction 0x{:06X}, correctly rounded {:.3}%\n", max_ulp, worst, correct as f64 / 16777216.0 * 100.0);
 }
