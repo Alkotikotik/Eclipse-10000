@@ -36,7 +36,6 @@ fn main(){
     }
     write();
 }
-//why am i doing it
 fn rcp(x: f64)   -> f64 { 1.0 / x }
 fn sin(x: f64)   -> f64 {(2.0 * PI * x).sin()} //in turns
 fn log2(x: f64)  -> f64 {x.log2()}
