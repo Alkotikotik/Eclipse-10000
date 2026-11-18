@@ -31,14 +31,15 @@ fn main(){
     }
     let q = quantize(f, mid, half_w);
     print!("{:?}\n", q);
-    verify(sin);
+    verify(arctan);
+    write();
 }
 //why am i doing it
 fn rcp(x: f64)   -> f64 { 1.0 / x }
 fn sin(x: f64)   -> f64 {(2.0 * PI * x).sin()} //in turns
 fn log2(x: f64)  -> f64 {x.log2()}
 fn exp2(x: f64)  -> f64 {x.exp2()}
-fn atan(x: f64)  -> f64 {x.atan() / (2.0 * PI)}
+fn arctan(x: f64)  -> f64 {x.atan() / (2.0 * PI) * 8.0}
 fn sqrt(x: f64)  -> f64 {x.sqrt()}
 fn rsqrt(x: f64) -> f64 {1.0 / x.sqrt()}
 //runs one time for every x and returns array of 5 elems
@@ -112,8 +113,10 @@ fn coeffs(f: fn(f64) -> f64, mid: f64, half_w: f64, n: usize, fixed: [f64; 4]) -
 
 //so I need to round those bigass f64 numbers to a smaller ones and then convert to an int.
 //LSB here represents a significance of the lowest bit in a number. Btw i run this split:
-//30/23/14/4 bits and i actually ommit the signs because they don't change
-const LSB: [i32; 4] = [-29, -29, -28, -27];
+//31/23/14/4 bits and i actually ommit the signs because they don't change
+//Also I realized that d1 never exceeds 2^22 and d2 never exceeds 2^13 meaning I can increase 
+//Other values for more precision, n
+const LSB: [i32; 4] = [-30, -30, -29, -27];
 fn quantize(f: fn(f64) -> f64, mid: f64, half_w: f64) -> [i64; 4] {
     let mut fixed = [0.0f64; 4];
     let mut ints = [0i64; 4]; //that looks so much like inst
@@ -125,6 +128,32 @@ fn quantize(f: fn(f64) -> f64, mid: f64, half_w: f64) -> [i64; 4] {
     }
     ints
 }
+
+
+//yup yup doesn't look great but this is what i came up with. Each function has to have its own
+//range and span so here they are. And also i address by i/64 bc sqrt 
+const FUNCS: [fn(f64) -> f64; 16] = [rsqrt, rsqrt, rsqrt, rsqrt, rcp, rcp, log2, log2, exp2, exp2, sin, sin, arctan, arctan, sqrt, sqrt];
+const LO: [f64; 16] = [1.0, 1.5, 2.0, 3.0, 1.0, 1.5, 1.0, 1.5, 0.0, 0.5, 0.0, 0.125, 0.0, 0.5, 1.0, 2.0];
+const SPAN: [f64; 16] = [0.5, 0.5, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.125, 0.125, 0.5, 0.5, 1.0, 2.0];
+const SIGN: [[i64; 2]; 16] = [[-1, 1], [-1, 1], [-1, 1], [-1, 1], [-1, 1], [-1, 1], [1, -1], [1, -1], [1, 1], [1, 1], [1, -1], [1, -1], [1, -1], [1, -1], [1, -1], [1, -1]];
+
+//final write
+fn write() {
+    let mut mem = String::new();
+    for i in 0..1024 {
+        let b = i / 64;
+        let seg = (i % 64) as f64;
+        let d = quantize(FUNCS[b], LO[b] + SPAN[b] * (seg + 0.5) / 64.0, SPAN[b] / 128.0); //get values
+        //Important to assert that signs match(bc i omit them hoping that they are connstant) and
+        //assert that it doesn't overflow
+        assert!(d[0] >= 0 && d[1] * SIGN[b][0] >= 0 && d[2] * SIGN[b][1] >= 0, "sign mismatch at address {}: {:?}", i, d);
+        assert!(d[0] < 1 << 31 && d[1].abs() < 1 << 23 && d[2].abs() < 1 << 14 && d[3] >= -8 && d[3] <= 7, "field overflow at address {}: {:?}", i, d);
+        let word = ((d[0] as u128) << 41) | ((d[1].abs() as u128) << 18) | ((d[2].abs() as u128) << 4) | ((d[3] & 0xF) as u128);
+        mem += &format!("{:018X}\n", word);
+    }
+    std::fs::write("transcendentals.mem", mem).unwrap();
+}
+
 
 //exshaustive verify for every mantissa bit, 2^24 ain't even that much of a computations
 fn verify(f: fn(f64) -> f64) {
@@ -172,8 +201,11 @@ fn verify(f: fn(f64) -> f64) {
         //Ulp should stay below 1 at least and ideally in the 0.5-0.6 range ill test it rn
         //rcp - 0.6075 ulp, perfect
         //alright not writing allat its mostly fine apart from atan which is at 0.8663 ulp and its
-        //kinda tight but im sure its fine. Also log2 has 24ulp but thats bc of 1 + 0x58/2^24
+        //kinda tight but im sure its fine. Also log2 has 24ulp but thats bc of values near 1 and im
+        //fien with that
         //And sin outputs garbare but im sure its fine lmao
+        //jk jk it was just in a different range now its somewhat fine, at least abs error is
+        //Also i can multiply atan by 8 and then reduce exp by 3 in gefp32 to achieve more precision
         let x = 1.0 + test_subject as f64 / 16777216.0;
         let true_v = f(x);
         if true_v == 0.0 {
