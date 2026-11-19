@@ -15,6 +15,7 @@ module XMU_T(
     //So I wrote a minimax script that generates .mem data that i will put
     //into my BRAM ROM and XMU_T is gonna read its transcendentals from it.
 
+
     //=> LKUP (Lookup) <=//
     //top 7bits are address bits
     logic [16:0] part;
