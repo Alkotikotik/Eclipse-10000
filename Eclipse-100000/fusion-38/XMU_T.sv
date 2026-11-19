@@ -3,7 +3,12 @@ module XMU_T(
     //I was about to start with SAM, but realized that I want XMU first
     input logic clk,
 
-    input logic [23:0] a_mant, //yup just a
+    input logic [31:0] a, //yup just a
+    input logic [3:0]  opcode,
+
+    //ROM lives in SAM bc its shared by all XMU-Ts within SAM
+    output logic [9:0]  rom_addr,
+    input  logic [71:0] rom_data,
 
     output logic [23:0] result
 );
@@ -11,18 +16,9 @@ module XMU_T(
     //into my BRAM ROM and XMU_T is gonna read its transcendentals from it.
 
     //=> LKUP (Lookup) <=//
-    //Initialize read fresh from the SAM.
-    //2BRAM36s tiles per SAM, which is 2 read ports with no collision. Not
-    //4BRAM18s because they can't provide 72bits of depth
-    (* mem_style = "block" *) logic [1023:0] ROM [0:71];
-    initial begin
-        $readmemh("transcendentals.mem", ROM);
-    end
     //top 7bits are address bits
-    logic [71:0] minimax;
     logic [16:0] part;
     always_ff @(posedge clk) begin
-        minimax <= ROM[a[24:17]];
         part <= {~a[16], a[15:0]};
     end
 
