@@ -10,17 +10,20 @@ module XMU_T(
     output logic [9:0]  rom_addr,
     input  logic [71:0] rom_data,
 
-    output logic [23:0] result
+    output logic [31:0] result
 );
     //So I wrote a minimax script that generates .mem data that i will put
     //into my BRAM ROM and XMU_T is gonna read its transcendentals from it.
 
+    //=> DECO (Decode) <=//
+    //Just quick decode of the flags for later stages, might end up
+    //starting right here i don't know, who knows.
 
-    //=> LKUP (Lookup) <=//
-    //top 7bits are address bits
-    logic [16:0] part;
-    always_ff @(posedge clk) begin
-        part <= {~a[16], a[15:0]};
-    end
+    logic [7:0] sexp;
+    logic [23:0] mant;
+    always_ff @(posedge clk) begin : DECO_DECO
+        sexp <= {~a[30], a[29:24]};
+
+    end : DECO_DECO
 
 endmodule
