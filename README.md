@@ -20,7 +20,7 @@ A complete computer system built from the ground up: from raw logic gates CPU an
 Many of the CPU and Compiler files do not contain much of a comments, its because only when finishing compiler I realized how good comments are. Also, I just love that project.
 
 > [!IMPORTANT]
-> I didn't use astro or regular assembly in this project, my .flar and .eci files just show up as astro and assembly files in the repository, I chose astro just for fun.
+> I didn't use astro or regular assembly in this project, my .flar and .eci files just show up as astro and assembly files in the repository, I chose astro just because why not.
 
 ## Status & Roadmap
 

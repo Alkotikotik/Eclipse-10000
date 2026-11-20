@@ -59,7 +59,7 @@ module XMU_T(
     logic [24:0] mant;
     logic [3:0] DECO_opcode;
     logic [2:0] prefix;
-    logic zero, arctan1, exp_V, neg, cos, massive, clamp_hi, clamp_lo;
+    logic zero, arctan1, exp_V, neg, cos, massive, clamp_hi, clamp_lo, negt;
     always_ff @(posedge clk) begin : DECO_DECO
         DECO_opcode <= opcode;
         DECO_sexp <= sexp;
@@ -70,6 +70,7 @@ module XMU_T(
         //various flags for later
         zero <= ~|a[30:24];
         neg <= a[31];
+        negt <= a[31] & (opcode == 4'b0011 | opcode == 4'b0100 | opcode == 4'b1100 | opcode == 4'b1110 | (slot_op & slot_signed));
         arctan1 <= a[30:0] == 31'h40000000;
 
         //still remember something from logisim cpu or ig i had it at the first sv cpu
@@ -84,8 +85,8 @@ module XMU_T(
         cos <= opcode == 4'b1100;
     end : DECO_DECO
 
-    logic  [7:0] DECO_flags;
-    assign DECO_flags = {zero, arctan1, exp_V, neg, cos, massive, clamp_hi, clamp_lo};
+    logic  [8:0] DECO_flags;
+    assign DECO_flags = {negt, zero, arctan1, exp_V, neg, cos, massive, clamp_hi, clamp_lo};
 
     //=> ALIG0(Align 0) <=//
     //good ol alig, was in the first version of GUCH.
@@ -103,7 +104,7 @@ module XMU_T(
     logic [3:0] ALIG0_opcode;
     logic [2:0] ALIG0_prefix;
     logic [1:0] ALIG0_sh_hi;
-    logic [7:0] ALIG0_flags;
+    logic [8:0] ALIG0_flags;
     always_ff @(posedge clk) begin : ALIG0_CRRY
         //CRRY everything
         ALIG0_sh_hi <= sh_amt[5:4];
@@ -116,6 +117,9 @@ module XMU_T(
     //=> ALIG1(Align 1) <=//
     //88bits where low ones are useless(sticky)
     //top ones are useless too(too much int bits), and only 34 are useful.
+    //Btw it passed synth first attempt, not saying anything but yeah im
+    //saying that i know something in computer engineering. And maybe a little
+    //bit in jokes
     logic [88:0] mant_final;
     assign mant_final = {alig1_mant, 48'h0} >> {ALIG0_sh_hi, 4'b0000};
     logic [33:0] Q6_27;
@@ -128,12 +132,30 @@ module XMU_T(
     logic [6:0] ALIG1_sexp;
     logic [3:0] ALIG1_opcode;
     logic [2:0] ALIG1_prefix;
-    logic [7:0] ALIG1_flags;
+    logic [8:0] ALIG1_flags;
     always_ff @(posedge clk) begin : ALIG1_CRRY
         ALIG1_sexp <= ALIG0_sexp;
         ALIG1_opcode <= ALIG0_opcode;
         ALIG1_prefix <= ALIG0_prefix;
         ALIG1_flags <= ALIG0_flags;
     end : ALIG1_CRRY
+
+    //=> STCY(Sticky) <=//
+    //Turns Q6_27 into two's compliment
+    logic [33:0] STCY_win;
+    always_ff @(posedge clk) begin : STCY_STCY
+        STCY_win <= (Q6_27 ^ {34{ALIG1_flags[8]}}) + {33'b0, ALIG1_flags[8] & ~sticky};
+    end : STCY_STCY
+
+    logic [6:0] STCY_sexp;
+    logic [3:0] STCY_opcode;
+    logic [2:0] STCY_prefix;
+    logic [8:0] STCY_flags;
+    always_ff @(posedge clk) begin : STCY_CRRY
+        STCY_sexp <= ALIG1_sexp;
+        STCY_opcode <= ALIG1_opcode;
+        STCY_prefix <= ALIG1_prefix;
+        STCY_flags <= ALIG1_flags;
+    end : STCY_CRRY
 
 endmodule
