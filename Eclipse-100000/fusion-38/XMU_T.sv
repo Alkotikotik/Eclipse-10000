@@ -271,7 +271,6 @@ module XMU_T(
     //8 128segments entries. In a true dual port mode, each BRAM18 gives
     //2 36bit read port, meaning two XMU-Ts can read simoltaneousely per cycle
     //Also i can compute seg_pos^2 during 2 lkup stages
-
     logic [47:0] seg_pos_sqrd;
     /* verilator lint_off PINCONNECTEMPTY */
     //should be good i think.
