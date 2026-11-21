@@ -207,12 +207,12 @@ module XMU_T(
         ALIG1_flags <= ALIG0_flags;
     end : ALIG1_CRRY
 
-    //=> STCY(Sticky) <=//
+    //=> STCY (Sticky) <=//
     //Turns Q6_27 into two's compliment
     //Also it adds 1/4 to it if its cos bc well cos = sin + 1/4 turns simple as that
-    logic [33:0] STCY_win;
+    logic [33:0] STCY_canddr; //canditate address
     always_ff @(posedge clk) begin : STCY_STCY
-        STCY_win <= (Q6_27 ^ {34{ALIG1_flags[10]}}) + {6'b0, ALIG1_flags[9], 26'b0, ALIG1_flags[10] & ~sticky};
+        STCY_canddr <= (Q6_27 ^ {34{ALIG1_flags[10]}}) + {6'b0, ALIG1_flags[9], 26'b0, ALIG1_flags[10] & ~sticky};
     end : STCY_STCY
 
     logic [7:0] STCY_oexp;
@@ -225,5 +225,37 @@ module XMU_T(
         STCY_prefix <= ALIG1_prefix;
         STCY_flags <= ALIG1_flags[8:0];
     end : STCY_CRRY
+
+    //=> ADDR (Address) <=//
+    //I like how address can be a noun and a verb
+    //So sin is only in the domain of 0 -> 1/4 because its enough.
+    //Imagine unit circle, its just well a circle so 1/4 is enough to repsent
+    //a whole circle, you just need to mirror and or flip quarter
+    logic  mirror, slot_flip;
+    assign mirror    = STCY_flags[6] & STCY_canddr[27];
+    assign slot_flip = STCY_prefix == 3'b111 & slot_signed;
+
+    //either max or zero or address that we calculated
+    logic  [24:0] seg_pos;
+    assign seg_pos = STCY_flags[8] ? 25'h1FFFFFF : STCY_flags[7] ? 25'h0 : STCY_canddr[26:2] ^ {mirror ^ slot_flip, {24{mirror}}};
+
+    logic [24:0] ADDR_seg_pos;
+    logic [26:0] ADDR_fract;
+    always_ff @(posedge clk) begin : ADDR_ADDR
+        //read addr, register bc its a bram read
+        rom_addr <= {STCY_prefix, seg_pos[24:18]};
+        ADDR_seg_pos <= {seg_pos[24:18], ~seg_pos[17], seg_pos[16:0]};
+        //and yup fract is just free like that
+        ADDR_fract <= {seg_pos[24:0], STCY_canddr[1:0]};
+    end : ADDR_ADDR
+
+    logic [7:0] ADDR_oexp;
+    logic [1:0] ADDR_spec;
+    logic [4:0] ADDR_flags;
+    always_ff @(posedge clk) begin : ADDR_CRRY
+        ADDR_oexp <= STCY_flags[5] ? {STCY_canddr[33], STCY_canddr[33:27]} : STCY_oexp;
+        ADDR_spec <= STCY_spec;
+        ADDR_flags <= {STCY_flags[4:1], STCY_flags[6] ? STCY_canddr[28] : STCY_flags[0]};
+    end : ADDR_CRRY
 
 endmodule
