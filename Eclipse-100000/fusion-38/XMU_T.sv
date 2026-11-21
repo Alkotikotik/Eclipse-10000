@@ -252,10 +252,389 @@ module XMU_T(
     logic [7:0] ADDR_oexp;
     logic [1:0] ADDR_spec;
     logic [4:0] ADDR_flags;
+    logic [3:0] ADDR_dsign;
     always_ff @(posedge clk) begin : ADDR_CRRY
-        ADDR_oexp <= STCY_flags[5] ? {STCY_canddr[33], STCY_canddr[33:27]} : STCY_oexp;
-        ADDR_spec <= STCY_spec;
+        ADDR_oexp  <= STCY_flags[5] ? {STCY_canddr[33], STCY_canddr[33:27]} : STCY_oexp;
+        ADDR_spec  <= STCY_spec;
         ADDR_flags <= {STCY_flags[4:1], STCY_flags[6] ? STCY_canddr[28] : STCY_flags[0]};
+        //Since signs are omitted on the actual ROM i have to figure them out
+        //from here. They are just signs of derivatives of function which ofc
+        //is constant. Its last two bits (stolen from d0 and d1) for slot btw.
+        ADDR_dsign <= {STCY_prefix[2:1] == 2'b00,
+                      STCY_prefix == 3'b010 | (STCY_prefix[2] & ~&STCY_prefix[1:0]),
+                      STCY_prefix == 3'b000, STCY_prefix == 3'b111};
     end : ADDR_CRRY
+
+    //=> LKUP0 (Lookup 0) <=//
+    //Yeah two stages just for BRAM read, what did you expect from 300MHz tho?
+    //Again configuration is: 4 cascaded BRAM18s, for 72bit depth and
+    //8 128segments entries. In a true dual port mode, each BRAM18 gives
+    //2 36bit read port, meaning two XMU-Ts can read simoltaneousely per cycle
+    //Also i can compute seg_pos^2 during 2 lkup stages
+
+    logic [47:0] seg_pos_sqrd;
+    /* verilator lint_off PINCONNECTEMPTY */
+    //should be good i think.
+    DSP48E1 #(
+        .A_INPUT("DIRECT"),
+        .B_INPUT("DIRECT"),
+        .USE_DPORT("FALSE"), //don't think i need this
+        .USE_MULT("MULTIPLY"),
+        .USE_SIMD("ONE48"),
+        .AUTORESET_PATDET("NO_RESET"),
+        .MASK(48'h3fffffffffff),
+        .PATTERN(48'h000000000000),
+        .SEL_MASK("MASK"),
+        .SEL_PATTERN("PATTERN"),
+        .USE_PATTERN_DETECT("NO_PATDET"),
+        .ACASCREG(1),
+        .ADREG(0),
+        .ALUMODEREG(0),
+        .AREG(1),
+        .BCASCREG(1),
+        .BREG(1),
+        .CARRYINREG(0),
+        .CARRYINSELREG(0),
+        .CREG(0),
+        .DREG(0),
+        .INMODEREG(0),
+        .MREG(1),
+        .OPMODEREG(0),
+        .PREG(1)
+    )
+    HereWe_areAgain (
+        .ACOUT(),
+        .BCOUT(),
+        .CARRYCASCOUT(),
+        .MULTSIGNOUT(),
+        .PCOUT(),
+        .OVERFLOW(),
+        .PATTERNBDETECT(),
+        .PATTERNDETECT(),
+        .UNDERFLOW(),
+        .CARRYOUT(),
+        .P(seg_pos_sqrd),
+        .ACIN(30'h0),
+        .BCIN(18'h0),
+        .CARRYCASCIN(1'b0),
+        .MULTSIGNIN(1'b0),
+        .PCIN(48'h0),
+        .ALUMODE(4'b0000),
+        .CARRYINSEL(3'b000),
+        .CLK(clk),
+        .INMODE(5'b00000),
+        .OPMODE(7'b0000101),
+        .A({{12{ADDR_seg_pos[17]}}, ADDR_seg_pos[17:0]}),
+        .B(ADDR_seg_pos[17:0]),
+        .C(48'h0),
+        .CARRYIN(1'b0),
+        .D(25'h0),
+        .CEA1(1'b1),
+        .CEA2(1'b1),
+        .CEAD(1'b1),
+        .CEALUMODE(1'b1),
+        .CEB1(1'b1),
+        .CEB2(1'b1),
+        .CEC(1'b1),
+        .CECARRYIN(1'b1),
+        .CECTRL(1'b1),
+        .CED(1'b1),
+        .CEINMODE(1'b1),
+        .CEM(1'b1),
+        .CEP(1'b1),
+        .RSTA(1'b0),
+        .RSTALLCARRYIN(1'b0),
+        .RSTALUMODE(1'b0),
+        .RSTB(1'b0),
+        .RSTC(1'b0),
+        .RSTCTRL(1'b0),
+        .RSTD(1'b0),
+        .RSTINMODE(1'b0),
+        .RSTM(1'b0),
+        .RSTP(1'b0)
+    );
+    /* verilator lint_on PINCONNECTEMPTY */
+
+    logic [26:0] LKUP0_fract;
+    logic [7:0]  LKUP0_oexp;
+    logic [4:0]  LKUP0_flags;
+    logic [1:0]  LKUP0_spec;
+    logic [17:0] LKUP0_seg_pos;
+    logic [3:0]  LKUP0_dsign;
+    always_ff @(posedge clk) begin : LKUP0_CRRY
+        LKUP0_fract   <= ADDR_fract;
+        LKUP0_oexp    <= ADDR_oexp;
+        LKUP0_spec    <= ADDR_spec;
+        LKUP0_flags   <= ADDR_flags;
+        LKUP0_seg_pos <= ADDR_seg_pos[17:0];
+        LKUP0_dsign   <= ADDR_dsign;
+    end : LKUP0_CRRY
+
+    //=> LKUP1 (Lookup 1) <=//
+    //lookup was initialized already, and dsp is doing its thing, so just crry
+    logic [26:0] LKUP1_fract;
+    logic [7:0]  LKUP1_oexp;
+    logic [4:0]  LKUP1_flags;
+    logic [1:0]  LKUP1_spec;
+    logic [17:0] LKUP1_seg_pos;
+    logic [3:0]  LKUP1_dsign;
+    always_ff @(posedge clk) begin : LKUP1_CRRY
+        LKUP1_fract   <= LKUP0_fract;
+        LKUP1_oexp    <= LKUP0_oexp;
+        LKUP1_spec    <= LKUP0_spec;
+        LKUP1_flags   <= LKUP0_flags;
+        LKUP1_seg_pos <= LKUP0_seg_pos;
+        LKUP1_dsign   <= LKUP0_dsign;
+    end : LKUP1_CRRY
+
+    //=> COMP0 (Compute 0) <=//
+    //Now we are talking, compute the cubic in Herner or whatever form
+    logic [26:0] COMP0_fract;
+    logic [7:0]  COMP0_oexp;
+    logic [4:0]  COMP0_flags;
+    logic [1:0]  COMP0_spec;
+    logic [30:0] COMP0_d0, COMP1_d0;
+    logic [13:0] COMP0_d2;
+    logic [2:0]  COMP0_dsign, COMP1_dsign, COMP2_dsign;
+    logic [17:0] COMP1_seg_sqrd;
+    logic [47:0] cubic_casc, COMP4_cubic;
+
+    /* verilator lint_off PINCONNECTEMPTY */
+    //should be good i think.
+    DSP48E1 #(
+        .A_INPUT("DIRECT"),
+        .B_INPUT("DIRECT"),
+        .USE_DPORT("FALSE"), //don't think i need this
+        .USE_MULT("MULTIPLY"),
+        .USE_SIMD("ONE48"),
+        .AUTORESET_PATDET("NO_RESET"),
+        .MASK(48'h3fffffffffff),
+        .PATTERN(48'h000000000000),
+        .SEL_MASK("MASK"),
+        .SEL_PATTERN("PATTERN"),
+        .USE_PATTERN_DETECT("NO_PATDET"),
+        .ACASCREG(2),
+        .ADREG(0),
+        .ALUMODEREG(1),
+        .AREG(2),
+        .BCASCREG(2),
+        .BREG(2),
+        .CARRYINREG(0),
+        .CARRYINSELREG(0),
+        .CREG(1),
+        .DREG(0),
+        .INMODEREG(0),
+        .MREG(1),
+        .OPMODEREG(0),
+        .PREG(1)
+    )
+    Ernest_Hemingway (
+        .ACOUT(),
+        .BCOUT(),
+        .CARRYCASCOUT(),
+        .MULTSIGNOUT(),
+        .PCOUT(cubic_casc),
+        .OVERFLOW(),
+        .PATTERNBDETECT(),
+        .PATTERNDETECT(),
+        .UNDERFLOW(),
+        .CARRYOUT(),
+        .P(),
+        .ACIN(30'h0),
+        .BCIN(18'h0),
+        .CARRYCASCIN(1'b0),
+        .MULTSIGNIN(1'b0),
+        .PCIN(48'h0),
+        .ALUMODE({2'b00, {2{COMP1_dsign[2]}}}),
+        .CARRYINSEL(3'b000),
+        .CLK(clk),
+        .INMODE(5'b00000),
+        .OPMODE(7'b0110101),
+        //d0 + d1 * seg_pos
+        .A({7'b0, rom_data[40:18]}),
+        .B(LKUP1_seg_pos),
+        .C({~COMP1_d0[30], COMP1_d0[29:0], 17'b0}),
+        .CARRYIN(1'b0),
+        .D(25'h0),
+        .CEA1(1'b1),
+        .CEA2(1'b1),
+        .CEAD(1'b1),
+        .CEALUMODE(1'b1),
+        .CEB1(1'b1),
+        .CEB2(1'b1),
+        .CEC(1'b1),
+        .CECARRYIN(1'b1),
+        .CECTRL(1'b1),
+        .CED(1'b1),
+        .CEINMODE(1'b1),
+        .CEM(1'b1),
+        .CEP(1'b1),
+        .RSTA(1'b0),
+        .RSTALLCARRYIN(1'b0),
+        .RSTALUMODE(1'b0),
+        .RSTB(1'b0),
+        .RSTC(1'b0),
+        .RSTCTRL(1'b0),
+        .RSTD(1'b0),
+        .RSTINMODE(1'b0),
+        .RSTM(1'b0),
+        .RSTP(1'b0)
+    );
+    //the d3 is tiny, just 4bits so plain fabric multiply is fine, don't wanna
+    //waste dsp on it, its just gonna take routing and stuff just don't feel
+    //great doing it.
+    logic [9:0] d3xsegpos;
+    (* use_dsp = "no" *) logic signed [13:0] d3_prod;
+    assign d3_prod = $signed(rom_data[3:0]) * $signed(LKUP1_seg_pos[17:8]);
+    always_ff @(posedge clk) begin
+        d3xsegpos <= LKUP1_dsign[1] ? 10'((d3_prod + 14'sd8) >>> 4) : 10'((d3_prod + 14'sd32) >>> 6);
+    end
+
+    always_ff @(posedge clk) begin : COMP0_CRRY
+        COMP0_fract <= LKUP1_fract;
+        COMP0_oexp  <= LKUP1_oexp;
+        COMP0_spec  <= LKUP1_spec;
+        COMP0_flags <= LKUP1_flags;
+        COMP0_d0    <= rom_data[71:41];
+        COMP0_d2    <= rom_data[17:4];
+        COMP0_dsign  <= {LKUP1_dsign[0] ? rom_data[18] : LKUP1_dsign[3], LKUP1_dsign[0] ? rom_data[41] : LKUP1_dsign[2], LKUP1_dsign[1]};
+    end : COMP0_CRRY
+
+    //=> COMP1 (Compute 1) <=//
+    //Second dsp start
+    /* verilator lint_off PINCONNECTEMPTY */
+    //should be good i think.
+    DSP48E1 #(
+        .A_INPUT("DIRECT"),
+        .B_INPUT("DIRECT"),
+        .USE_DPORT("TRUE"), //don't think i need this
+        .USE_MULT("MULTIPLY"),
+        .USE_SIMD("ONE48"),
+        .AUTORESET_PATDET("NO_RESET"),
+        .MASK(48'h3fffffffffff),
+        .PATTERN(48'h000000000000),
+        .SEL_MASK("MASK"),
+        .SEL_PATTERN("PATTERN"),
+        .USE_PATTERN_DETECT("NO_PATDET"),
+        .ACASCREG(1),
+        .ADREG(1),
+        .ALUMODEREG(1),
+        .AREG(1),
+        .BCASCREG(1),
+        .BREG(1),
+        .CARRYINREG(0),
+        .CARRYINSELREG(0),
+        .CREG(0),
+        .DREG(1),
+        .INMODEREG(1),
+        .MREG(1),
+        .OPMODEREG(0),
+        .PREG(1)
+    )
+    Fjodor_Dostoevsky (
+        .ACOUT(),
+        .BCOUT(),
+        .CARRYCASCOUT(),
+        .MULTSIGNOUT(),
+        .PCOUT(),
+        .OVERFLOW(),
+        .PATTERNBDETECT(),
+        .PATTERNDETECT(),
+        .UNDERFLOW(),
+        .CARRYOUT(),
+        .P(COMP4_cubic),
+        .ACIN(30'h0),
+        .BCIN(18'h0),
+        .CARRYCASCIN(1'b0),
+        .MULTSIGNIN(1'b0),
+        .PCIN(cubic_casc),
+        .ALUMODE({2'b00, {2{COMP2_dsign[1]}}}),
+        .CARRYINSEL(3'b000),
+        .CLK(clk),
+        .INMODE({1'b0, COMP0_dsign[1], 3'b100}),
+        .OPMODE(7'b0010101),
+        .A({{20{d3xsegpos[9]}}, d3xsegpos}),
+        .B(COMP1_seg_sqrd),
+        .C(48'h0),
+        .CARRYIN(1'b0),
+        .D({10'b0, COMP0_d2, 1'b0}),
+        .CEA1(1'b1),
+        .CEA2(1'b1),
+        .CEAD(1'b1),
+        .CEALUMODE(1'b1),
+        .CEB1(1'b1),
+        .CEB2(1'b1),
+        .CEC(1'b1),
+        .CECARRYIN(1'b1),
+        .CECTRL(1'b1),
+        .CED(1'b1),
+        .CEINMODE(1'b1),
+        .CEM(1'b1),
+        .CEP(1'b1),
+        .RSTA(1'b0),
+        .RSTALLCARRYIN(1'b0),
+        .RSTALUMODE(1'b0),
+        .RSTB(1'b0),
+        .RSTC(1'b0),
+        .RSTCTRL(1'b0),
+        .RSTD(1'b0),
+        .RSTINMODE(1'b0),
+        .RSTM(1'b0),
+        .RSTP(1'b0)
+    );
+
+    logic [26:0] COMP1_fract;
+    logic [7:0]  COMP1_oexp;
+    logic [4:0]  COMP1_flags;
+    logic [1:0]  COMP1_spec;
+    always_ff @(posedge clk) begin : COMP1_CRRY
+        COMP1_fract <= COMP0_fract;
+        COMP1_oexp  <= COMP0_oexp;
+        COMP1_spec  <= COMP0_spec;
+        COMP1_flags <= COMP0_flags;
+        COMP1_d0    <= COMP0_d0;
+        COMP1_dsign  <= COMP0_dsign;
+        COMP1_seg_sqrd <= seg_pos_sqrd[34] ? 18'h1FFFF : {1'b0, seg_pos_sqrd[33:17]}; //saturate
+    end : COMP1_CRRY
+
+    //=> COMP2 (Compute 2) <=//
+    //waiting on dsps, just crry
+    logic [26:0] COMP2_fract;
+    logic [7:0]  COMP2_oexp;
+    logic [4:0]  COMP2_flags;
+    logic [1:0]  COMP2_spec;
+    always_ff @(posedge clk) begin : COMP2_CRRY
+        COMP2_fract <= COMP1_fract;
+        COMP2_oexp  <= COMP1_oexp;
+        COMP2_spec  <= COMP1_spec;
+        COMP2_flags <= COMP1_flags;
+        COMP2_dsign  <= COMP1_dsign;
+    end : COMP2_CRRY
+
+    //=> COMP3 (Compute 3) <=//
+    logic [26:0] COMP3_fract;
+    logic [7:0]  COMP3_oexp;
+    logic [4:0]  COMP3_flags;
+    logic [1:0]  COMP3_spec;
+    always_ff @(posedge clk) begin : COMP3_CRRY
+        COMP3_fract <= COMP2_fract;
+        COMP3_oexp  <= COMP2_oexp;
+        COMP3_spec  <= COMP2_spec;
+        COMP3_flags <= COMP2_flags;
+    end : COMP3_CRRY
+
+    //=> COMP4 (Compute 4) <=//
+    //finish the compute up. And holy spam was allat, but well this is what
+    //you do at 300MHz.
+    logic [26:0] COMP4_fract;
+    logic [7:0]  COMP4_oexp;
+    logic [4:0]  COMP4_flags;
+    logic [1:0]  COMP4_spec;
+    always_ff @(posedge clk) begin : COMP4_CRRY
+        COMP4_fract <= COMP3_fract;
+        COMP4_oexp  <= COMP3_oexp;
+        COMP4_spec  <= COMP3_spec;
+        COMP4_flags <= COMP3_flags;
+    end : COMP4_CRRY
 
 endmodule
