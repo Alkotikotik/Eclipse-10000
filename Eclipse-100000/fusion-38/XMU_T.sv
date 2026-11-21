@@ -8,6 +8,7 @@ module XMU_T(
     input logic [7:0]  sh_base,
     input logic [6:0]  slot_thr,
     input logic        slot_signed,
+    input logic [7:0]  slot_oexp,
 
     //ROM lives in SAM bc its shared by all XMU-Ts within SAM
     output logic [9:0]  rom_addr,
@@ -36,9 +37,10 @@ module XMU_T(
     logic  [6:0] sexp; //signed exp
     assign sexp = {~a[30], a[29:24]};
 
-    logic  slot_op, arctan_op, direct_op;
+    logic  slot_op, arctan_op, direct_op, rsq_sqrt_op;
     assign slot_op   = opcode == 4'b0111;
     assign arctan_op = opcode == 4'b0101;
+    assign rsq_sqrt_op = opcode == 4'b0000 | opcode == 4'b0110;
     //direct op doesn't need a shifter, refer to optbl
     assign direct_op = opcode == 4'b0000 | opcode == 4'b0001 | opcode == 4'b0010 | opcode == 4'b0110 | (arctan_op & a[30]);
 
@@ -63,8 +65,8 @@ module XMU_T(
     always_ff @(posedge clk) begin : DECO_DECO
         DECO_opcode <= opcode;
         DECO_sexp <= sexp;
-        mant <= {1'b1, a[23:0]};
-        sh_amt <= direct_op ? 6'd23 : (sh_diff[8] | |sh_diff[7:6]) ? 6'd63 : sh_diff[5:0]; //shift by exp(saturate)
+        mant <= {rsq_sqrt_op ? a[24] : 1'b1, a[23:0]};
+        sh_amt <= direct_op ? (rsq_sqrt_op ? 6'd24 : 6'd23) : (sh_diff[8] | |sh_diff[7:6]) ? 6'd63 : sh_diff[5:0]; //shift by exp(saturate)
         massive <= sh_diff[8]; //same thing as in GUCH - shifter can't shift left
 
         //various flags for later
@@ -85,9 +87,6 @@ module XMU_T(
         cos <= opcode == 4'b1100;
     end : DECO_DECO
 
-    logic  [8:0] DECO_flags;
-    assign DECO_flags = {negt, zero, arctan1, exp_V, neg, cos, massive, clamp_hi, clamp_lo};
-
     //=> ALIG0(Align 0) <=//
     //good ol alig, was in the first version of GUCH.
     //Again this is most LUT efficient way of doing it that I figured out.
@@ -100,18 +99,86 @@ module XMU_T(
         alig1_mant <= {alig0_mant, 12'h0} >> {sh_amt[3:2], 2'b00};
     end
 
-    logic [6:0] ALIG0_sexp;
-    logic [3:0] ALIG0_opcode;
+    //So computing output exp for varios cases
+    logic  [7:0] oexp; //output exp
+    logic  [1:0] spec;
+    logic  sgn, oexp_sub;
+    always_comb begin : ALIG0_OEXP
+        unique case (DECO_opcode)
+            //rsq: out exp is -(exp>>>1), back end subtracts it
+            //Bc we calculate rsq for only mant
+            4'b0000: begin
+                oexp = {{2{DECO_sexp[6]}}, DECO_sexp[6:1]};
+                spec = (zero | neg) ? 2'b10 : 2'b00;
+                sgn  = 1'b0;
+                oexp_sub = 1'b1;
+            end
+            //rcp: out exp is -exp, back end subtracts it
+            4'b0001: begin
+                oexp = {DECO_sexp[6], DECO_sexp};
+                spec = zero ? 2'b10 : 2'b00;
+                sgn  = neg;
+                oexp_sub = 1'b1;
+            end
+            //log2: exp is the integer part, added in fixed point
+            4'b0010: begin
+                oexp = {DECO_sexp[6], DECO_sexp};
+                spec = (zero | neg) ? 2'b10 : 2'b00;
+                sgn  = zero  | neg;
+                oexp_sub = 1'b0;
+            end
+            //exp2: n comes from the window later overflow = max, underflow = 0
+            4'b0011: begin
+                oexp = 8'd0;
+                spec = exp_V ? {~neg, neg} : 2'b00;
+                sgn  = 1'b0;
+                oexp_sub = 1'b0;
+            end
+            //arctan: table is x8 so -3 the exp if its 1 tho, result is 1/8,
+            //otherwise its super inaccurate bc no cubic can represent such big
+            //slope change
+            4'b0101: begin
+                oexp = 8'hFD;
+                spec = arctan1 ? 2'b11 : 2'b00;
+                sgn  = neg;
+                oexp_sub = 1'b0;
+            end
+            //sqrt: out exp is +(exp>>>1)
+            4'b0110: begin
+                oexp = {{2{DECO_sexp[6]}}, DECO_sexp[6:1]};
+                spec = (zero | neg) ? 2'b01 : 2'b00;
+                sgn  = 1'b0;
+                oexp_sub = 1'b0;
+            end
+            //slot: offset from config
+            4'b0111: begin
+                oexp = slot_oexp;
+                spec = 2'b00;
+                sgn  = 1'b0;
+                oexp_sub = 1'b0;
+            end
+            //sin, cos and fract: table output is already good
+            default: begin
+                oexp = 8'd0;
+                oexp_sub = 1'b0;
+                spec = 2'b00;
+                sgn  = 1'b0;
+            end
+        endcase
+    end : ALIG0_OEXP
+
+    logic [7:0] ALIG0_oexp;
     logic [2:0] ALIG0_prefix;
-    logic [1:0] ALIG0_sh_hi;
-    logic [8:0] ALIG0_flags;
+    logic [1:0] ALIG0_sh_hi, ALIG0_spec;
+    logic [10:0] ALIG0_flags;
     always_ff @(posedge clk) begin : ALIG0_CRRY
         //CRRY everything
         ALIG0_sh_hi <= sh_amt[5:4];
-        ALIG0_sexp <= DECO_sexp;
-        ALIG0_opcode <= DECO_opcode;
+        ALIG0_oexp <= oexp;
+        ALIG0_spec <= spec;
         ALIG0_prefix <= prefix;
-        ALIG0_flags <= DECO_flags;
+        ALIG0_flags <= {negt & ~massive, cos, clamp_hi, clamp_lo, DECO_opcode[2:0] == 3'b100, DECO_opcode == 4'b0011,
+                        DECO_opcode == 4'b0101 & prefix == 3'b001, DECO_opcode == 4'b0010, DECO_opcode == 4'b1110, oexp_sub, sgn};
     end : ALIG0_CRRY
 
     //=> ALIG1(Align 1) <=//
@@ -129,33 +196,34 @@ module XMU_T(
         sticky <= |mant_final[37:0];
     end
 
-    logic [6:0] ALIG1_sexp;
-    logic [3:0] ALIG1_opcode;
+    logic [7:0] ALIG1_oexp;
     logic [2:0] ALIG1_prefix;
-    logic [8:0] ALIG1_flags;
+    logic [1:0] ALIG1_spec;
+    logic [10:0] ALIG1_flags;
     always_ff @(posedge clk) begin : ALIG1_CRRY
-        ALIG1_sexp <= ALIG0_sexp;
-        ALIG1_opcode <= ALIG0_opcode;
+        ALIG1_oexp <= ALIG0_oexp;
+        ALIG1_spec <= ALIG0_spec;
         ALIG1_prefix <= ALIG0_prefix;
         ALIG1_flags <= ALIG0_flags;
     end : ALIG1_CRRY
 
     //=> STCY(Sticky) <=//
     //Turns Q6_27 into two's compliment
+    //Also it adds 1/4 to it if its cos bc well cos = sin + 1/4 turns simple as that
     logic [33:0] STCY_win;
     always_ff @(posedge clk) begin : STCY_STCY
-        STCY_win <= (Q6_27 ^ {34{ALIG1_flags[8]}}) + {33'b0, ALIG1_flags[8] & ~sticky};
+        STCY_win <= (Q6_27 ^ {34{ALIG1_flags[10]}}) + {6'b0, ALIG1_flags[9], 26'b0, ALIG1_flags[10] & ~sticky};
     end : STCY_STCY
 
-    logic [6:0] STCY_sexp;
-    logic [3:0] STCY_opcode;
+    logic [7:0] STCY_oexp;
     logic [2:0] STCY_prefix;
+    logic [1:0] STCY_spec;
     logic [8:0] STCY_flags;
     always_ff @(posedge clk) begin : STCY_CRRY
-        STCY_sexp <= ALIG1_sexp;
-        STCY_opcode <= ALIG1_opcode;
+        STCY_oexp <= ALIG1_oexp;
+        STCY_spec <= ALIG1_spec;
         STCY_prefix <= ALIG1_prefix;
-        STCY_flags <= ALIG1_flags;
+        STCY_flags <= ALIG1_flags[8:0];
     end : STCY_CRRY
 
 endmodule
