@@ -102,6 +102,18 @@ module XMU_T(
     end
 
     //So computing output exp for varios cases
+    //As for special cases
+    //sqrt of negative flushes to zero
+    //rsqrt of negative saturates, yes yes i know i know that you can't devide
+    //by zero, or undefined, however i believe it best suits graphical
+    //requirements of gefp32
+    //and log2 saturates to negative maximum, same thing not a huge fan of it,
+    //but decision had to be made.
+    //Btw nvidia and amd set those cases to NaN, but first of all, i don't
+    //even have NaN, and second i don't really like NaN, i feel like it would
+    //corrupt stuff, like imagine value being NaN, then it gets into FMA, and
+    //another value becomes NaN and suddentely your whole screen is filled
+    //with NaNs.
     logic  [7:0] oexp; //output exp
     logic  [1:0] spec;
     logic  sgn, oexp_sub;
@@ -676,5 +688,181 @@ module XMU_T(
         COMP4_spec  <= COMP3_spec;
         COMP4_flags <= COMP3_flags;
     end : COMP4_CRRY
+
+    //=> COMB (Combine) <=//
+    //Every op lands in one 56bit fixed point frame: LSB 2^-47, bit 47 = 1.0,
+    //bit 55 = 2^8. After this the back end doesn't care which op it was.
+    //The DSP holds p - 1, flipping the top bit back gives p in [0, 2).
+    logic  [47:0] cubic_p;
+    assign cubic_p = {~COMP4_cubic[47], COMP4_cubic[46:0]};
+
+    //log2: p is a pure fraction there, so {oexp, p} already is oexp + p in
+    //two's complement. Negative ones get inverted instead of negated:
+    //~v = -v - 2^-47. Bc the ROM error is max 2^-30, since mantissa has only
+    //24 bits, so its already kinda overkill. And therefore adding 1 to
+    //negated value is literally useless, so im saving some CARRY4s on that.
+    //Its really nice actually.
+    logic  [55:0] comb_raw;
+    assign comb_raw = COMP4_flags[3] ? {1'b0, {COMP4_oexp, cubic_p[46:0]} ^ {55{COMP4_oexp[7]}}} :
+                      COMP4_flags[2] ? {9'b0, COMP4_fract, 20'b0} : {8'b0, cubic_p};
+
+    //No carry chain above means the 16bit group checks fit in here, so NRM0's
+    //select comes straight from a register same as PRENRM in GUCH.
+    //Tbh its just gefp32 backend its so similar to GUCH.
+    //COMB_lo is the part that can only ever end up in sticky.
+    //COMB_exp is the output field - E + 64, as if the leading one was at bit 55,
+    //so +64 bias +8 for bit 55 = 72, and each NRM stage takes its shift off it.
+    //log2 already has oexp inside the value, so just 72. Others negate with
+    //(oexp ^ sub) + sub, and that + sub rides along in the same add as 72.
+    logic  [55:0] COMB_val;
+    logic  [2:0]  COMB_grp;
+    logic  COMB_lo;
+    logic  signed [9:0] COMB_exp;
+    always_ff @(posedge clk) begin : COMB_COMB
+        COMB_val <= comb_raw;
+        COMB_grp <= {|comb_raw[55:40], |comb_raw[39:24], |comb_raw[23:8]};
+        COMB_lo  <= |comb_raw[14:0];
+        COMB_exp <= COMP4_flags[3] ? 10'sd72 : ({{2{COMP4_oexp[7]}}, COMP4_oexp} ^ {10{COMP4_flags[1]}}) + {9'd36, COMP4_flags[1]};
+    end : COMB_COMB
+
+    //log2 sign is the sign of oexp + p, which is just oexp's sign since p >= 0
+    logic  COMB_sgn;
+    logic  [1:0] COMB_spec;
+    always_ff @(posedge clk) begin : COMB_CRRY
+        COMB_sgn  <= COMP4_flags[0] | (COMP4_flags[3] & COMP4_oexp[7]);
+        COMB_spec <= COMP4_spec;
+    end : COMB_CRRY
+
+    //=> NRM0 (Normalize 0) <=//
+    //Just a shift by 0/16/32/48 yk the drill from GUCH.
+    logic  [1:0] NRM0_shamt;
+    assign NRM0_shamt = COMB_grp[2] ? 2'd0 : COMB_grp[1] ? 2'd1 : COMB_grp[0] ? 2'd2 : 2'd3;
+
+    //only the kept window is muxed, low bits that shift up get pulled in directly
+    logic  [55:15] NRM0_sh;
+    always_comb begin
+        unique case (NRM0_shamt)
+            2'd0: NRM0_sh = COMB_val[55:15];
+            2'd1: NRM0_sh = {COMB_val[39:0], 1'b0};
+            2'd2: NRM0_sh = {COMB_val[23:0], 17'b0};
+            2'd3: NRM0_sh = {COMB_val[7:0], 33'b0};
+        endcase
+    end
+
+    //thats NRM0_fell buuut the exponent loses the shift right away
+    //instead of carrying a lzc like GUCH bc there simply is no need for it,
+    //10bit add is short and keeps RND free.
+    logic  [55:15] NRM0_val;
+    logic  NRM0_fell;
+    logic  signed [9:0] NRM0_exp;
+    always_ff @(posedge clk) begin : NRM0_REG
+        NRM0_val  <= NRM0_sh;
+        NRM0_fell <= ~|NRM0_shamt & COMB_lo;
+        NRM0_exp  <= COMB_exp - {4'b0, NRM0_shamt, 4'b0000};
+    end : NRM0_REG
+
+    logic  NRM0_sgn;
+    logic  [1:0] NRM0_spec;
+    always_ff @(posedge clk) begin : NRM0_CRRY
+        NRM0_sgn  <= COMB_sgn;
+        NRM0_spec <= COMB_spec;
+    end : NRM0_CRRY
+
+    //=> NRM1 (Normalize 1) <=//
+    //Leading one is in the top 16, so find and shift by 0/4/8/12.
+    logic  [1:0] NRM1_shamt;
+    assign NRM1_shamt = |NRM0_val[55:52] ? 2'd0 : |NRM0_val[51:48] ? 2'd1 : |NRM0_val[47:44] ? 2'd2 : 2'd3;
+
+    logic  [55:27] NRM1_sh;
+    always_comb begin
+        unique case (NRM1_shamt)
+            2'd0: NRM1_sh = NRM0_val[55:27];
+            2'd1: NRM1_sh = NRM0_val[51:23];
+            2'd2: NRM1_sh = NRM0_val[47:19];
+            2'd3: NRM1_sh = NRM0_val[43:15];
+        endcase
+    end
+
+    logic  NRM1_drop;
+    always_comb begin
+        unique case (NRM1_shamt)
+            2'd0: NRM1_drop = |NRM0_val[26:15];
+            2'd1: NRM1_drop = |NRM0_val[22:15];
+            2'd2: NRM1_drop = |NRM0_val[18:15];
+            2'd3: NRM1_drop = 1'b0;
+        endcase
+    end
+
+    logic  [55:27] NRM1_val;
+    logic  NRM1_fell;
+    logic  signed [9:0] NRM1_exp;
+    always_ff @(posedge clk) begin : NRM1_REG
+        NRM1_val  <= NRM1_sh;
+        NRM1_fell <= NRM0_fell | NRM1_drop;
+        NRM1_exp  <= NRM0_exp - {6'b0, NRM1_shamt, 2'b00};
+    end : NRM1_REG
+
+    logic  NRM1_sgn;
+    logic  [1:0] NRM1_spec;
+    always_ff @(posedge clk) begin : NRM1_CRRY
+        NRM1_sgn  <= NRM0_sgn;
+        NRM1_spec <= NRM0_spec;
+    end : NRM1_CRRY
+
+    //=> NRM2 (Normalize 2) <=//
+    //Last shift by 0..3, and every flag for RND is computed here
+    logic  [1:0] NRM2_shamt;
+    assign NRM2_shamt = NRM1_val[55] ? 2'd0 : NRM1_val[54] ? 2'd1 : NRM1_val[53] ? 2'd2 : 2'd3;
+
+    logic  [55:27] NRM2_sh;
+    assign NRM2_sh = NRM1_val << NRM2_shamt;
+
+    //hidden at 55, mantissa [54:31], guard 30, rest is sticky. Ties to even as usual
+    logic  NRM2_inc;
+    assign NRM2_inc = NRM2_sh[30] & (NRM2_sh[31] | |NRM2_sh[29:27] | NRM1_fell);
+
+    //Final field = NRM1_exp - shamt, but the range checks compare the register
+    //against a constant per shamt instead, so they don't wait on that subtract.
+    //big: field >= 128, flush: field <= 0 (field 0 is zero in gefp32 field is unbias exp).
+    //top: field 127, an all ones mantissa rounding up there would carry into 128, which is just saturate.
+    logic  NRM2_big, NRM2_top, NRM2_flush;
+    always_comb begin
+        unique case (NRM2_shamt)
+            2'd0: begin NRM2_big = NRM1_exp > 10'sd127; NRM2_top = NRM1_exp == 10'sd127; NRM2_flush = NRM1_exp < 10'sd1; end
+            2'd1: begin NRM2_big = NRM1_exp > 10'sd128; NRM2_top = NRM1_exp == 10'sd128; NRM2_flush = NRM1_exp < 10'sd2; end
+            2'd2: begin NRM2_big = NRM1_exp > 10'sd129; NRM2_top = NRM1_exp == 10'sd129; NRM2_flush = NRM1_exp < 10'sd3; end
+            2'd3: begin NRM2_big = NRM1_exp > 10'sd130; NRM2_top = NRM1_exp == 10'sd130; NRM2_flush = NRM1_exp < 10'sd4; end
+        endcase
+    end
+
+    logic  NRM2_ovf, NRM2_none;
+    assign NRM2_ovf  = NRM2_top & NRM2_inc & &NRM2_sh[54:31];
+    assign NRM2_none = NRM1_spec == 2'b00;
+
+    //specials has the highest priority(spec)
+    logic  [6:0]  NRM2_field;
+    logic  [23:0] NRM2_mant;
+    logic  NRM2_up, NRM2_sat, NRM2_1over8, NRM2_zero, NRM2_sgn;
+    always_ff @(posedge clk) begin : NRM2_REG
+        NRM2_field  <= NRM1_exp[6:0] - {5'b0, NRM2_shamt};
+        NRM2_mant   <= NRM2_sh[54:31];
+        NRM2_up     <= NRM2_none & NRM2_inc & ~NRM2_big & ~NRM2_ovf;
+        NRM2_sat    <= NRM1_spec == 2'b10 | (NRM2_none & NRM2_sh[55] & (NRM2_big | NRM2_ovf));
+        NRM2_zero   <= NRM1_spec == 2'b01 | (NRM2_none & (~NRM2_sh[55] | NRM2_flush));
+        NRM2_1over8 <= NRM1_spec == 2'b11; //looks like lover 8 lmao
+        NRM2_sgn    <= NRM1_sgn;
+    end : NRM2_REG
+
+    //=> RND (Round) <=//
+    //Pack and add the round bit. Result is never -0 again
+    logic  [30:0] rnd_word;
+    assign rnd_word = NRM2_sat ? 31'h7FFFFFFF : NRM2_1over8 ? 31'h3D000000 : {NRM2_field, NRM2_mant};
+
+    logic  [31:0] RND_res;
+    always_ff @(posedge clk) begin : RND_RND
+        if (NRM2_zero) RND_res <= 32'h0;
+        else           RND_res <= {NRM2_sgn, rnd_word + {30'b0, NRM2_up}};
+    end : RND_RND
+    assign result = RND_res;
 
 endmodule
