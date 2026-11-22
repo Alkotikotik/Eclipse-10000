@@ -78,29 +78,30 @@ module XMU_T(
     logic  [24:0] COMB_lb_mant;
     always_ff @(posedge clk) begin : DECO_DECO
         DECO_opcode <= arctan_loop ? 4'b0101 : opcode;
-        DECO_sexp <= sexp;
-        mant <= arctan_loop ? COMB_lb_mant : {rsq_sqrt_op ? a[24] : 1'b1, a[23:0]};
-        sh_amt <= arctan_loop ? COMB_lb_sh : direct_op ? (rsq_sqrt_op ? 6'd24 : 6'd23) : sh_diff[5:0]; //shift by exp(saturate)
-        sh_sat <= arctan_loop ? COMB_lb_sat : ~direct_op & (sh_diff[8] | |sh_diff[7:6]);
-        massive <= ~arctan_loop & sh_diff[8]; //same thing as in GUCH - shifter can't shift left
+        DECO_sexp   <= sexp;
+        //mux everything mu-ha-ha-ha
+        mant        <= arctan_loop ? COMB_lb_mant : {rsq_sqrt_op ? a[24] : 1'b1, a[23:0]};
+        sh_amt      <= arctan_loop ? COMB_lb_sh : direct_op ? (rsq_sqrt_op ? 6'd24 : 6'd23) : sh_diff[5:0]; //shift by exp(saturate)
+        sh_sat      <= arctan_loop ? COMB_lb_sat : ~direct_op & (sh_diff[8] | |sh_diff[7:6]);
+        massive     <= ~arctan_loop & sh_diff[8]; //same thing as in GUCH - shifter can't shift left
 
         //various flags for later
-        zero <= ~arctan_loop & ~|a[30:24];
-        neg <= arctan_loop ? COMB_sgn : a[31];
-        negt <= ~arctan_loop & a[31] & (opcode == 4'b0011 | opcode == 4'b0100 | opcode == 4'b1100 | opcode == 4'b1110 | (slot_op & slot_signed));
-        arctan1 <= arctan_loop ? COMB_spec == 2'b11 : a[30:0] == 31'h40000000;
+        zero      <= ~arctan_loop & ~|a[30:24];
+        neg       <= arctan_loop ? COMB_sgn : a[31];
+        negt      <= ~arctan_loop & a[31] & (opcode == 4'b0011 | opcode == 4'b0100 | opcode == 4'b1100 | opcode == 4'b1110 | (slot_op & slot_signed));
+        arctan1   <= arctan_loop ? COMB_spec == 2'b11 : a[30:0] == 31'h40000000;
         arctan_p2 <= arctan_loop;
 
         //still remember something from logisim cpu or ig i had it at the first sv cpu
         //where branching was still done in two instructions, it was a long time ago
-        exp_V <= ~arctan_loop & a[30:24] >= 7'd70;
+        exp_V    <= ~arctan_loop & a[30:24] >= 7'd70;
         clamp_hi <= ~arctan_loop & slot_op & ~a[31] & slot_over;
         clamp_lo <= ~arctan_loop & slot_op & a[31] & (slot_over | ~slot_signed);
 
         //nice encoding scheme, man do I love encoding stuff
         //arctan needs rcp first if a is more than 1 and then arctan
         prefix <= arctan_loop ? 3'b101 : (arctan_op & a[30]) ? 3'b001 : opcode[2:0];
-        cos <= ~arctan_loop & opcode == 4'b1100;
+        cos    <= ~arctan_loop & opcode == 4'b1100;
     end : DECO_DECO
 
     //=> ALIG0(Align 0) <=//
