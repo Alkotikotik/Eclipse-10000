@@ -1,6 +1,11 @@
 module XMU_T(
     //XMU-T - Xtended Math Unit - Transcendentals
     //I was about to start with SAM, but realized that I want XMU first
+    //XMU-T computes Transcendentals functions for pariticular input x, precisely:
+    //rsqrt(x), rcp(x), log2(x), exp2(x), sqrt(x), arctan(x) plus sin(x), cos(x) taken in turns(360 degrees = 1turn)
+    //and additionally fract(x). XMU-T's ROM has a free runtime programmable 128segment slot
+    //Where user can write any possible function of x and use it as any other built-in function.
+    //XMU-T utilizes 598LUTs, 818FFs and 3 DSPs as well as meets 300MHz criteria at total of 17pipeline stages.
     input logic clk,
 
     input logic [31:0] a, //yup just a
@@ -9,6 +14,10 @@ module XMU_T(
     input logic [6:0]  slot_thr,
     input logic        slot_signed,
     input logic [7:0]  slot_oexp,
+    //arctan takes 2 passes to compute in case |x| >= 1.0
+    //bc i need to rcp x to compute arctan. This indicates this is second pass
+    //of arctan
+    input logic        arctan_loop,
 
     //ROM lives in SAM bc its shared by all XMU-Ts within SAM
     output logic [9:0]  rom_addr,
@@ -62,31 +71,36 @@ module XMU_T(
     logic [3:0] DECO_opcode;
     logic [2:0] prefix;
     //always helps
-    (* shreg_extract = "no" *) logic zero, arctan1, exp_V, neg, cos, massive, clamp_hi, clamp_lo, negt, sh_sat;
+    (* shreg_extract = "no" *) logic zero, arctan1, exp_V, neg, cos, massive, clamp_hi, clamp_lo, negt, sh_sat, arctan_p2;
+    logic  COMB_sgn, COMB_lb_sat;
+    logic  [1:0]  COMB_spec;
+    logic  [5:0]  COMB_lb_sh;
+    logic  [24:0] COMB_lb_mant;
     always_ff @(posedge clk) begin : DECO_DECO
-        DECO_opcode <= opcode;
+        DECO_opcode <= arctan_loop ? 4'b0101 : opcode;
         DECO_sexp <= sexp;
-        mant <= {rsq_sqrt_op ? a[24] : 1'b1, a[23:0]};
-        sh_amt <= direct_op ? (rsq_sqrt_op ? 6'd24 : 6'd23) : sh_diff[5:0]; //shift by exp(saturate)
-        sh_sat <= ~direct_op & (sh_diff[8] | |sh_diff[7:6]);
-        massive <= sh_diff[8]; //same thing as in GUCH - shifter can't shift left
+        mant <= arctan_loop ? COMB_lb_mant : {rsq_sqrt_op ? a[24] : 1'b1, a[23:0]};
+        sh_amt <= arctan_loop ? COMB_lb_sh : direct_op ? (rsq_sqrt_op ? 6'd24 : 6'd23) : sh_diff[5:0]; //shift by exp(saturate)
+        sh_sat <= arctan_loop ? COMB_lb_sat : ~direct_op & (sh_diff[8] | |sh_diff[7:6]);
+        massive <= ~arctan_loop & sh_diff[8]; //same thing as in GUCH - shifter can't shift left
 
         //various flags for later
-        zero <= ~|a[30:24];
-        neg <= a[31];
-        negt <= a[31] & (opcode == 4'b0011 | opcode == 4'b0100 | opcode == 4'b1100 | opcode == 4'b1110 | (slot_op & slot_signed));
-        arctan1 <= a[30:0] == 31'h40000000;
+        zero <= ~arctan_loop & ~|a[30:24];
+        neg <= arctan_loop ? COMB_sgn : a[31];
+        negt <= ~arctan_loop & a[31] & (opcode == 4'b0011 | opcode == 4'b0100 | opcode == 4'b1100 | opcode == 4'b1110 | (slot_op & slot_signed));
+        arctan1 <= arctan_loop ? COMB_spec == 2'b11 : a[30:0] == 31'h40000000;
+        arctan_p2 <= arctan_loop;
 
         //still remember something from logisim cpu or ig i had it at the first sv cpu
         //where branching was still done in two instructions, it was a long time ago
-        exp_V <= a[30:24] >= 7'd70;
-        clamp_hi <= slot_op & ~a[31] & slot_over;
-        clamp_lo <= slot_op & a[31] & (slot_over | ~slot_signed);
+        exp_V <= ~arctan_loop & a[30:24] >= 7'd70;
+        clamp_hi <= ~arctan_loop & slot_op & ~a[31] & slot_over;
+        clamp_lo <= ~arctan_loop & slot_op & a[31] & (slot_over | ~slot_signed);
 
         //nice encoding scheme, man do I love encoding stuff
         //arctan needs rcp first if a is more than 1 and then arctan
-        prefix <= (arctan_op & a[30]) ? 3'b001 : opcode[2:0];
-        cos <= opcode == 4'b1100;
+        prefix <= arctan_loop ? 3'b101 : (arctan_op & a[30]) ? 3'b001 : opcode[2:0];
+        cos <= ~arctan_loop & opcode == 4'b1100;
     end : DECO_DECO
 
     //=> ALIG0(Align 0) <=//
@@ -152,7 +166,7 @@ module XMU_T(
             //otherwise its super inaccurate bc no cubic can represent such big
             //slope change
             4'b0101: begin
-                oexp = 8'hFD;
+                oexp = prefix == 3'b001 ? {DECO_sexp[6], DECO_sexp} : 8'hFD;
                 spec = arctan1 ? 2'b11 : 2'b00;
                 sgn  = neg;
                 oexp_sub = 1'b0;
@@ -192,7 +206,7 @@ module XMU_T(
         ALIG0_spec <= spec;
         ALIG0_prefix <= prefix;
         ALIG0_flags <= {sh_sat, negt & ~massive, cos, clamp_hi, clamp_lo, DECO_opcode[2:0] == 3'b100, DECO_opcode == 4'b0011,
-                        DECO_opcode == 4'b0101 & prefix == 3'b001, DECO_opcode == 4'b0010, DECO_opcode == 4'b1110, oexp_sub, sgn};
+                        arctan_p2, DECO_opcode == 4'b0010, DECO_opcode == 4'b1110, oexp_sub, sgn};
     end : ALIG0_CRRY
 
     //=> ALIG1(Align 1) <=//
@@ -427,9 +441,8 @@ module XMU_T(
 
     //=> COMP0 (Compute 0) <=//
     //Now we are talking, compute the cubic in Herner or whatever form
-    logic [26:0] COMP0_fract;
-    logic [7:0]  COMP0_oexp;
-    logic [4:0]  COMP0_flags;
+    logic [7:0]  COMP0_oexp, COMP2_oexp;
+    logic [4:0]  COMP0_flags, COMP1_flags, COMP2_flags;
     logic [1:0]  COMP0_spec;
     logic [30:0] COMP0_d0, COMP1_d0;
     logic [13:0] COMP0_d2;
@@ -463,7 +476,7 @@ module XMU_T(
         .DREG(0),
         .INMODEREG(0),
         .MREG(1),
-        .OPMODEREG(0),
+        .OPMODEREG(1),
         .PREG(1)
     )
     Ernest_Hemingway (
@@ -487,7 +500,7 @@ module XMU_T(
         .CARRYINSEL(3'b000),
         .CLK(clk),
         .INMODE(5'b00000),
-        .OPMODE(7'b0110101),
+        .OPMODE(COMP1_flags[2] ? 7'b0110000 : 7'b0110101),
         //d0 + d1 * seg_pos
         .A({7'b0, rom_data[40:18]}),
         .B(LKUP1_seg_pos),
@@ -539,11 +552,10 @@ module XMU_T(
     end : COMP0_D3X
 
     always_ff @(posedge clk) begin : COMP0_CRRY
-        COMP0_fract  <= LKUP1_fract;
         COMP0_oexp   <= LKUP1_oexp;
         COMP0_spec   <= LKUP1_spec;
         COMP0_flags  <= LKUP1_flags;
-        COMP0_d0     <= rom_data[71:41];
+        COMP0_d0     <= LKUP1_flags[2] ? {1'b0, LKUP1_fract, 3'b0} : rom_data[71:41];
         COMP0_d2     <= rom_data[17:4];
         COMP0_dsign  <= {LKUP1_dsign[0] ? rom_data[18] : LKUP1_dsign[3], LKUP1_dsign[0] ? rom_data[41] : LKUP1_dsign[2], LKUP1_dsign[1]};
     end : COMP0_CRRY
@@ -580,7 +592,7 @@ module XMU_T(
         .DREG(1),
         .INMODEREG(1),
         .MREG(1),
-        .OPMODEREG(0),
+        .OPMODEREG(1),
         .PREG(1)
     )
     Fjodor_Dostoevsky (
@@ -600,12 +612,15 @@ module XMU_T(
         .CARRYCASCIN(1'b0),
         .MULTSIGNIN(1'b0),
         .PCIN(cubic_casc),
-        .ALUMODE({2'b00, {2{COMP2_dsign[1]}}}),
+        //So thats really sick, I invert fract and log2/arctan in here using
+        //ALUMODE and INMODE and OPMODE configs to save up LUTs and FFs and
+        //timing, its beutiful.
+        .ALUMODE({2'b00, COMP2_dsign[1] ^ ((COMP2_flags[3] & COMP2_oexp[7]) | COMP2_flags[4]), COMP2_dsign[1]}),
         .CARRYINSEL(3'b000),
         .CLK(clk),
         .INMODE({1'b0, COMP0_dsign[1], 3'b100}),
-        .OPMODE(7'b0010101),
-        .A({{20{d3xsegpos[9]}}, d3xsegpos}),
+        .OPMODE(COMP2_flags[2] ? 7'b0010000 : 7'b0010101),
+        .A({5'b0, {15{d3xsegpos[9]}}, d3xsegpos}),
         .B(COMP1_seg_sqrd),
         .C(48'h0),
         .CARRYIN(1'b0),
@@ -635,12 +650,9 @@ module XMU_T(
         .RSTP(1'b0)
     );
 
-    logic [26:0] COMP1_fract;
     logic [7:0]  COMP1_oexp;
-    logic [4:0]  COMP1_flags;
     logic [1:0]  COMP1_spec;
     always_ff @(posedge clk) begin : COMP1_CRRY
-        COMP1_fract  <= COMP0_fract;
         COMP1_oexp   <= COMP0_oexp;
         COMP1_spec   <= COMP0_spec;
         COMP1_flags  <= COMP0_flags;
@@ -651,12 +663,8 @@ module XMU_T(
 
     //=> COMP2 (Compute 2) <=//
     //waiting on dsps, just crry
-    logic [26:0] COMP2_fract;
-    logic [7:0]  COMP2_oexp;
-    logic [4:0]  COMP2_flags;
     logic [1:0]  COMP2_spec;
     always_ff @(posedge clk) begin : COMP2_CRRY
-        COMP2_fract  <= COMP1_fract;
         COMP2_oexp   <= COMP1_oexp;
         COMP2_spec   <= COMP1_spec;
         COMP2_flags  <= COMP1_flags;
@@ -664,12 +672,10 @@ module XMU_T(
     end : COMP2_CRRY
 
     //=> COMP3 (Compute 3) <=//
-    logic [26:0] COMP3_fract;
     logic [7:0]  COMP3_oexp;
     logic [4:0]  COMP3_flags;
     logic [1:0]  COMP3_spec;
     always_ff @(posedge clk) begin : COMP3_CRRY
-        COMP3_fract <= COMP2_fract;
         COMP3_oexp  <= COMP2_oexp;
         COMP3_spec  <= COMP2_spec;
         COMP3_flags <= COMP2_flags;
@@ -678,12 +684,10 @@ module XMU_T(
     //=> COMP4 (Compute 4) <=//
     //finish the compute up. And holy spam was allat, but well this is what
     //you do at 300MHz.
-    logic [26:0] COMP4_fract;
     logic [7:0]  COMP4_oexp;
     logic [4:0]  COMP4_flags;
     logic [1:0]  COMP4_spec;
     always_ff @(posedge clk) begin : COMP4_CRRY
-        COMP4_fract <= COMP3_fract;
         COMP4_oexp  <= COMP3_oexp;
         COMP4_spec  <= COMP3_spec;
         COMP4_flags <= COMP3_flags;
@@ -703,8 +707,7 @@ module XMU_T(
     //negated value is literally useless, so im saving some CARRY4s on that.
     //Its really nice actually.
     logic  [55:0] comb_raw;
-    assign comb_raw = COMP4_flags[3] ? {1'b0, {COMP4_oexp, cubic_p[46:0]} ^ {55{COMP4_oexp[7]}}} :
-                      COMP4_flags[2] ? {9'b0, COMP4_fract, 20'b0} : {8'b0, cubic_p};
+    assign comb_raw = {1'b0, COMP4_flags[3] ? COMP4_oexp ^ {8{COMP4_oexp[7]}} : {7'b0, cubic_p[47]}, cubic_p[46:0]};
 
     //No carry chain above means the 16bit group checks fit in here, so NRM0's
     //select comes straight from a register same as PRENRM in GUCH.
@@ -717,20 +720,26 @@ module XMU_T(
     logic  [55:0] COMB_val;
     logic  [2:0]  COMB_grp;
     logic  COMB_lo;
+    logic  [11:0] COMB_hex;
     logic  signed [9:0] COMB_exp;
     always_ff @(posedge clk) begin : COMB_COMB
         COMB_val <= comb_raw;
         COMB_grp <= {|comb_raw[55:40], |comb_raw[39:24], |comb_raw[23:8]};
         COMB_lo  <= |comb_raw[14:0];
+        COMB_hex <= {|comb_raw[55:52], |comb_raw[51:48], |comb_raw[47:44],
+                     |comb_raw[39:36], |comb_raw[35:32], |comb_raw[31:28],
+                     |comb_raw[23:20], |comb_raw[19:16], |comb_raw[15:12],
+                     |comb_raw[7:4],   |comb_raw[3:0],   1'b0};
         COMB_exp <= COMP4_flags[3] ? 10'sd72 : ({{2{COMP4_oexp[7]}}, COMP4_oexp} ^ {10{COMP4_flags[1]}}) + {9'd36, COMP4_flags[1]};
     end : COMB_COMB
 
     //log2 sign is the sign of oexp + p, which is just oexp's sign since p >= 0
-    logic  COMB_sgn;
-    logic  [1:0] COMB_spec;
     always_ff @(posedge clk) begin : COMB_CRRY
         COMB_sgn  <= COMP4_flags[0] | (COMP4_flags[3] & COMP4_oexp[7]);
         COMB_spec <= COMP4_spec;
+        COMB_lb_mant <= cubic_p[47:23];
+        COMB_lb_sh   <= COMP4_oexp[5:0] + 6'd23;
+        COMB_lb_sat  <= COMP4_oexp[6:0] > 7'd40;
     end : COMB_CRRY
 
     //=> NRM0 (Normalize 0) <=//
@@ -754,10 +763,12 @@ module XMU_T(
     //10bit add is short and keeps RND free.
     logic  [55:15] NRM0_val;
     logic  NRM0_fell;
+    logic  [2:0] NRM0_hex;
     logic  signed [9:0] NRM0_exp;
     always_ff @(posedge clk) begin : NRM0_REG
         NRM0_val  <= NRM0_sh;
         NRM0_fell <= ~|NRM0_shamt & COMB_lo;
+        NRM0_hex  <= NRM0_shamt[1] ? (NRM0_shamt[0] ? COMB_hex[2:0] : COMB_hex[5:3]) : (NRM0_shamt[0] ? COMB_hex[8:6] : COMB_hex[11:9]);
         NRM0_exp  <= COMB_exp - {4'b0, NRM0_shamt, 4'b0000};
     end : NRM0_REG
 
@@ -771,7 +782,7 @@ module XMU_T(
     //=> NRM1 (Normalize 1) <=//
     //Leading one is in the top 16, so find and shift by 0/4/8/12.
     logic  [1:0] NRM1_shamt;
-    assign NRM1_shamt = |NRM0_val[55:52] ? 2'd0 : |NRM0_val[51:48] ? 2'd1 : |NRM0_val[47:44] ? 2'd2 : 2'd3;
+    assign NRM1_shamt = NRM0_hex[2] ? 2'd0 : NRM0_hex[1] ? 2'd1 : NRM0_hex[0] ? 2'd2 : 2'd3;
 
     logic  [55:27] NRM1_sh;
     always_comb begin
@@ -795,10 +806,12 @@ module XMU_T(
 
     logic  [55:27] NRM1_val;
     logic  NRM1_fell;
+    logic  [1:0] NRM1_nxt;
     logic  signed [9:0] NRM1_exp;
     always_ff @(posedge clk) begin : NRM1_REG
         NRM1_val  <= NRM1_sh;
         NRM1_fell <= NRM0_fell | NRM1_drop;
+        NRM1_nxt  <= NRM1_sh[55] ? 2'd0 : NRM1_sh[54] ? 2'd1 : NRM1_sh[53] ? 2'd2 : 2'd3;
         NRM1_exp  <= NRM0_exp - {6'b0, NRM1_shamt, 2'b00};
     end : NRM1_REG
 
@@ -812,7 +825,7 @@ module XMU_T(
     //=> NRM2 (Normalize 2) <=//
     //Last shift by 0..3, and every flag for RND is computed here
     logic  [1:0] NRM2_shamt;
-    assign NRM2_shamt = NRM1_val[55] ? 2'd0 : NRM1_val[54] ? 2'd1 : NRM1_val[53] ? 2'd2 : 2'd3;
+    assign NRM2_shamt = NRM1_nxt;
 
     logic  [55:27] NRM2_sh;
     assign NRM2_sh = NRM1_val << NRM2_shamt;
@@ -825,6 +838,7 @@ module XMU_T(
     //against a constant per shamt instead, so they don't wait on that subtract.
     //big: field >= 128, flush: field <= 0 (field 0 is zero in gefp32 field is unbias exp).
     //top: field 127, an all ones mantissa rounding up there would carry into 128, which is just saturate.
+    //sd is signed decimal in case you don't know, yeah bro like someone is gonna read it
     logic  NRM2_big, NRM2_top, NRM2_flush;
     always_comb begin
         unique case (NRM2_shamt)
@@ -835,33 +849,48 @@ module XMU_T(
         endcase
     end
 
-    logic  NRM2_ovf, NRM2_none;
-    assign NRM2_ovf  = NRM2_top & NRM2_inc & &NRM2_sh[54:31];
+    logic  NRM2_ones, NRM2_hid, NRM2_none;
+    always_comb begin
+        unique case (NRM2_shamt)
+            2'd0: NRM2_ones = &NRM1_val[54:31];
+            2'd1: NRM2_ones = &NRM1_val[53:30];
+            2'd2: NRM2_ones = &NRM1_val[52:29];
+            2'd3: NRM2_ones = &NRM1_val[51:28];
+        endcase
+    end
+    assign NRM2_hid  = NRM2_sh[55];
     assign NRM2_none = NRM1_spec == 2'b00;
 
-    //specials has the highest priority(spec)
+    //specials have the highest priority(spec)
     logic  [6:0]  NRM2_field;
     logic  [23:0] NRM2_mant;
-    logic  NRM2_up, NRM2_sat, NRM2_1over8, NRM2_zero, NRM2_sgn;
+    logic  NRM2_up, NRM2_sat, NRM2_1over8, NRM2_zero, NRM2_sgn, NRM2_ovf_top, NRM2_ovf_inc, NRM2_ovf_ones;
     always_ff @(posedge clk) begin : NRM2_REG
-        NRM2_field  <= NRM1_exp[6:0] - {5'b0, NRM2_shamt};
-        NRM2_mant   <= NRM2_sh[54:31];
-        NRM2_up     <= NRM2_none & NRM2_inc & ~NRM2_big & ~NRM2_ovf;
-        NRM2_sat    <= NRM1_spec == 2'b10 | (NRM2_none & NRM2_sh[55] & (NRM2_big | NRM2_ovf));
-        NRM2_zero   <= NRM1_spec == 2'b01 | (NRM2_none & (~NRM2_sh[55] | NRM2_flush));
-        NRM2_1over8 <= NRM1_spec == 2'b11; //looks like lover 8 lmao
-        NRM2_sgn    <= NRM1_sgn;
+        NRM2_field    <= NRM1_exp[6:0] - {5'b0, NRM2_shamt};
+        NRM2_mant     <= NRM2_sh[54:31];
+        NRM2_up       <= NRM2_none & NRM2_hid & ~NRM2_flush & NRM2_inc;
+        NRM2_sat      <= NRM1_spec == 2'b10 | (NRM2_none & NRM2_hid & NRM2_big);
+        NRM2_ovf_top  <= NRM2_none & NRM2_top;
+        NRM2_ovf_inc  <= NRM2_inc;
+        NRM2_ovf_ones <= NRM2_ones;
+        NRM2_zero     <= NRM1_spec == 2'b01 | (NRM2_none & (~NRM2_hid | NRM2_flush));
+        NRM2_1over8   <= NRM1_spec == 2'b11; //looks like lover 8 lmao
+        NRM2_sgn      <= NRM1_sgn;
     end : NRM2_REG
 
     //=> RND (Round) <=//
     //Pack and add the round bit. Result is never -0 again
     logic  [30:0] rnd_word;
-    assign rnd_word = NRM2_sat ? 31'h7FFFFFFF : NRM2_1over8 ? 31'h3D000000 : {NRM2_field, NRM2_mant};
+    assign rnd_word = NRM2_zero ? 31'h0 : NRM2_1over8 ? 31'h3D000000 : {NRM2_field, NRM2_mant};
+
+    logic  rnd_sat;
+    assign rnd_sat = NRM2_sat | (NRM2_ovf_top & NRM2_ovf_inc & NRM2_ovf_ones);
 
     logic  [31:0] RND_res;
     always_ff @(posedge clk) begin : RND_RND
-        if (NRM2_zero) RND_res <= 32'h0;
-        else           RND_res <= {NRM2_sgn, rnd_word + {30'b0, NRM2_up}};
+        RND_res[31] <= NRM2_sgn & ~NRM2_zero;
+        if (rnd_sat) RND_res[30:0] <= 31'h7FFFFFFF;
+        else         RND_res[30:0] <= rnd_word + {30'b0, NRM2_up};
     end : RND_RND
     assign result = RND_res;
 
