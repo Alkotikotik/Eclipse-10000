@@ -61,12 +61,14 @@ module XMU_T(
     logic [24:0] mant;
     logic [3:0] DECO_opcode;
     logic [2:0] prefix;
-    logic zero, arctan1, exp_V, neg, cos, massive, clamp_hi, clamp_lo, negt;
+    //always helps
+    (* shreg_extract = "no" *) logic zero, arctan1, exp_V, neg, cos, massive, clamp_hi, clamp_lo, negt, sh_sat;
     always_ff @(posedge clk) begin : DECO_DECO
         DECO_opcode <= opcode;
         DECO_sexp <= sexp;
         mant <= {rsq_sqrt_op ? a[24] : 1'b1, a[23:0]};
-        sh_amt <= direct_op ? (rsq_sqrt_op ? 6'd24 : 6'd23) : (sh_diff[8] | |sh_diff[7:6]) ? 6'd63 : sh_diff[5:0]; //shift by exp(saturate)
+        sh_amt <= direct_op ? (rsq_sqrt_op ? 6'd24 : 6'd23) : sh_diff[5:0]; //shift by exp(saturate)
+        sh_sat <= ~direct_op & (sh_diff[8] | |sh_diff[7:6]);
         massive <= sh_diff[8]; //same thing as in GUCH - shifter can't shift left
 
         //various flags for later
@@ -170,14 +172,14 @@ module XMU_T(
     logic [7:0] ALIG0_oexp;
     logic [2:0] ALIG0_prefix;
     logic [1:0] ALIG0_sh_hi, ALIG0_spec;
-    logic [10:0] ALIG0_flags;
+    logic [11:0] ALIG0_flags;
     always_ff @(posedge clk) begin : ALIG0_CRRY
         //CRRY everything
         ALIG0_sh_hi <= sh_amt[5:4];
         ALIG0_oexp <= oexp;
         ALIG0_spec <= spec;
         ALIG0_prefix <= prefix;
-        ALIG0_flags <= {negt & ~massive, cos, clamp_hi, clamp_lo, DECO_opcode[2:0] == 3'b100, DECO_opcode == 4'b0011,
+        ALIG0_flags <= {sh_sat, negt & ~massive, cos, clamp_hi, clamp_lo, DECO_opcode[2:0] == 3'b100, DECO_opcode == 4'b0011,
                         DECO_opcode == 4'b0101 & prefix == 3'b001, DECO_opcode == 4'b0010, DECO_opcode == 4'b1110, oexp_sub, sgn};
     end : ALIG0_CRRY
 
@@ -199,7 +201,7 @@ module XMU_T(
     logic [7:0] ALIG1_oexp;
     logic [2:0] ALIG1_prefix;
     logic [1:0] ALIG1_spec;
-    logic [10:0] ALIG1_flags;
+    logic [11:0] ALIG1_flags;
     always_ff @(posedge clk) begin : ALIG1_CRRY
         ALIG1_oexp <= ALIG0_oexp;
         ALIG1_spec <= ALIG0_spec;
@@ -212,7 +214,8 @@ module XMU_T(
     //Also it adds 1/4 to it if its cos bc well cos = sin + 1/4 turns simple as that
     logic [33:0] STCY_canddr; //canditate address
     always_ff @(posedge clk) begin : STCY_STCY
-        STCY_canddr <= (Q6_27 ^ {34{ALIG1_flags[10]}}) + {6'b0, ALIG1_flags[9], 26'b0, ALIG1_flags[10] & ~sticky};
+        //also saturate now
+        STCY_canddr <= ((Q6_27 & {34{~ALIG1_flags[11]}}) ^ {34{ALIG1_flags[10]}}) + {6'b0, ALIG1_flags[9], 26'b0, ALIG1_flags[10] & ~sticky & ~ALIG1_flags[11]};
     end : STCY_STCY
 
     logic [7:0] STCY_oexp;
@@ -369,6 +372,22 @@ module XMU_T(
         LKUP0_dsign   <= ADDR_dsign;
     end : LKUP0_CRRY
 
+    //So i precompute all products of d3 here, and then apply then in later
+    //stages. Yeah you guessed it for critical path
+    logic signed [11:0] d3_x;
+    assign d3_x = ADDR_dsign[1] ? {ADDR_seg_pos[17:8], 2'b00} : {{2{ADDR_seg_pos[17]}}, ADDR_seg_pos[17:8]};
+
+    logic signed [11:0] LKUP0_x,  LKUP1_x;
+    logic signed [12:0] LKUP0_xn, LKUP1_xn, LKUP0_x1, LKUP1_x1;
+    logic signed [13:0] LKUP0_x2, LKUP1_x2, LKUP0_x3, LKUP1_x3;
+    always_ff @(posedge clk) begin : LKUP0_D3X
+        LKUP0_x  <= d3_x;
+        LKUP0_xn <= -13'(d3_x);
+        LKUP0_x1 <= 13'(d3_x) + 13'sd32;
+        LKUP0_x2 <= 14'(d3_x) * 2 + 14'sd32;
+        LKUP0_x3 <= 14'(d3_x) * 3;
+    end : LKUP0_D3X
+
     //=> LKUP1 (Lookup 1) <=//
     //lookup was initialized already, and dsp is doing its thing, so just crry
     logic [26:0] LKUP1_fract;
@@ -385,6 +404,14 @@ module XMU_T(
         LKUP1_seg_pos <= LKUP0_seg_pos;
         LKUP1_dsign   <= LKUP0_dsign;
     end : LKUP1_CRRY
+
+    always_ff @(posedge clk) begin : LKUP1_D3X
+        LKUP1_x  <= LKUP0_x;
+        LKUP1_xn <= LKUP0_xn;
+        LKUP1_x1 <= LKUP0_x1;
+        LKUP1_x2 <= LKUP0_x2;
+        LKUP1_x3 <= LKUP0_x3 + 14'sd32;
+    end : LKUP1_D3X
 
     //=> COMP0 (Compute 0) <=//
     //Now we are talking, compute the cubic in Herner or whatever form
@@ -481,26 +508,40 @@ module XMU_T(
     );
     //the d3 is tiny, just 4bits so plain fabric multiply is fine, don't wanna
     //waste dsp on it, its just gonna take routing and stuff just don't feel
-    //great doing it.
-    logic [9:0] d3xsegpos;
-    (* use_dsp = "no" *) logic signed [13:0] d3_prod;
-    assign d3_prod = $signed(rom_data[3:0]) * $signed(LKUP1_seg_pos[17:8]);
-    always_ff @(posedge clk) begin
-        d3xsegpos <= LKUP1_dsign[1] ? 10'((d3_prod + 14'sd8) >>> 4) : 10'((d3_prod + 14'sd32) >>> 6);
-    end
+    //great doing it. And yeah there are precomputed results
+    //Those aren't shifts btw, its just bit aligments for DSP
+    logic signed [15:0] COMP0_t1, COMP0_t2;
+    always_ff @(posedge clk) begin : COMP0_D3X
+        unique case (rom_data[1:0])
+            2'd0: COMP0_t1 <= 16'sd32;
+            2'd1: COMP0_t1 <= 16'(LKUP1_x1);
+            2'd2: COMP0_t1 <= 16'(LKUP1_x2);
+            2'd3: COMP0_t1 <= 16'(LKUP1_x3);
+        endcase
+        unique case (rom_data[3:2])
+            2'd0: COMP0_t2 <= 16'sd0;
+            2'd1: COMP0_t2 <= 16'(LKUP1_x)  <<< 2;
+            2'd2: COMP0_t2 <= 16'(LKUP1_xn) <<< 3;
+            2'd3: COMP0_t2 <= 16'(LKUP1_xn) <<< 2;
+        endcase
+    end : COMP0_D3X
 
     always_ff @(posedge clk) begin : COMP0_CRRY
-        COMP0_fract <= LKUP1_fract;
-        COMP0_oexp  <= LKUP1_oexp;
-        COMP0_spec  <= LKUP1_spec;
-        COMP0_flags <= LKUP1_flags;
-        COMP0_d0    <= rom_data[71:41];
-        COMP0_d2    <= rom_data[17:4];
+        COMP0_fract  <= LKUP1_fract;
+        COMP0_oexp   <= LKUP1_oexp;
+        COMP0_spec   <= LKUP1_spec;
+        COMP0_flags  <= LKUP1_flags;
+        COMP0_d0     <= rom_data[71:41];
+        COMP0_d2     <= rom_data[17:4];
         COMP0_dsign  <= {LKUP1_dsign[0] ? rom_data[18] : LKUP1_dsign[3], LKUP1_dsign[0] ? rom_data[41] : LKUP1_dsign[2], LKUP1_dsign[1]};
     end : COMP0_CRRY
 
     //=> COMP1 (Compute 1) <=//
     //Second dsp start
+    logic signed [15:0] d3_sum;
+    assign d3_sum = COMP0_t1 + COMP0_t2;
+    logic [9:0] d3xsegpos;
+    assign d3xsegpos = d3_sum[15:6];
     /* verilator lint_off PINCONNECTEMPTY */
     //should be good i think.
     DSP48E1 #(
@@ -587,11 +628,11 @@ module XMU_T(
     logic [4:0]  COMP1_flags;
     logic [1:0]  COMP1_spec;
     always_ff @(posedge clk) begin : COMP1_CRRY
-        COMP1_fract <= COMP0_fract;
-        COMP1_oexp  <= COMP0_oexp;
-        COMP1_spec  <= COMP0_spec;
-        COMP1_flags <= COMP0_flags;
-        COMP1_d0    <= COMP0_d0;
+        COMP1_fract  <= COMP0_fract;
+        COMP1_oexp   <= COMP0_oexp;
+        COMP1_spec   <= COMP0_spec;
+        COMP1_flags  <= COMP0_flags;
+        COMP1_d0     <= COMP0_d0;
         COMP1_dsign  <= COMP0_dsign;
         COMP1_seg_sqrd <= seg_pos_sqrd[34] ? 18'h1FFFF : {1'b0, seg_pos_sqrd[33:17]}; //saturate
     end : COMP1_CRRY
@@ -603,10 +644,10 @@ module XMU_T(
     logic [4:0]  COMP2_flags;
     logic [1:0]  COMP2_spec;
     always_ff @(posedge clk) begin : COMP2_CRRY
-        COMP2_fract <= COMP1_fract;
-        COMP2_oexp  <= COMP1_oexp;
-        COMP2_spec  <= COMP1_spec;
-        COMP2_flags <= COMP1_flags;
+        COMP2_fract  <= COMP1_fract;
+        COMP2_oexp   <= COMP1_oexp;
+        COMP2_spec   <= COMP1_spec;
+        COMP2_flags  <= COMP1_flags;
         COMP2_dsign  <= COMP1_dsign;
     end : COMP2_CRRY
 
