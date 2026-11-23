@@ -63,7 +63,7 @@ FMA <<==
 [0]     sat_01
 ==>>
 
-FMA rd, ra, rb, rc      //rd = sat_01(abs_efp(+-|ra| * rb +- rc))
+FMA rw0 <<== +-[|rw1| * rw2] +- rw3 <| <SAT && ABS> //i like it
 ADD and MUL are FMA with rb = 1.0 or rc = 0. ldexp is ra = 0 (see FCMP for c * 2^m).
 
 IFMA <<==
@@ -77,13 +77,11 @@ IFMA <<==
 [3:2]   round
 [1:0]   unused
 ==>>
-
 IFMA rc, ra, rb, k      //rc = +-((ra * rb + (rc << k)) >> k)
-Round codes 10 and 11 need the int sticky fix in GUCH, until then only 00/01 (floor) are right.
 
 XMU <<==
 [31:29] 010
-[28:25] xop
+[28:25] xop //XMU-op btw
 [24:19] rd
 [18:13] ra
 [12:7]  rb
@@ -136,10 +134,10 @@ FCMP (gop 000) <<==
 [7]     neg_p
 [6]     neg_c
 [5:4]   cmp
-[3:0]   m      (signed, -8 - 7)
+[3:0]   m      (signed, -8 to 7)
 ==>>
 
-FCMP ra, rb, rc, m      //pred = +-ra * rb <cmp> +-rc * 2^m, > and >= by flipping neg_p and neg_c
+FCMP ra, rb, rc, m      //cmp_tru = +-ra * rb <cmp> +-rc * 2^m, > and >= by flipping neg_p and neg_c
 
 IMMAD (gop 001) <<==
 [25:20] rd

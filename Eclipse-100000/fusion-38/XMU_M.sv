@@ -86,6 +86,7 @@ module XMU_M (
         unique case (MINMAX_op)
             3'b000:  sel = less ? 2'b01 : 2'b00; //min
             3'b001:  sel = more ? 2'b01 : 2'b10; //max
+            3'b010:  sel = 2'b11;
             3'b011:  sel = 2'b00;
             3'b111:  sel = more ? 2'b10 : (less ? 2'b00 : 2'b01); //clamp
             default: sel = 2'b00; //a on the wrong opcode but it shouldn't matter
