@@ -54,3 +54,37 @@ SHL     a << k      int_sh 25+k  cexp 127   INMODE 00010/00010   OPMODE2 0001100
 SHR     c >> k      int_sh 45-k  cexp 52    INMODE 00010/00010   OPMODE2 1010101   OPMODE3 0010000   ALUMODE3 0000   //k 0..31
 SRA     c >> k      int_sh 29-k  cexp 36    INMODE 00010/00010   OPMODE2 1010101   OPMODE3 0010000   ALUMODE3 0000   //k 0..29
 SHR and SRA take the value from c, not a.
+
+
+XMU-T
+
+//Offsets
+offset
+0  : a, opcode, sh_base, slot_thr, slot_signed, arctan_loop
+1  : slot_oexp
+4  : slot_signed (read again, keep it static)
+5  : rom_addr comes out
+7  : rom_data goes in (TBL read latency 2)
+17 : result comes out
+
+//Ops
+0000 rsq     direct, sh_base ignored
+0001 rcp     direct, sh_base ignored
+0010 log2    direct, sh_base ignored
+0011 exp2    sh_base 23
+0100 sin     sh_base 21, input in turns
+1100 cos     sh_base 21, input in turns
+0101 atan    sh_base 23, output in turns
+0110 sqrt    direct, sh_base ignored
+0111 slot    sh_base slot_base, slot_thr = slot_domain - slot_signed, slot_oexp
+1110 fract   sh_base 23
+
+//Arctan |x| >= 1 (a[30] = 1)
+issue + 13 : arctan_loop = 1, bubble slot, no issue
+issue + 17 : pass 1 result, ignore it
+issue + 30 : real result (17 after the bubble)
+
+//Specials
+rsq(0 | neg) = +max, rcp(0) = +max, log2(0 | neg) = -max, sqrt(neg) = 0
+atan(+-1) = +-1/8 exact, exp2 overflow = max, underflow = 0
+flush below 2^-63, saturate >= 2^64, never -0
