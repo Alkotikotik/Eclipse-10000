@@ -1,0 +1,198 @@
+//Fusion-38 ISA
+[31:n] opcode
+[n:k]  operands
+[k:0]  permutations / empty
+
+Every instruction is 32 bits. [31:29] is the instruction group, for encoding primaraly
+000 : FMA
+001 : IFMA
+010 : XMU (XMU-T and XMU-M)
+011 : Memory
+100 : GUCH (everything that isn't FMA or IFMA)
+101 : reserved (branches / masks)
+110 : reserved (PACK control)
+111 : reserved (uniforms / XMU-T slot config / future units)
+
+//Registers
+Register fields are 6 bits. rw0 - rw47 are actual registers, codes 48 - 63 are constants.
+Each lane has 3 banks (1 BRAM18 each), bank = reg[5:4], BRAM address = {pack_id, reg[3:0]}.
+
+float     |     int
+48 : 0          0           //discard the result
+49 : 1.0        1
+50 : -1.0       -1 (all ones)
+51 : 0.5        2
+52 : 2.0        4
+53 : 0.25       8
+54 : 4.0        12
+55 : 1/(2pi)    255
+56 : log2(e)    0xFFFF
+57 : ln2        31
+58 : U0         //runtime programmable registers
+59 : U1
+60 : U2
+61 : U3
+62 : GUCH_ID    //0 - 11
+63 : PACK_ID    //0 - 31
+
+//Compare codes
+00 : ==
+01 : !=
+10 : <
+11 : <=
+
+//Round codes (int results)
+00 : trunc
+01 : floor
+10 : ceil
+11 : round (ties to even)
+
+//Memory
+32MB, 32-bit words only, 23-bit word address. Pixels are RGB565, 2 per word.
+
+FMA <<==
+[31:29] 000
+[28:23] rd
+[22:17] ra
+[16:11] rb
+[10:5]  rc
+[4]     neg_p
+[3]     neg_c
+[2]     abs_a
+[1]     abs_efp
+[0]     sat_01
+==>>
+
+FMA rd, ra, rb, rc      //rd = sat_01(abs_efp(+-|ra| * rb +- rc))
+ADD and MUL are FMA with rb = 1.0 or rc = 0. ldexp is ra = 0 (see FCMP for c * 2^m).
+
+IFMA <<==
+[31:29] 001
+[28:23] ra
+[22:17] rb
+[16:11] rc     (source and destination)
+[10:6]  k      (0 - 16)
+[5]     signed
+[4]     neg_c  (negates the whole result)
+[3:2]   round
+[1:0]   unused
+==>>
+
+IFMA rc, ra, rb, k      //rc = +-((ra * rb + (rc << k)) >> k)
+Round codes 10 and 11 need the int sticky fix in GUCH, until then only 00/01 (floor) are right.
+
+XMU <<==
+[31:29] 010
+[28:25] xop
+[24:19] rd
+[18:13] ra
+[12:7]  rb
+[6:1]   rc
+[0]     efp
+==>>
+
+XMU-T (xop = XMU-T opcode, only rd and ra are used):
+0000 : RSQ   rd, ra
+0001 : RCP   rd, ra
+0010 : LOG2  rd, ra
+0011 : EXP2  rd, ra
+0100 : SIN   rd, ra    //input in turns
+1100 : COS   rd, ra    //input in turns
+0101 : ATAN  rd, ra    //output in turns, |ra| >= 1 takes 2 passes
+0110 : SQRT  rd, ra
+0111 : SLOT  rd, ra    //programmable function, config is static (group 111)
+1110 : FRACT rd, ra
+
+XMU-M (xop[2:0] = XMU-M opcode):
+1000 : MIN    rd, ra, rb          //efp = float, otherwise rc[0] = signed
+1001 : MAX    rd, ra, rb          //efp = float, otherwise rc[0] = signed, SAM feeds ra/rb into XMU-M b/c
+1111 : CLAMP  rd, ra, rb, rc      //rb clamped between ra and rc, efp = float, otherwise signed
+1010 : POPCNT rd, ra
+1011 : BITREV rd, ra
+1101 : reserved
+
+Memory <<==
+[31:29] 011
+[28:26] mop
+[25:20] rd / rs
+[19:14] ra     (base)
+[13:0]  imm14  (signed word offset)
+==>>
+
+000 : LOAD  rd, [ra + imm14]
+001 : STORE rs, [ra + imm14]
+010 - 111 : reserved
+
+GUCH <<==
+[31:29] 100
+[28:26] gop
+[25:0]  depends on gop
+==>>
+
+FCMP (gop 000) <<==
+[25:20] ra
+[19:14] rb
+[13:8]  rc
+[7]     neg_p
+[6]     neg_c
+[5:4]   cmp
+[3:0]   m      (signed, -8 - 7)
+==>>
+
+FCMP ra, rb, rc, m      //pred = +-ra * rb <cmp> +-rc * 2^m, > and >= by flipping neg_p and neg_c
+
+IMMAD (gop 001) <<==
+[25:20] rd
+[19:14] ra
+[13:8]  rb
+[7:2]   rc
+[1]     signed
+[0]     neg_c  (negates the whole result)
+==>>
+
+IMMAD rd, ra, rb, rc    //rd = +-(ra * rb + rc), global id = IMMAD rd, PACK_ID, 12, LANE_ID
+
+LOMUL (gop 010) <<==
+[25:20] rd
+[19:14] ra
+[13:8]  rb
+[7:3]   k      (0 - 16)
+[2:0]   unused
+==>>
+
+LOMUL rd, ra, rb, k     //rd = (ra * rb) >> k
+
+HIMUL (gop 011) <<==
+[25:20] rd
+[19:14] ra
+[13:8]  rb
+[7:2]   rc
+[1:0]   unused
+==>>
+
+HIMUL rd, ra, rb, rc    //rd = (ra[31:24] * rb + rc) >> 8, rc is PREMUL's result
+
+ALU (gop 100) <<==
+[25:18] op8
+[17:12] rd
+[11:6]  ra
+[5:0]   rb     (or k for immediate shifts)
+==>>
+
+00000000 : ADD    rd, ra, rb
+00000001 : SUB    rd, ra, rb
+00000010 : AND    rd, ra, rb
+00000011 : OR     rd, ra, rb
+00000100 : XOR    rd, ra, rb
+00000101 : PREMUL rd, ra, rb     //rd = (ra[23:0] * rb) >> 24, unsigned
+00001000 : SHL    rd, ra, rb     //shift by rb[4:0]
+00001001 : SHR    rd, ra, rb
+00001010 : SRA    rd, ra, rb
+00001100 : SHLI   rd, ra, k      //k = 0 - 31
+00001101 : SHRI   rd, ra, k
+00001110 : SRAI   rd, ra, k      //k = 0 - 29
+00010000 : I2F    rd, ra
+000101cc : F2I    rd, ra         //cc = round code
+00100scc : ICMP   ra, rb         //pred = ra <cc> rb, s = signed
+
+gop 101 - 111 : reserved

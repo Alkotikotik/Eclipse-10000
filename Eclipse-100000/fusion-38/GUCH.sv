@@ -17,12 +17,15 @@ module GUCH (
     //First of all, all signals are computed in 1 SAM because all GUCHes share them
     //But that I mean b becomes one or c becomes zero
     input logic efp_op, int_op, int_mul, cmp_signed, neg_p, neg_c, sat_01, abs_int, abs_efp, sh_shr, sh_var,
+    //cmp is permutation of FMA btw. Just came up with it, and turns out
+    //i don't even have to change the GUCH.
     input logic [1:0] secret_code, //rounding and cmp uses same signal to choose mode
     input logic [5:0] int_sh,
     //28 for efp 52 - k for int fma
     //It least it was like that before - I realized that it can be encoded in
     //the instruction's immediate which would give a*b+(c*2^cexp_const), and
     //yeah i think it is pretty uselss, but its so cool, i have to implement it.
+    //
     input logic [8:0] cexp_const,
     input logic [6:0] OPMODE1, OPMODE2, OPMODE3,
     input logic [4:0] INMODE1, INMODE2,
