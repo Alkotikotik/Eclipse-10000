@@ -19,7 +19,11 @@ module GUCH (
     input logic efp_op, int_op, int_mul, cmp_signed, neg_p, neg_c, sat_01, abs_int, abs_efp, sh_shr, sh_var,
     input logic [1:0] secret_code, //rounding and cmp uses same signal to choose mode
     input logic [5:0] int_sh,
-    input logic [8:0] cexp_const, //28 for efp 52 - k for int fma
+    //28 for efp 52 - k for int fma
+    //It least it was like that before - I realized that it can be encoded in
+    //the instruction's immediate which would give a*b+(c*2^cexp_const), and
+    //yeah i think it is pretty uselss, but its so cool, i have to implement it.
+    input logic [8:0] cexp_const,
     input logic [6:0] OPMODE1, OPMODE2, OPMODE3,
     input logic [4:0] INMODE1, INMODE2,
     input logic [3:0] ALUMODE, ALUMODE3,
@@ -100,7 +104,7 @@ module GUCH (
     //Calc sh and start DSPs
     logic [32:0] STRT_a, STRT_b, STRT_c;
     logic [6:0]  STRT_b_hi, STRT_c_hi;
-    logic [8:0]  STRT_abexp;
+    logic [8:0]  STRT_abexp, STRT_cbase;
     logic [8:0]  shexp;
     logic STRT_prod_zero, STRT_shexp_neg;
 
@@ -119,6 +123,7 @@ module GUCH (
 
         //this is for i2f(int to float), so it aligns.
         STRT_abexp <= PREA_efp_op ? PREA_shexp : {3'b0, PREA_int_sh};
+        STRT_cbase <= 9'd92 - PREA_cexp;
 
         STRT_prod_zero <= PREA_prod_zero;
         STRT_shexp_neg <= shexp[8];
@@ -334,7 +339,7 @@ module GUCH (
         //sits at row 48. So c's exponent would have much more value and would take over.
         //92 because field = exp + 64, top1_pos = 76 - lcz(shoudl be clear) and 
         //exp = base + (top1 pos - 48) bc each column above 48 doubles the value.
-        DGAF0_exp_base <= ((STRT_shexp_neg | STRT_prod_zero) & STRT_c[24]) ? {2'b00, STRT_c[31:25]} : STRT_abexp + 9'd92;
+        DGAF0_exp_base <= ((STRT_shexp_neg | STRT_prod_zero) & STRT_c[24]) ? STRT_cbase : STRT_abexp + 9'd92;
         DGAF0_ato_add <= STRT_a[24] ? STRT_b[24:0] : 25'h0;
     end : DGAF0_C
 
