@@ -63,7 +63,7 @@ FMA <<==
 [0]     sat_01
 ==>>
 
-FMA rw0 <<== +-[|rw1| * rw2] +- rw3 <| <SAT && ABS> //i like it
+FMA rw0 <<== +-[|rw1| * rw2] +- rw3 <| <ABS>, <SAT01>
 ADD and MUL are FMA with rb = 1.0 or rc = 0. ldexp is ra = 0 (see FCMP for c * 2^m).
 
 IFMA <<==
@@ -74,10 +74,10 @@ IFMA <<==
 [10:6]  k      (0 - 16)
 [5]     signed
 [4]     neg_c  (negates the whole result)
-[3:2]   round
-[1:0]   unused
+[3]     neg_p  (rb is unsigned)
+[2:0]   unused
 ==>>
-IFMA rc, ra, rb, k      //rc = +-((ra * rb + (rc << k)) >> k)
+IFMA rc, ra, rb, k      //rc = +-((ra * rb + (rc << k)) >> k), >> k is floor
 
 XMU <<==
 [31:29] 010

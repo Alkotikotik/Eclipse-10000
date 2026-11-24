@@ -806,10 +806,6 @@ module GUCH (
 
     (* shreg_extract = "no" *) logic PRENRM_int, PRENRM_sat;
     (* shreg_extract = "no" *) logic [4:0] PRENRM_int_sh;
-    (* shreg_extract = "no" *) logic [10:0] PRENRM_ibm, PRENRM_isb;
-    (* shreg_extract = "no" *) logic [1:0] PRENRM_igl;
-    logic  [7:0] int_G;
-    assign int_G = 8'd44 - {2'b00, FIAD_int_sh};
     always_ff @(posedge clk) begin : PRENRM_CRRY
         PRENRM_top32_c0 <= FIAD_int ? FIAD_int_sh[5] : top32_c0;
         PRENRM_top32_c1 <= FIAD_int ? FIAD_int_sh[5] : top32_c1;
@@ -830,11 +826,6 @@ module GUCH (
         PRENRM_int      <= FIAD_int;
         PRENRM_sat      <= FIAD_sat;
         PRENRM_int_sh   <= FIAD_int_sh[4:0];
-        PRENRM_igl      <= int_G[1:0];
-        for (int i = 0; i < 11; i++) begin
-            PRENRM_ibm[i] <= $signed(int_G) >= $signed(8'(4 * i + 4));
-            PRENRM_isb[i] <= $signed(int_G) > $signed(8'(4 * i)) & $signed(int_G) < $signed(8'(4 * i + 4));
-        end
     end : PRENRM_CRRY
 
 
@@ -886,25 +877,11 @@ module GUCH (
     //Also for int ops shifter acts as a literal position shifter of 32bit
     //window. The problem is that it can be any window of the 48bit result, so
     //I have to consider that and expand NORM ffs
-    logic [11:0] int_ist;
-    always_comb begin : INT_STICKY
-        for (int i = 0; i < 11; i++) begin
-            int_ist[i] = (|PRENRM_raw_res[4 * i +: 4] & PRENRM_ibm[i])
-                       | ((PRENRM_igl == 2'd1 ? PRENRM_raw_res[4 * i] : PRENRM_igl == 2'd2 ? |PRENRM_raw_res[4 * i +: 2] : |PRENRM_raw_res[4 * i +: 3]) & PRENRM_isb[i]);
-        end
-        int_ist[11] = PRENRM_sticky;
-    end : INT_STICKY
-
-    (* shreg_extract = "no" *) logic [11:0] NORM0_ist;
-    always_ff @(posedge clk) begin
-        NORM0_ist <= int_ist;
-    end
-
-    (* extract_reset = "no" *) logic [76:13] NORM0_raw_res;
+    (* extract_reset = "no" *) logic [76:14] NORM0_raw_res;
     (* shreg_extract = "no" *) logic [1:0]  NORM0_lzc;
     (* shreg_extract = "no" *) logic NORM0_fell_ff;
     always_ff @(posedge clk) begin : NORM0_REG
-        NORM0_raw_res <= {NORM0_sh[76:20], PRENRM_raw_res[19:13]};
+        NORM0_raw_res <= {NORM0_sh[76:20], PRENRM_raw_res[19:14]};
         NORM0_lzc <= {NORM0_sh64, NORM0_sh32};
         NORM0_fell_ff <= NORM0_fell | PRENRM_sticky;
     end : NORM0_REG
@@ -931,7 +908,7 @@ module GUCH (
 
     //=> NORM1 (Normalization 1) <=//
     //Did you really expect the 76big ass shifter to fit into 1 stage?
-    logic  [76:13] NORM1_sh;
+    logic  [76:14] NORM1_sh;
     assign NORM1_sh = NORM0_raw_res << {NORM1_sh16, NORM1_sh8, 3'b000};
 
     logic  NORM1_fell;
@@ -945,14 +922,14 @@ module GUCH (
     end
 
     //51 - 7
-    (* extract_reset = "no" *) logic [76:37] NORM1_raw_res;
+    (* extract_reset = "no" *) logic [76:38] NORM1_raw_res;
     (* shreg_extract = "no" *) logic [3:0]   NORM1_lzc;
     (* shreg_extract = "no" *) logic NORM1_fell_ff, NORM1_sticky;
     always_ff @(posedge clk) begin : NORM1_REG
-        NORM1_raw_res[76:37] <= NORM1_sh[76:37];
+        NORM1_raw_res[76:38] <= NORM1_sh[76:38];
         NORM1_lzc <= {NORM0_lzc, NORM1_sh16, NORM1_sh8};
         NORM1_fell_ff <= NORM1_fell | NORM0_fell_ff;
-        NORM1_sticky <= |NORM0_ist;
+        NORM1_sticky <= NORM0_fell_ff;
     end : NORM1_REG
 
     (* shreg_extract = "no" *) logic NORM1_neg, NORM1_c_sign;
@@ -976,7 +953,7 @@ module GUCH (
     assign NORM2_sh4 = NORM1_int ? NORM1_neg : NORM1_raw_res[76:73] == {4{NORM1_neg}};
     assign NORM2_sh2 = NORM1_int ? NORM1_int_sh[1] : NORM2_sh4 ? NORM1_raw_res[72:71] == {2{NORM1_neg}} : NORM1_raw_res[76:75] == {2{NORM1_neg}};
 
-    logic  [76:37] NORM2_sh;
+    logic  [76:38] NORM2_sh;
     assign NORM2_sh = NORM1_raw_res << {NORM2_sh4, NORM2_sh2, 1'b0};
 
     logic NORM2_fell;
@@ -989,12 +966,12 @@ module GUCH (
         endcase
     end
 
-    logic [76:43] NORM2_raw_res;
+    logic [76:44] NORM2_raw_res;
     logic NORM2_fell_ff;
     (* shreg_extract = "no" *) logic NORM2_sticky;
     (* shreg_extract = "no" *) logic [5:0]   NORM2_lzc;
     always_ff @(posedge clk) begin : NORM2_REG
-        NORM2_raw_res <= NORM2_sh[76:43];
+        NORM2_raw_res <= NORM2_sh[76:44];
         NORM2_fell_ff <= NORM1_fell_ff | NORM2_fell;
         NORM2_sticky <= NORM1_sticky;
         NORM2_lzc <= {NORM1_lzc, NORM2_sh4, NORM2_sh2};
@@ -1028,9 +1005,6 @@ module GUCH (
     assign norm_diff = NORM2_exp_base + ~{2'b00, NORM2_lzc, NORM3_sh1};
 
     logic [76:45] norm_res; //hell yeahhhhh
-    logic  int_gd, int_lsb;
-    assign int_gd  = NORM2_int_sh ? NORM2_raw_res[43] : NORM2_raw_res[44];
-    assign int_lsb = NORM2_int_sh ? NORM2_raw_res[44] : NORM2_raw_res[45];
     logic norm_cin, norm_cmp_lsb, up;
     logic [1:0] norm_code;
     //Btw f2i and f2i operand comes as C from SAM, and a and b are both 0, additionally
@@ -1038,9 +1012,9 @@ module GUCH (
     always_comb begin
         unique case (secret_code)
             2'b00: up = 1'b0; //trunc
-            2'b01: up = NORM2_c_sign & (int_gd | NORM2_sticky); //floor
-            2'b10: up = ~NORM2_c_sign & (int_gd | NORM2_sticky); //ceil
-            2'b11: up = int_gd & (NORM2_sticky | int_lsb); //round(ties to even)
+            2'b01: up = NORM2_c_sign & (NORM2_raw_res[44] | NORM2_sticky); //floor
+            2'b10: up = ~NORM2_c_sign & (NORM2_raw_res[44] | NORM2_sticky); //ceil
+            2'b11: up = NORM2_raw_res[44] & (NORM2_sticky | NORM2_raw_res[45]); //round(ties to even)
         endcase
     end
     //yeah yeah precomputing flags again
