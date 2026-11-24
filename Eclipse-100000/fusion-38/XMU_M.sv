@@ -1,8 +1,8 @@
 module XMU_M (
     //XMU-M - Xtended Math Unit - Misc
     //XMU-M performs min/max and clamp along with popcount and bitrev.
-    //XMU-M utilizes 114LUTs, 217FFs, has median worst critical path of 2.9ns
-    //and total of 3pipeline stages.
+    //XMU-M utilizes 114LUTs, 217FFs, has median worst critical path of 2.9ns.
+    //XMU-M has total of 3 pipeline stages.
     input logic clk,
 
     input logic efp_op, signed_op,
