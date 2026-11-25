@@ -4,9 +4,9 @@ module SAM (
     input logic rst_n, //rst is back, idk how to feel about it
 );
 
-    //Two BRAM36s in Simple dual port mode give two independent 72bit reads
+    //Two BRAM36s in True dual port mode give two independent 72bit reads
     //per cycle, therefore allowing 2 XMU-Ts per SAM.
-    (* ram_style = "block" *) logic [1023:0] TBL [0:71];
+    (* ram_style = "block" *) logic [71:0] TBL [0:1023];
     initial begin
         $readmemh("transcendentals.mem", TBL);
     end
