@@ -17,7 +17,7 @@ module XMU_T(
     //arctan takes 2 passes to compute in case |x| >= 1.0
     //bc i need to rcp x to compute arctan. This indicates this is second pass
     //of arctan
-    input logic        arctan_loop,
+    input logic arctan_loop,
 
     //ROM lives in SAM bc its shared by all XMU-Ts within SAM
     output logic [9:0]  rom_addr,
