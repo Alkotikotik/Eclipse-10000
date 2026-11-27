@@ -86,12 +86,35 @@ module SAM (
         end
     end : FETCHER
 
-    logic [4:0] PACK_isscomb;
+    //I original had GTO planned, with with 2instruction deep buffer its
+    //essentially useless, so plain oldest first is fine. The age matrix is
+    //kinda cool, for each PACK store whether every other PACK is older or
+    //newer using only 1 bit. Additionally second half is ~[j][i] so it
+    //doesn't need full [31:0][31:0];
+    logic [5:0] PACK_isscomb;
+    logic age_matrix [0:31][0:31];
+    logic [31:0] winner; //only one bit can be true
+    logic [31:0] ready_mtrx;
+    logic any;
     always_comb begin
-        //i have a bad feeling about this
+        PACK_isscomb = 6'b111111; //not found
+        for (int k = 0; k < 32; k++) begin
+            ready_mtrx[k] = ~|(PACKs_blk[k] & PACKs_used[k]) & PACKs_sts[k] == 2'b01;
+        end
         for (int i = 0; i < 32; i++) begin
-            if (~|(PACKs_blk[i] & PACKs_used) & PACKs_sts[i] == 2'b01) begin //instr buffered state
-                PACK_isscomb = i;
+            any = 1'b1;
+            if (ready_mtrx[i]) begin //instr buffer state
+                for (int j = 0; j < 32; j++) begin
+                    if (ready_mtrx[j] & (j != i)) begin
+                        any = any & ((i > j) ? age_matrix[i][j] : ~age_matrix[j][i]);
+                    end
+                end
+            end
+            winner[i] = ready_mtrx[i] & any;
+        end
+        for (int i = 0; i < 32; i++) begin
+            if (winner[i]) begin
+                PACK_isscomb = 6'(i); //love the tricks
             end
         end
     end
