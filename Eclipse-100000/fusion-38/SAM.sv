@@ -67,13 +67,18 @@ module SAM (
         |(PACK_rds[PACK_cnt][11:6] == instr_rb)
         |(PACK_rds[PACK_cnt][11:6] == instr_rc)
     );
+    logic [4:0] PACK_nxt;
     always_ff @(posedge clk or negedge rst_n) begin : FETCHER
         if (!rst_n) begin //long time no see rst...
             PACK_cnt <= 5'h0;
         end else begin
+            PACK_nxt <= PACK_cnt + 5'h1;
             if (instr_new) begin
-                PACK_cnt <= PACK_cnt + 5'h1;
-                if (!PACKs_blk[PACK_cnt]) begin
+                //fetch next one
+                PACK_cnt <= PACK_nxt;
+                PC <= PACKs_PCs[PACK_nxt];
+                PACK_PC <= PACK_nxt;
+                if (PACKs_sts[PACK_cnt] == 2'b00) begin //needs fetch state
                     PACKs_instrs[PACK_cnt] <= MM_instr;
                     new_instr <= 1'b0; //this is a prototype, alright?
                 end
@@ -85,7 +90,7 @@ module SAM (
     always_comb begin
         //i have a bad feeling about this
         for (int i = 0; i < 32; i++) begin
-            if (~|(PACKs_blk[i] & PACKs_used)) begin
+            if (~|(PACKs_blk[i] & PACKs_used) & PACKs_sts[i] == 2'b01) begin //instr buffered state
                 PACK_isscomb = i;
             end
         end
