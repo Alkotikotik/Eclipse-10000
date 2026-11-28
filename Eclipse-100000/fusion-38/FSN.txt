@@ -81,7 +81,7 @@ IFMA rc, ra, rb, k      //rc = +-((ra * rb + (rc << k)) >> k), >> k is floor
 
 XMU <<==
 [31:29] 010
-[28:25] xop //XMU-op btw
+[28:25] trans_op / misc_op //XMU-op btw
 [24:19] rd
 [18:13] ra
 [12:7]  rb
@@ -89,7 +89,7 @@ XMU <<==
 [0]     efp
 ==>>
 
-XMU-T (xop = XMU-T opcode, only rd and ra are used):
+XMU-T (trans_op = XMU-T opcode, only rd and ra are used):
 0000 : RSQ   rd, ra
 0001 : RCP   rd, ra
 0010 : LOG2  rd, ra
@@ -101,7 +101,7 @@ XMU-T (xop = XMU-T opcode, only rd and ra are used):
 0111 : SLOT  rd, ra    //programmable function, config is static (group 111)
 1110 : FRACT rd, ra
 
-XMU-M (xop[2:0] = XMU-M opcode):
+XMU-M (misc_op = [27:25] = XMU-M opcode):
 1000 : MIN    rd, ra, rb          //efp = float, otherwise rc[0] = signed
 1001 : MAX    rd, ra, rb          //efp = float, otherwise rc[0] = signed, SAM feeds ra/rb into XMU-M b/c
 1111 : CLAMP  rd, ra, rb, rc      //rb clamped between ra and rc, efp = float, otherwise signed
@@ -111,7 +111,7 @@ XMU-M (xop[2:0] = XMU-M opcode):
 
 Memory <<==
 [31:29] 011
-[28:26] mop
+[28:26] mem_op
 [25:20] rd / rs
 [19:14] ra     (base)
 [13:0]  imm14  (signed word offset)
@@ -123,11 +123,11 @@ Memory <<==
 
 GUCH <<==
 [31:29] 100
-[28:26] gop
-[25:0]  depends on gop
+[28:26] main_op
+[25:0]  depends on main_op
 ==>>
 
-FCMP (gop 000) <<==
+FCMP (main_op 000) <<==
 [25:20] ra
 [19:14] rb
 [13:8]  rc
@@ -139,7 +139,7 @@ FCMP (gop 000) <<==
 
 FCMP ra, rb, rc, m      //cmp_tru = +-ra * rb <cmp> +-rc * 2^m, > and >= by flipping neg_p and neg_c
 
-IMMAD (gop 001) <<==
+IMMAD (main_op 001) <<==
 [25:20] rd
 [19:14] ra
 [13:8]  rb
@@ -150,7 +150,7 @@ IMMAD (gop 001) <<==
 
 IMMAD rd, ra, rb, rc    //rd = +-(ra * rb + rc), global id = IMMAD rd, PACK_ID, 12, LANE_ID
 
-LOMUL (gop 010) <<==
+LOMUL (main_op 010) <<==
 [25:20] rd
 [19:14] ra
 [13:8]  rb
@@ -160,7 +160,7 @@ LOMUL (gop 010) <<==
 
 LOMUL rd, ra, rb, k     //rd = (ra * rb) >> k
 
-HIMUL (gop 011) <<==
+HIMUL (main_op 011) <<==
 [25:20] rd
 [19:14] ra
 [13:8]  rb
@@ -170,8 +170,8 @@ HIMUL (gop 011) <<==
 
 HIMUL rd, ra, rb, rc    //rd = (ra[31:24] * rb + rc) >> 8, rc is PREMUL's result
 
-ALU (gop 100) <<==
-[25:18] op8
+ALU (main_op 100) <<==
+[25:18] alu_op
 [17:12] rd
 [11:6]  ra
 [5:0]   rb     (or k for immediate shifts)
@@ -193,4 +193,4 @@ ALU (gop 100) <<==
 000101cc : F2I    rd, ra         //cc = round code
 00100scc : ICMP   ra, rb         //pred = ra <cc> rb, s = signed
 
-gop 101 - 111 : reserved
+main_op 101 - 111 : reserved

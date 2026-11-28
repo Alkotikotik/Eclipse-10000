@@ -58,6 +58,104 @@ module SAM (
     logic [11:0] PACKs_rds    [4:0];  //2 rds i've been talking about
     logic [1:0]  PACKs_blk    [4:0]; //2 per pack, whether instr was loaded or blocked
 
+    //just a big mux on operands, every flag i could possibly need(for now)
+    logic [5:0] instr_rd, instr_ra, instr_rb, instr_rc;
+    logic [0:0] FMA_instr, IFMA_instr, XMU_instr, MEM_instr, GUCH_instr;
+
+    //ALU here is misc GUCH ops, like i2f, add/sub shift etc
+    logic [5:0] alu_op;
+    assign alu_op = instr[25:20];
+
+    logic  ALU_cmp, ALU_rb;
+    assign ALU_cmp = alu_op[5:1] == 5'b00100;
+    assign ALU_rb  = (alu_op[5:1] == 5'b00000) | (alu_op == 6'b000010) | ALU_cmp;
+
+    //That feels pretty expensive, that isn't actually, just 91LUTs
+    always_comb begin : REG_MUX
+        //reset them every time, just in case
+        instr_rd   = 6'd63;
+        instr_ra   = 6'd63;
+        instr_rb   = 6'd63;
+        instr_rc   = 6'd63;
+        FMA_instr  = 1'b0;
+        IFMA_instr = 1'b0;
+        XMU_instr  = 1'b0;
+        MEM_instr  = 1'b0;
+        GUCH_instr = 1'b0;
+        unique case (instr[31:29])
+            3'b000: begin //FMA
+                instr_rd = instr[28:23];
+                instr_ra = instr[22:17];
+                instr_rb = instr[16:11];
+                instr_rc = instr[10:5];
+                FMA_instr = 1'b1; //for the future
+            end
+            3'b001: begin //IFMA
+                instr_ra   = instr[28:23];
+                instr_rb   = instr[22:17];
+                instr_rc   = instr[16:11];
+                instr_rd   = instr[16:11];
+                IFMA_instr = 1'b1;
+            end
+            3'b010: begin //XMU
+                instr_rd  = instr[24:19];
+                instr_ra  = instr[18:13];
+                XMU_instr = 1'b1;
+                unique case (instr[28:25])
+                    4'b1111: begin
+                        instr_rb = instr[12:7];
+                        instr_rc = instr[6:1];
+                    end
+                    4'b1000, 4'b1001: instr_rb = instr[12:7];
+                    default: ;
+                endcase
+            end
+            3'b011: begin //MEM
+                instr_ra  = instr[19:14];
+                MEM_instr = 1'b1;
+                unique case (instr[28:26])
+                    3'b000:  instr_rd = instr[25:20];
+                    3'b001:  instr_rb = instr[25:20];
+                    default: ;
+                endcase
+            end
+            3'b100: begin //GUCH
+                GUCH_instr = 1'b1;
+                unique case (instr[28:26])
+                    3'b000: begin
+                        instr_ra = instr[25:20];
+                        instr_rb = instr[19:14];
+                        instr_rc = instr[13:8];
+                    end
+                    3'b001, 3'b011: begin
+                        instr_rd = instr[25:20];
+                        instr_ra = instr[19:14];
+                        instr_rb = instr[13:8];
+                        instr_rc = instr[7:2];
+                    end
+                    3'b010: begin
+                        instr_rd = instr[25:20];
+                        instr_ra = instr[19:14];
+                        instr_rb = instr[13:8];
+                    end
+                    3'b100: begin
+                        instr_ra = instr[11:6];
+                        if (~ALU_cmp) begin
+                            instr_rd = instr[17:12];
+                        end if (ALU_rb) begin
+                            instr_rb = instr[5:0];
+                        end
+                    end
+                    default: ;
+                endcase
+            end
+            default: ;
+        endcase
+    end : REG_MUX
+
+    //4 unifroms are stored in the LUTRAM
+    (* ram_style = "distributed" *) logic [31:0] UNIF [57:60];
+
     //Simple round-robin fetching for now, gotta love randomely placed operands in the ISA
     //Also this is kinda expensive, but im afraid there is no way around it.
     logic  [4:0] PACK_cnt;
