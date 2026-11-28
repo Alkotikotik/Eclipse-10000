@@ -37,6 +37,12 @@ module SAM (
         end
     endgenerate
 
+
+    typedef enum logic [1:0] {
+        FREE,
+        FETCH,
+        INSTR,
+    } PACK_sts;
     //So in SIMT PACKs can issue instruction even if previos issue of that
     //exact PACK hasn't finished. The only issue is the hazard of using
     //register that hasn't been written yet but should have been. Write-use or
@@ -47,7 +53,7 @@ module SAM (
     logic [31:0] PACKs_instrs [4:0];
     logic [22:0] PACKs_PCs    [4:0];
     logic [11:0] PACKs_msks   [4:0];     //valid/invalid mask for each GUCH for divergence
-    logic [1:0]  PACKs_sts    [4:0];    //states: free / needs fetch / instr buffered
+    PACK_sts     PACKs_sts    [4:0];    //states: free / needs fetch / instr buffered
     logic [1:0]  PACKs_used   [4:0];   //Whether rd register is valid or nah
     logic [11:0] PACKs_rds    [4:0];  //2 rds i've been talking about
     logic [1:0]  PACKs_blk    [4:0]; //2 per pack, whether instr was loaded or blocked
@@ -78,7 +84,7 @@ module SAM (
                 PACK_cnt <= PACK_nxt;
                 PC <= PACKs_PCs[PACK_nxt];
                 PACK_PC <= PACK_nxt;
-                if (PACKs_sts[PACK_cnt] == 2'b00) begin //needs fetch state
+                if (PACKs_sts[PACK_cnt] == FETCH) begin //needs fetch state
                     PACKs_instrs[PACK_cnt] <= MM_instr;
                     new_instr <= 1'b0; //this is a prototype, alright?
                 end
@@ -96,14 +102,16 @@ module SAM (
     logic [31:0] winner; //only one bit can be true
     logic [31:0] ready_mtrx;
     logic any;
-    always_comb begin
+    logic [31:0] needs_slot;
+    always_comb begin : PICKER
         PACK_isscomb = 6'b111111; //not found
-        for (int k = 0; k < 32; k++) begin
-            ready_mtrx[k] = ~|(PACKs_blk[k] & PACKs_used[k]) & PACKs_sts[k] == 2'b01;
+        for (int k = 0; k < 32; k++) begin //check is PACK is ready for each PACK
+            needs_slot[k] = (opcode == FCMP | STR | ICMP | (rd == 63))
+            ready_mtrx[k] = ~|(PACKs_blk[k] & PACKs_used[k]) & PACKs_sts[k] == INSTR & (~needs_slot | ~&PACKs_used[k]);
         end
         for (int i = 0; i < 32; i++) begin
             any = 1'b1;
-            if (ready_mtrx[i]) begin //instr buffer state
+            if (ready_mtrx[i]) begin
                 for (int j = 0; j < 32; j++) begin
                     if (ready_mtrx[j] & (j != i)) begin
                         any = any & ((i > j) ? age_matrix[i][j] : ~age_matrix[j][i]);
@@ -117,7 +125,7 @@ module SAM (
                 PACK_isscomb = 6'(i); //love the tricks
             end
         end
-    end
+    end : PICKER
 
     logic [31:0] read_a, read_b, read_c;
     always_ff @(posedge clk) begin

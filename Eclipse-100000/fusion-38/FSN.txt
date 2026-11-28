@@ -18,22 +18,22 @@ Register fields are 6 bits. rw0 - rw47 are actual registers, codes 48 - 63 are c
 Each lane has 3 banks (1 BRAM18 each), bank = reg[5:4], BRAM address = {pack_id, reg[3:0]}.
 
 float     |     int
-48 : 0          0           //discard the result
-49 : 1.0        1
-50 : -1.0       -1 (all ones)
-51 : 0.5        2
-52 : 2.0        4
-53 : 0.25       8
-54 : 4.0        12
-55 : 1/(2pi)    255
-56 : log2(e)    0xFFFF
-57 : ln2        31
-58 : U0         //runtime programmable registers
-59 : U1
-60 : U2
-61 : U3
-62 : GUCH_ID    //0 - 11
-63 : PACK_ID    //0 - 31
+48 : 1.0        1
+49 : -1.0       -1 (all ones)
+50 : 0.5        2
+51 : 2.0        4
+52 : 0.25       8
+53 : 4.0        12
+54 : 1/(2pi)    255
+55 : log2(e)    0xFFFF
+56 : ln2        31
+57 : U0         //runtime programmable registers
+58 : U1
+59 : U2
+60 : U3
+61 : GUCH_ID    //0 - 11
+62 : PACK_ID    //0 - 31
+63 : 0          0           //discard the result
 
 //Compare codes
 00 : ==
