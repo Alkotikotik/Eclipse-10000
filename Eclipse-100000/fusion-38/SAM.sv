@@ -64,19 +64,27 @@ module SAM (
 
     //ALU here is misc GUCH ops, like i2f, add/sub shift etc
     logic [5:0] alu_op;
-    assign alu_op = instr[25:20];
+    assign alu_op = instr[10:5];
 
     logic  ALU_cmp, ALU_rb;
-    assign ALU_cmp = alu_op[5:1] == 5'b00100;
-    assign ALU_rb  = (alu_op[5:1] == 5'b00000) | (alu_op == 6'b000010) | ALU_cmp;
+    assign ALU_cmp =  alu_op[5:3] == 3'b100;
+    assign ALU_rb  = (alu_op[5:3] == 3'b000) | (alu_op[5:2] == 4'b0010) | ALU_cmp;
 
-    //That feels pretty expensive, that isn't actually, just 91LUTs
+    //So it was pretty bad just now, but I realized that my ISA kinda sucked,
+    //so I re-encoded everything, now every register is in the same field. But
+    //sometimes some else can be in place of those registers, as suggested by
+    //those signals below. Turns out it drastically improves the decoding,
+    //from 91LUTs to 24LUTs of muxes, but it might be a little bit more
+    //confusing, but i would consider it as a real "tradeoff" or something.
+    logic  rd_used, ra_used, rb_used, rc_used, rd_is_rc, rb_is_rd;
     always_comb begin : REG_MUX
         //reset them every time, just in case
-        instr_rd   = 6'd63;
-        instr_ra   = 6'd63;
-        instr_rb   = 6'd63;
-        instr_rc   = 6'd63;
+        rd_used    = 1'b0;
+        ra_used    = 1'b0;
+        rb_used    = 1'b0;
+        rc_used    = 1'b0;
+        rd_is_rc   = 1'b0;
+        rb_is_rd   = 1'b0;
         FMA_instr  = 1'b0;
         IFMA_instr = 1'b0;
         XMU_instr  = 1'b0;
@@ -84,67 +92,36 @@ module SAM (
         GUCH_instr = 1'b0;
         unique case (instr[31:29])
             3'b000: begin //FMA
-                instr_rd = instr[28:23];
-                instr_ra = instr[22:17];
-                instr_rb = instr[16:11];
-                instr_rc = instr[10:5];
-                FMA_instr = 1'b1; //for the future
+                {rd_used, ra_used, rb_used, rc_used} = 4'b1111;
+                FMA_instr = 1'b1;
             end
             3'b001: begin //IFMA
-                instr_ra   = instr[28:23];
-                instr_rb   = instr[22:17];
-                instr_rc   = instr[16:11];
-                instr_rd   = instr[16:11];
+                {rd_is_rc, ra_used, rb_used, rc_used} = 4'b1111;
                 IFMA_instr = 1'b1;
             end
             3'b010: begin //XMU
-                instr_rd  = instr[24:19];
-                instr_ra  = instr[18:13];
+                {rd_used, ra_used} = 2'b11;
+                rb_used   = (instr[4:1] == 4'b1000) | (instr[4:1] == 4'b1001) | (instr[4:1] == 4'b1111);
+                rc_used   = instr[4:1] == 4'b1111;
                 XMU_instr = 1'b1;
-                unique case (instr[28:25])
-                    4'b1111: begin
-                        instr_rb = instr[12:7];
-                        instr_rc = instr[6:1];
-                    end
-                    4'b1000, 4'b1001: instr_rb = instr[12:7];
-                    default: ;
-                endcase
             end
             3'b011: begin //MEM
-                instr_ra  = instr[19:14];
+                ra_used   = 1'b1;
+                rd_used   = instr[2:0] == 3'b000;
+                rb_is_rd  = instr[2:0] == 3'b001;
                 MEM_instr = 1'b1;
-                unique case (instr[28:26])
-                    3'b000:  instr_rd = instr[25:20];
-                    3'b001:  instr_rb = instr[25:20];
-                    default: ;
-                endcase
             end
             3'b100: begin //GUCH
                 GUCH_instr = 1'b1;
-                unique case (instr[28:26])
-                    3'b000: begin
-                        instr_ra = instr[25:20];
-                        instr_rb = instr[19:14];
-                        instr_rc = instr[13:8];
-                    end
-                    3'b001, 3'b011: begin
-                        instr_rd = instr[25:20];
-                        instr_ra = instr[19:14];
-                        instr_rb = instr[13:8];
-                        instr_rc = instr[7:2];
-                    end
-                    3'b010: begin
-                        instr_rd = instr[25:20];
-                        instr_ra = instr[19:14];
-                        instr_rb = instr[13:8];
-                    end
+                unique case (instr[4:2])
+                    //i love sv for that, and overall too
+                    3'b000:         {ra_used, rb_used, rc_used} = 3'b111;
+                    3'b001, 3'b011: {rd_used, ra_used, rb_used, rc_used} = 4'b1111;
+                    3'b010:         {rd_used, ra_used, rb_used} = 3'b111;
                     3'b100: begin
-                        instr_ra = instr[11:6];
-                        if (~ALU_cmp) begin
-                            instr_rd = instr[17:12];
-                        end if (ALU_rb) begin
-                            instr_rb = instr[5:0];
-                        end
+                        ra_used = 1'b1;
+                        rd_used = ~ALU_cmp;
+                        rb_used = ALU_rb;
                     end
                     default: ;
                 endcase
@@ -152,6 +129,12 @@ module SAM (
             default: ;
         endcase
     end : REG_MUX
+
+    //6'd63 means discard. And yeah thats pretty clean if you ask me
+    assign instr_rd = rd_is_rc ? instr[10:5]  : rd_used ? instr[28:23] : 6'd63;
+    assign instr_ra = ra_used  ? instr[22:17] : 6'd63;
+    assign instr_rb = rb_is_rd ? instr[28:23] : rb_used ? instr[16:11] : 6'd63;
+    assign instr_rc = rc_used  ? instr[10:5]  : 6'd63;
 
     //4 unifroms are stored in the LUTRAM
     (* ram_style = "distributed" *) logic [31:0] UNIF [57:60];
